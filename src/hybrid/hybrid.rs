@@ -24,9 +24,6 @@ impl HybridModel {
         if config.snn_steps == 0 {
             return Err(HybridError::InvalidConfig("snn_steps must be ≥ 1".into()));
         }
-        if config.context_length == 0 {
-            return Err(HybridError::InvalidConfig("context_length must be ≥ 1".into()));
-        }
         if config.top_k_experts == 0 {
             return Err(HybridError::InvalidConfig("top_k_experts must be ≥ 1".into()));
         }
@@ -61,12 +58,6 @@ impl HybridModel {
             let active_1 = (step + snap.gpu_temp_c.max(0.0) as usize) % N_NEURONS;
             let active_2 = (active_1 + 5) % N_NEURONS;
             spike_train.push(vec![active_1, active_2]);
-        }
-
-        if spike_train.iter().all(|step| step.is_empty()) {
-            return Err(HybridError::SilentNetwork {
-                steps: self.config.snn_steps,
-            });
         }
 
         let potentials = vec![0.5; N_NEURONS];

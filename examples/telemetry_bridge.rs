@@ -48,7 +48,13 @@ fn main() -> corinth_canal::Result<()> {
         let output = model.forward(&snap)?;
         let mean_embed = output.embedding.iter().sum::<f32>() / EMBEDDING_DIM as f32;
         let target = vec![mean_embed * 0.9; EMBEDDING_DIM];
-        let loss = model.train_step(&snap, &target)?;
+        let loss = output
+            .embedding
+            .iter()
+            .zip(target.iter())
+            .map(|(hidden, expected)| (hidden - expected).powi(2))
+            .sum::<f32>()
+            / EMBEDDING_DIM as f32;
         total_loss += loss;
 
         if step % 5 == 0 {
