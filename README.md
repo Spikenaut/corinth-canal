@@ -6,7 +6,7 @@ SNN-logic quantization repo focused on the spiking projector and OLMoE routing p
 
 ## Overview
 
-`corinth-canal` keeps the real projector and OLMoE simulation logic, while the old telemetry/SNN front-end is replaced by a deterministic in-repo spike generator. That keeps the crate self-contained and runnable from a fresh clone.
+`corinth-canal` keeps the real projector and first-block OLMoE routing bridge, while the old telemetry/SNN front-end is replaced by a deterministic in-repo spike generator. That keeps the crate self-contained and runnable from a fresh clone while still supporting a real GGUF-backed path.
 
 ## Origin
 
@@ -31,27 +31,38 @@ TelemetrySnapshot
        v  Projector (SpikingTernary GIF mode for 2048-neuron input)
 dense embedding [2048]
        |
-       v  OLMoE (stub/dense/spiking sim) + SAT solver for routing
+       v  OLMoE (stub/dense/spiking sim) with GGUF-backed first-block routing
 expert_weights + selected_experts + hidden + spike_count telemetry
 ```
 
 ### GPU Acceleration (NVIDIA Blackwell sm_120+ with GIF)
 
-When a compatible GPU is detected, the crate offloads the 2048-neuron GIF SNN to CUDA via `GpuAccelerator` (temporal tick loop with `gif_step_weighted`, adaptation buffer, dynamic thresholds). This provides history-aware spiking for better SAAQ quantization and sparsity telemetry to optimize 16GB VRAM/power usage.
+When a compatible GPU is detected, the crate offloads the 2048-neuron GIF SNN to CUDA via `GpuAccelerator` (temporal tick loop with `gif_step_weighted` / `gif_step_weighted_f16`, adaptation buffer, dynamic thresholds). The temporal path now supports a GGUF-backed first-layer synapse upload: `blk.0.attn_q.weight` is memory-mapped, host-registered with CUDA, uploaded once as FP16, and then reused across forwards.
 
 ```text
 TelemetrySnapshot
        |
        v  project_snapshot_current (to input_current)
        |
-       v  GpuAccelerator::reset_temporal_state() + load_synapse_weights()
+       v  mmap GGUF tensor + cuMemHostRegister_v2 + resident synapse upload
        |
        v  gif_step_weighted_tick loop (adaptation decay, adaptive threshold = base + scale*adaptation, weighted synapses, refractory)
        |
        v  temporal_*_to_vec (membrane, adaptation, spikes)
        |
-       v  forward_activity + Projector (GIF mode) + OLMoE + SAAQ/sparsity CSV (spike_count, mean_adaptation, active_fraction)
+       v  forward_activity + Projector (GIF mode) + OLMoE routing + SAAQ/sparsity CSV (spike_count, mean_adaptation, active_fraction)
 ```
+
+## GGUF First-Block Bridge
+
+The current OLMoE integration is intentionally scoped to a first-block bridge:
+
+- `blk.0.ffn_gate_inp.weight` is used as the real routing matrix for `DenseSim` and `SpikingSim`
+- `blk.0.attn_q.weight` is the default recurrent synapse matrix for `forward_gpu_temporal`
+- the GGUF file is memory-mapped and the GPU synapse slice is registered with CUDA via `cuMemHostRegister_v2`
+- the temporal GPU path reuses resident device weights across forwards instead of rebuilding dummy weights
+
+This phase does not implement the full expert MLP block. Hidden outputs remain a route-weighted passthrough of the projector embedding so the repo can exercise real routing without pretending to be a full multi-layer OLMoE runtime.
 
 ## Quick start
 
@@ -88,6 +99,20 @@ let output = model.forward_activity(
 )?;
 
 println!("Selected experts: {:?}", output.selected_experts);
+```
+
+To point the model at a real GGUF checkpoint while keeping the default GPU synapse tensor:
+
+```rust
+use corinth_canal::{HybridConfig, HybridModel};
+
+let cfg = HybridConfig {
+    olmoe_model_path: "/models/olmoe.gguf".into(),
+    gpu_synapse_tensor_name: "blk.0.attn_q.weight".into(),
+    ..Default::default()
+};
+
+let mut model = HybridModel::new(cfg)?;
 ```
 
 ## TelemetryEncoder
@@ -145,7 +170,7 @@ TelemetrySnapshot
 16 input neurons (4 channels × 2 polarities × 2 neurons)
        |
        v  SparseGifHiddenLayer
-512 GIF neurons with adaptive thresholds (sparse 16→512 weights)
+2048 GIF neurons with adaptive thresholds (sparse 16→2048 weights)
        |
        v  FunnelActivity
 spike_train + potentials + iz_potentials
@@ -182,11 +207,13 @@ let output = model.forward_gpu_temporal(&mut accelerator, &TelemetrySnapshot::de
 // GIF adaptation drives sparsity pruning; CSV now logs spike_count, mean_adaptation, active_fraction for VRAM optimization and Julia symbolic regression
 ```
 
-## Features
+## OLMoE Modes
 
-| Feature | Effect |
-|---------|--------|
-| `gguf` | Enables GGUF header validation for model-file probing |
+| Mode | Behavior |
+|------|----------|
+| `StubUniform` | No checkpoint required. Returns uniform expert weights and zero hidden output |
+| `DenseSim` | Uses the real GGUF first-block routing tensor when a model path is provided |
+| `SpikingSim` | Uses the same real routing tensor but integrates expert and hidden membrane state over time |
 
 ## Run example
 
@@ -194,11 +221,11 @@ let output = model.forward_gpu_temporal(&mut accelerator, &TelemetrySnapshot::de
 cargo run --example telemetry_bridge
 ```
 
-With GGUF probing enabled:
+With a real GGUF checkpoint:
 
 ```bash
-OLMOE_PATH=/models/OLMoE-1B-7B-Q5_K_M.gguf \
-  cargo run --example telemetry_bridge --features gguf --release
+OLMOE_PATH=/models/olmoe.gguf \
+  cargo run --example telemetry_bridge --release
 ```
 
 ## CSV Replay Contract
