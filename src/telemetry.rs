@@ -1,4 +1,4 @@
-use crate::types::TelemetrySnapshot;
+pub use crate::types::TelemetrySnapshot;
 
 #[derive(Debug, Clone)]
 pub struct TelemetryEncoder {

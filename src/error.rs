@@ -10,7 +10,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum HybridError {
     // ── Configuration errors ──────────────────────────────────────────────
-    /// A required field in [`HybridConfig`](crate::types::HybridConfig) was
+    /// A required field in [`ModelConfig`](crate::types::ModelConfig) was
     /// empty or out of range.
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
@@ -33,8 +33,8 @@ pub enum HybridError {
     #[error("input length mismatch: expected {expected}, got {got}")]
     InputLengthMismatch { expected: usize, got: usize },
 
-    /// OLMoE forward pass returned an error.
-    #[error("OLMoE forward pass failed: {0}")]
+    /// OlmoeRouter forward pass returned an error.
+    #[error("OlmoeRouter forward pass failed: {0}")]
     OlmoeForward(String),
 
     // ── I/O errors ────────────────────────────────────────────────────────

@@ -1,9 +1,9 @@
 //! Spike-to-expert projector — the heart of the neuromorphic-ANN fusion.
 //!
-//! The [`Projector`] sits between the Spikenaut SNN and OLMoE's expert router.
+//! The [`Projector`] sits between the Spikenaut SNN and OlmoeRouter's expert router.
 //! Its job is to compress the high-dimensional spike activity (neuron indices +
 //! firing rates + membrane potentials) into a single dense embedding vector
-//! that OLMoE can use as a context prefix.
+//! that OlmoeRouter can use as a context prefix.
 //!
 //! # Projection modes
 //!
@@ -13,7 +13,7 @@
 //! | [`TemporalHistogram`] | Spikes binned over time → flatten | timing-sensitive HFT |
 //! | [`MembraneSnapshot`] | Post-step membrane potentials → linear | smooth gradient flow |
 //!
-//! # No OLMoE dependency
+//! # No OlmoeRouter dependency
 //!
 //! The projector is intentionally **pure** — it depends only on the spike
 //! activity represented as spike indices, potentials, and adaptive voltages,
@@ -25,7 +25,8 @@
 //! [`MembraneSnapshot`]: crate::types::ProjectionMode::MembraneSnapshot
 
 use crate::error::{HybridError, Result};
-use crate::types::{ProjectionMode, EMBEDDING_DIM};
+use crate::types::EMBEDDING_DIM;
+pub use crate::types::ProjectionMode;
 
 // ── Projection weight matrix ───────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ fn feature_dim_for(snn_neurons: usize) -> usize {
 
 // ── Projector ─────────────────────────────────────────────────────────────────
 
-/// Converts Spikenaut SNN output into a dense embedding for OLMoE.
+/// Converts Spikenaut SNN output into a dense embedding for OlmoeRouter.
 ///
 /// Internally this is a **learned linear layer** `W ∈ ℝ^{EMBEDDING_DIM × FEATURE_DIM}`
 /// plus a bias `b ∈ ℝ^{EMBEDDING_DIM}`, initialised with Xavier-uniform weights.
@@ -56,8 +57,7 @@ fn feature_dim_for(snn_neurons: usize) -> usize {
 /// to clear it (e.g. on episode boundaries).
 ///
 /// ```no_run
-/// use corinth_canal::hybrid::projector::Projector;
-/// use corinth_canal::types::ProjectionMode;
+/// use corinth_canal::projector::{ProjectionMode, Projector};
 ///
 /// let proj = Projector::new(ProjectionMode::RateSum);
 /// ```

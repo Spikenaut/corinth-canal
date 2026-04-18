@@ -1,38 +1,27 @@
-use corinth_canal::{
-    HybridConfig, HybridModel, OlmoeExecutionMode, ProjectionMode, gpu::GpuAccelerator,
-};
+mod support;
+
+use corinth_canal::{gpu::GpuAccelerator, model::Model};
 use std::io::Error;
 use std::time::Instant;
+use support::{default_spiking_model_config, required_gguf_checkpoint_path};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let model_path = std::env::var("OLMOE_PATH").unwrap_or_default();
-    if model_path.trim().is_empty() {
-        eprintln!("OLMOE_PATH must point to a GGUF checkpoint");
-        std::process::exit(1);
-    }
+    let model_path = required_gguf_checkpoint_path()?;
 
     let mut accelerator = GpuAccelerator::new();
-    let mut model = HybridModel::new(HybridConfig {
-        olmoe_model_path: model_path.clone(),
-        gpu_synapse_tensor_name: "blk.0.attn_q.weight".into(),
-        num_experts: 8,
-        top_k_experts: 1,
-        olmoe_execution_mode: OlmoeExecutionMode::SpikingSim,
-        snn_steps: 1,
-        projection_mode: ProjectionMode::SpikingTernary,
-    })?;
+    let mut model = Model::new(default_spiking_model_config(model_path.clone(), 1))?;
 
     let target_neurons = model.projector_mut().input_neurons();
     println!(
-        "startup model_path={} olmoe_loaded={} gpu_ready={} target_neurons={}",
+        "startup model_path={} router_loaded={} gpu_ready={} target_neurons={}",
         model_path,
-        model.olmoe_loaded(),
+        model.router_loaded(),
         accelerator.is_ready(),
         target_neurons,
     );
 
-    if !model.olmoe_loaded() {
-        return Err(Error::other("OLMoE model did not load from OLMOE_PATH").into());
+    if !model.router_loaded() {
+        return Err(Error::other("OlmoeRouter model did not load from GGUF_CHECKPOINT_PATH").into());
     }
     if !accelerator.is_ready() {
         return Err(Error::other("GpuAccelerator is not ready").into());

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Dimensionality of the dense embedding the projector hands to OLMoE.
+/// Dimensionality of the dense embedding the projector hands to OlmoeRouter.
 pub const EMBEDDING_DIM: usize = 2048;
 
 /// Minimal local telemetry payload used to seed deterministic spike patterns.
@@ -23,31 +23,31 @@ impl TelemetrySnapshot {
 
 /// Top-level configuration for the hybrid quantization pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HybridConfig {
-    pub olmoe_model_path: String,
+pub struct ModelConfig {
+    pub gguf_checkpoint_path: String,
     pub gpu_synapse_tensor_name: String,
     pub num_experts: usize,
     pub top_k_experts: usize,
-    pub olmoe_execution_mode: OlmoeExecutionMode,
+    pub routing_mode: RoutingMode,
     pub snn_steps: usize,
     pub projection_mode: ProjectionMode,
 }
 
-impl Default for HybridConfig {
+impl Default for ModelConfig {
     fn default() -> Self {
         Self {
-            olmoe_model_path: String::new(),
+            gguf_checkpoint_path: String::new(),
             gpu_synapse_tensor_name: "blk.0.attn_q.weight".into(),
             num_experts: 8,
             top_k_experts: 1,
-            olmoe_execution_mode: OlmoeExecutionMode::SpikingSim,
+            routing_mode: RoutingMode::SpikingSim,
             snn_steps: 20,
             projection_mode: ProjectionMode::SpikingTernary,
         }
     }
 }
 
-/// Strategy used to convert spike activity into an OLMoE embedding.
+/// Strategy used to convert spike activity into an OlmoeRouter embedding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ProjectionMode {
     RateSum,
@@ -57,18 +57,18 @@ pub enum ProjectionMode {
     SpikingTernary,
 }
 
-/// Execution mode used by the OLMoE router.
+/// Execution mode used by the OlmoeRouter router.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum OlmoeExecutionMode {
+pub enum RoutingMode {
     StubUniform,
     DenseSim,
     #[default]
     SpikingSim,
 }
 
-/// Output of one `HybridModel::forward` pass.
+/// Output of one `Model::forward` pass.
 #[derive(Debug, Clone)]
-pub struct HybridOutput {
+pub struct ModelOutput {
     pub spike_train: Vec<Vec<usize>>,
     pub firing_rates: Vec<f32>,
     pub membrane_potentials: Vec<f32>,

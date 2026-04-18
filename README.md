@@ -1,16 +1,37 @@
 # corinth-canal
 
-SNN-logic quantization repo focused on the spiking projector and OLMoE routing path.
+SNN-logic quantization repo focused on the spiking projector and OlmoeRouter routing path.
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 ## Overview
 
-`corinth-canal` keeps the real projector and first-block OLMoE routing bridge, while the old telemetry/SNN front-end is replaced by a deterministic in-repo spike generator. That keeps the crate self-contained and runnable from a fresh clone while still supporting a real GGUF-backed path.
+`corinth-canal` keeps the real projector and first-block OlmoeRouter routing bridge, while the old telemetry/SNN front-end is replaced by a deterministic in-repo spike generator. That keeps the crate self-contained and runnable from a fresh clone while still supporting a real GGUF-backed path.
 
 ## Origin
 
-This repository originated from the `spikenaut-hybrid` codebase and was reorganized into `corinth-canal` with a consolidated `src/hybrid`, `src/tensor`, and `src/transformer` structure.
+This repository originated from the `spikenaut-hybrid` codebase and is now organized around feature modules: `src/model`, `src/moe`, `src/projector.rs`, `src/funnel.rs`, `src/telemetry.rs`, and `src/latent.rs`.
+
+## Module Map
+
+- `src/model/*`: end-to-end runtime orchestration, GPU temporal logic, and routing telemetry helpers
+- `src/moe/*`: GGUF checkpoint parsing, router math, and token embedding extraction
+- `src/projector.rs`: spike-to-embedding projection and `ProjectionMode`
+- `src/funnel.rs`: telemetry funnel and GIF hidden layer
+- `src/telemetry.rs`: `TelemetryEncoder` plus `TelemetrySnapshot` re-export
+- `src/latent.rs`: latent calibration snapshots and CSV export
+- `examples/support/mod.rs`: shared example bootstrap helpers
+
+## Migration Note
+
+Core runtime imports now come from feature modules instead of flat crate-root exports:
+
+```rust
+use corinth_canal::model::{Model, ModelConfig};
+use corinth_canal::moe::RoutingMode;
+use corinth_canal::projector::ProjectionMode;
+use corinth_canal::telemetry::TelemetrySnapshot;
+```
 
 ## Architecture
 
@@ -31,7 +52,7 @@ TelemetrySnapshot
        v  Projector (SpikingTernary GIF mode for 2048-neuron input)
 dense embedding [2048]
        |
-       v  OLMoE (stub/dense/spiking sim) with GGUF-backed first-block routing
+       v  OlmoeRouter (stub/dense/spiking sim) with GGUF-backed first-block routing
 expert_weights + selected_experts + hidden + spike_count telemetry
 ```
 
@@ -52,26 +73,28 @@ TelemetrySnapshot
        |
        v  temporal_*_to_vec (membrane, adaptation, spikes)
        |
-       v  forward_activity + Projector (GIF mode) + OLMoE routing + SAAQ/sparsity CSV (spike_count, mean_adaptation, active_fraction)
+       v  forward_activity + Projector (GIF mode) + OlmoeRouter routing + SAAQ/sparsity CSV (spike_count, mean_adaptation, active_fraction)
 ```
 
 ## GGUF First-Block Bridge
 
-The current OLMoE integration is intentionally scoped to a first-block bridge:
+The current OlmoeRouter integration is intentionally scoped to a first-block bridge:
 
 - `blk.0.ffn_gate_inp.weight` is used as the real routing matrix for `DenseSim` and `SpikingSim`
 - `blk.0.attn_q.weight` is the default recurrent synapse matrix for `forward_gpu_temporal`
 - the GGUF file is memory-mapped and the GPU synapse slice is registered with CUDA via `cuMemHostRegister_v2`
 - the temporal GPU path reuses resident device weights across forwards instead of rebuilding dummy weights
 
-This phase does not implement the full expert MLP block. Hidden outputs remain a route-weighted passthrough of the projector embedding so the repo can exercise real routing without pretending to be a full multi-layer OLMoE runtime.
+This phase does not implement the full expert MLP block. Hidden outputs remain a route-weighted passthrough of the projector embedding so the repo can exercise real routing without pretending to be a full multi-layer OlmoeRouter runtime.
 
 ## Quick start
 
 ```rust
 use corinth_canal::{
-    HybridConfig, HybridModel, TelemetryFunnel, TelemetrySnapshot,
     FUNNEL_HIDDEN_NEURONS,
+    funnel::TelemetryFunnel,
+    model::{Model, ModelConfig},
+    telemetry::TelemetrySnapshot,
 };
 
 // Configure the telemetry funnel
@@ -92,8 +115,8 @@ let snap = TelemetrySnapshot {
 let activity = funnel.encode_snapshot(&snap);
 
 // Or use the complete hybrid pipeline
-let cfg = HybridConfig::default();
-let mut model = HybridModel::new_with_projector_neurons(cfg, FUNNEL_HIDDEN_NEURONS)?;
+let cfg = ModelConfig::default();
+let mut model = Model::new_with_projector_neurons(cfg, FUNNEL_HIDDEN_NEURONS)?;
 let output = model.forward_activity(
     &activity.spike_train,
     &activity.potentials,
@@ -106,15 +129,15 @@ println!("Selected experts: {:?}", output.selected_experts);
 To point the model at a real GGUF checkpoint while keeping the default GPU synapse tensor:
 
 ```rust
-use corinth_canal::{HybridConfig, HybridModel};
+use corinth_canal::model::{Model, ModelConfig};
 
-let cfg = HybridConfig {
-    olmoe_model_path: "/models/olmoe.gguf".into(),
+let cfg = ModelConfig {
+    gguf_checkpoint_path: "/models/olmoe.gguf".into(),
     gpu_synapse_tensor_name: "blk.0.attn_q.weight".into(),
     ..Default::default()
 };
 
-let mut model = HybridModel::new(cfg)?;
+let mut model = Model::new(cfg)?;
 ```
 
 ## TelemetryEncoder
@@ -135,7 +158,7 @@ For each telemetry channel (GPU temp, GPU power, CPU temp, CPU power), the encod
 ### Usage
 
 ```rust
-use corinth_canal::{TelemetryEncoder, TelemetrySnapshot};
+use corinth_canal::{telemetry::TelemetryEncoder, telemetry::TelemetrySnapshot};
 
 // Configure thresholds: [temp, power, temp, power]
 let thresholds = [1.0, 5.0, 1.0, 5.0];
@@ -184,7 +207,7 @@ spike_train + potentials + iz_potentials
 |-----------|-------------|
 | `SignedSplitBankBridge` | Expands 4-channel ternary spikes into 16 input neurons using signed split banks (positive/negative pairs per channel) |
 | `SparseGifHiddenLayer` | Pure-Rust Generalized Integrate-and-Fire (GIF) layer with adaptive thresholds. Uses sparse 4-edge connectivity per hidden neuron for fast inference |
-| `FunnelActivity` / `HybridOutput` | Output struct containing the 2048-neuron GIF spike train, membrane potentials, adaptation stats, and Izhikevich potentials. Extended with spike_count telemetry for SAAQ. |
+| `FunnelActivity` / `ModelOutput` | Output struct containing the 2048-neuron GIF spike train, membrane potentials, adaptation stats, and Izhikevich potentials. Extended with spike_count telemetry for SAAQ. |
 
 ### GIF neuron parameters (synced in GPU kernel, funnel.rs, projector.rs)
 
@@ -200,9 +223,13 @@ spike_train + potentials + iz_potentials
 ### Usage with GIF GPU Path
 
 ```rust
-use corinth_canal::{HybridModel, HybridConfig, GpuAccelerator, TelemetrySnapshot};
+use corinth_canal::{
+    gpu::GpuAccelerator,
+    model::{Model, ModelConfig},
+    telemetry::TelemetrySnapshot,
+};
 
-let mut model = HybridModel::new(HybridConfig::default()).unwrap();
+let mut model = Model::new(ModelConfig::default()).unwrap();
 let mut accelerator = GpuAccelerator::new();  // falls back gracefully
 let output = model.forward_gpu_temporal(&mut accelerator, &TelemetrySnapshot::default()).unwrap();
 
@@ -214,7 +241,7 @@ let output = model.forward_gpu_temporal(&mut accelerator, &TelemetrySnapshot::de
 To validate the actual Blackwell temporal path on hardware, use the dedicated smoke test:
 
 ```bash
-OLMOE_PATH=/path/to/gguf cargo run --release --example gpu_smoke_test
+GGUF_CHECKPOINT_PATH=/path/to/gguf cargo run --release --example gpu_smoke_test
 ```
 
 This example exercises:
@@ -227,7 +254,7 @@ This example exercises:
 
 This is the correct example for validating the real GPU temporal path. `saaq_latent_calibration` is CPU-side calibration logic and does not exercise the direct GPU temporal loop.
 
-## OLMoE Modes
+## OlmoeRouter Modes
 
 | Mode | Behavior |
 |------|----------|
@@ -244,7 +271,7 @@ cargo run --example telemetry_bridge
 With a real GGUF checkpoint:
 
 ```bash
-OLMOE_PATH=/models/olmoe.gguf \
+GGUF_CHECKPOINT_PATH=/models/olmoe.gguf \
   cargo run --example telemetry_bridge --release
 ```
 
@@ -268,7 +295,7 @@ cargo run --example csv_replay /path/to/canonical.csv
 - `rows_processed`
 - `rows_skipped`
 - `global_step`
-- `olmoe_loaded`
+- `router_loaded`
 
 ## Latent Telemetry Calibration
 
@@ -278,17 +305,17 @@ The crate provides a separate calibration path for driving the GPU temporal SNN 
 
 Rather than bringing in a heavy text tokenizer dependency, the `saaq_latent_calibration` example bypasses text parsing entirely:
 
-1. It memory-maps the `token_embd.weight` tensor from the provided OLMoE GGUF checkpoint.
+1. It memory-maps the `token_embd.weight` tensor from the provided OlmoeRouter GGUF checkpoint.
 2. It extracts the raw 2048-dimensional embedding rows for a hard-coded sequence of token IDs (representing the prompt: *"Let's teach this MoE model the language of SNN"*).
 3. It mean-pools these tokens into a single `[f32; 2048]` context vector.
 4. It feeds this single context vector continuously into the direct GPU temporal loop (`tick_gpu_temporal`) for 10,000 ticks.
 
 ### Calibration Runner
 
-Run the calibration test by pointing it to your local OLMoE checkpoint:
+Run the calibration test by pointing it to your local OlmoeRouter checkpoint:
 
 ```bash
-OLMOE_PATH=/path/to/olmoe.gguf cargo run --example saaq_latent_calibration --release
+GGUF_CHECKPOINT_PATH=/path/to/olmoe.gguf cargo run --example saaq_latent_calibration --release
 ```
 
 The runner will output the per-tick performance and the winning SAAQ walker ID selected by the on-device reduction:
@@ -331,27 +358,30 @@ token_idx,best_score,best_walker
 
 This file is created automatically on the first call to `compute_routing_telemetry` and grows sequentially as more tokens are processed.
 
-## Project layout
+## Project Layout
 
 | Path | Responsibility |
 |------|----------------|
 | `Cargo.toml` | crate config and dependencies |
 | `src/lib.rs` | public API and crate docs |
-| `src/types.rs` | `TelemetrySnapshot`, config, enums, output types |
+| `src/types.rs` | shared scalar types and metadata structs |
 | `src/error.rs` | `HybridError`, `Result` |
-| `src/telemetry.rs` | `TelemetryEncoder` delta-modulation state machine |
-| `src/tensor/mod.rs` | candle-free tensor utilities |
-| `src/transformer/mod.rs` | transformer helpers |
-| `src/hybrid/mod.rs` | hybrid module switchboard |
-| `src/hybrid/projector.rs` | 2-bit spiking projector logic |
-| `src/hybrid/olmoe.rs` | GGUF-aware OLMoE simulation |
+| `src/telemetry.rs` | `TelemetryEncoder` and `TelemetrySnapshot` |
+| `src/projector.rs` | 2-bit spiking projector logic |
+| `src/moe/mod.rs` | public MoE router shell |
+| `src/moe/checkpoint.rs` | GGUF parsing and mapped tensor access |
+| `src/moe/routing.rs` | routing math and expert selection |
 | `src/funnel.rs` | TelemetryFunnel: encoder + split-bank bridge + sparse GIF hidden layer |
-| `src/hybrid/hybrid.rs` | deterministic front-end + projector + OLMoE orchestration |
+| `src/model/mod.rs` | public runtime shell and re-exports |
+| `src/model/core.rs` | deterministic front-end + projector + OlmoeRouter orchestration |
+| `src/model/temporal.rs` | GPU temporal tick orchestration |
+| `src/model/telemetry_io.rs` | routing telemetry CSV helpers |
 | `src/latent.rs` | `SnnLatentSnapshot`, `SnnLatentCalibrator`, `SnnLatentCsvExporter` for symbolic regression |
 | `src/gpu/mod.rs` | GPU accelerator public API and module switchboard |
 | `src/gpu/kernels/` | CUDA kernels (`.cu`, `.cuh`) for GPU-accelerated tasks |
 | `src/gpu/wrappers/` | Safe Rust wrappers for CUDA context, memory, and kernel launches |
 | `build.rs` | Build script to compile CUDA kernels to PTX |
+| `examples/support/mod.rs` | shared example bootstrap and prompt helpers |
 | `examples/telemetry_bridge.rs` | end-to-end standalone example |
 | `examples/csv_replay.rs` | canonical CSV replay adapter (funnel-driven) |
 | `examples/saaq_latent_calibration.rs` | calibration-only latent telemetry exporter |
@@ -369,7 +399,7 @@ This work builds directly on prior research in spiking and spike-driven LLMs.
 - Qiu et al. (2025), *Quantized Spike-driven Transformer* (`QSD-Transformer`).
   - ICLR poster: [OpenReview / ICLR 2025](https://iclr.cc/virtual/2025/poster/30954)
   - arXiv: [2501.13492](https://arxiv.org/abs/2501.13492)
-- The Allen Institute for AI for releasing the open OLMoE models used as the primary testbed.
+- The Allen Institute for AI for releasing the open OlmoeRouter models used as the primary testbed.
 
 ## Citation
 
