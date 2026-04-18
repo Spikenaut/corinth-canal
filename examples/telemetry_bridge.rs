@@ -1,36 +1,32 @@
 //! Standalone demo for the deterministic dummy front-end.
 
+mod support;
+
 use corinth_canal::{
-    EMBEDDING_DIM, HybridConfig, HybridModel, OlmoeExecutionMode, ProjectionMode, TelemetrySnapshot,
+    EMBEDDING_DIM, model::Model, moe::RoutingMode, telemetry::TelemetrySnapshot,
 };
+use support::{default_spiking_model_config, gguf_checkpoint_path_or_default};
 
 fn main() -> corinth_canal::Result<()> {
-    let model_path = std::env::var("OLMOE_PATH").unwrap_or_default();
-    let olmoe_execution_mode = match std::env::var("OLMOE_MODE")
+    let model_path = gguf_checkpoint_path_or_default();
+    let routing_mode = match std::env::var("ROUTING_MODE")
         .unwrap_or_else(|_| "spiking".into())
         .to_ascii_lowercase()
         .as_str()
     {
-        "dense" => OlmoeExecutionMode::DenseSim,
-        "stub" => OlmoeExecutionMode::StubUniform,
-        _ => OlmoeExecutionMode::SpikingSim,
+        "dense" => RoutingMode::DenseSim,
+        "stub" => RoutingMode::StubUniform,
+        _ => RoutingMode::SpikingSim,
     };
 
-    let cfg = HybridConfig {
-        olmoe_model_path: model_path,
-        gpu_synapse_tensor_name: "blk.0.attn_q.weight".into(),
-        snn_steps: 20,
-        num_experts: 8,
-        top_k_experts: 1,
-        olmoe_execution_mode,
-        projection_mode: ProjectionMode::SpikingTernary,
-    };
+    let mut cfg = default_spiking_model_config(model_path, 20);
+    cfg.routing_mode = routing_mode;
 
-    let mut model = HybridModel::new(cfg)?;
+    let mut model = Model::new(cfg)?;
     println!(
-        "olmoe_loaded={} olmoe_mode={:?}",
-        model.olmoe_loaded(),
-        model.config().olmoe_execution_mode
+        "router_loaded={} routing_mode={:?}",
+        model.router_loaded(),
+        model.config().routing_mode
     );
     let mut total_loss = 0.0_f32;
 

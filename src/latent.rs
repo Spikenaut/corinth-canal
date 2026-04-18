@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{HybridError, Result};
 use crate::funnel::{FunnelActivity, FUNNEL_HIDDEN_NEURONS};
-use crate::types::{HybridOutput, TelemetrySnapshot};
+use crate::types::{ModelOutput, TelemetrySnapshot};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SnnLatentSnapshot {
@@ -34,7 +34,7 @@ impl SnnLatentCalibrator {
         &mut self,
         snap: &TelemetrySnapshot,
         activity: &FunnelActivity,
-        output: &HybridOutput,
+        output: &ModelOutput,
     ) -> Result<SnnLatentSnapshot> {
         let dt_ms = self.window_dt_ms(snap.timestamp_ms);
         let dt_seconds = (dt_ms as f32 / 1000.0).max(1e-3);
@@ -49,7 +49,7 @@ impl SnnLatentCalibrator {
         let expert_weights = output
             .expert_weights
             .as_deref()
-            .ok_or_else(|| HybridError::OlmoeForward("missing expert_weights in HybridOutput".into()))?;
+            .ok_or_else(|| HybridError::OlmoeForward("missing expert_weights in ModelOutput".into()))?;
         let routing_entropy = normalized_entropy(expert_weights);
 
         let saaq_delta_q_prev = self.prev_delta_q;
@@ -162,8 +162,8 @@ mod tests {
         }
     }
 
-    fn sample_output(expert_weights: Vec<f32>) -> HybridOutput {
-        HybridOutput {
+    fn sample_output(expert_weights: Vec<f32>) -> ModelOutput {
+        ModelOutput {
             spike_train: vec![vec![0, 1]; 4],
             firing_rates: vec![0.5; FUNNEL_HIDDEN_NEURONS],
             membrane_potentials: vec![0.25; FUNNEL_HIDDEN_NEURONS],

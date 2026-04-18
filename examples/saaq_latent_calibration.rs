@@ -1,30 +1,21 @@
-use corinth_canal::{
-    HybridConfig, HybridModel, OlmoeExecutionMode, ProjectionMode, EMBEDDING_DIM,
-    gpu::GpuAccelerator,
-};
+mod support;
+
+use corinth_canal::{gpu::GpuAccelerator, model::Model};
 use std::io::Error;
 use std::time::Instant;
+use support::{
+    DEFAULT_MATH_PROMPT_TOKEN_IDS, default_spiking_model_config, mean_pool_prompt_embeddings,
+    required_gguf_checkpoint_path,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let model_path = std::env::var("OLMOE_PATH").unwrap_or_default();
-    if model_path.trim().is_empty() {
-        eprintln!("OLMOE_PATH must point to a GGUF checkpoint");
-        std::process::exit(1);
-    }
+    let model_path = required_gguf_checkpoint_path()?;
 
     let mut accelerator = GpuAccelerator::new();
-    let mut model = HybridModel::new(HybridConfig {
-        olmoe_model_path: model_path.clone(),
-        gpu_synapse_tensor_name: "blk.0.attn_q.weight".into(),
-        num_experts: 8,
-        top_k_experts: 1,
-        olmoe_execution_mode: OlmoeExecutionMode::SpikingSim,
-        snn_steps: 1,
-        projection_mode: ProjectionMode::SpikingTernary,
-    })?;
+    let mut model = Model::new(default_spiking_model_config(model_path.clone(), 1))?;
 
-    if !model.olmoe_loaded() {
-        return Err(Error::other("OLMoE model did not load from OLMOE_PATH").into());
+    if !model.router_loaded() {
+        return Err(Error::other("OlmoeRouter model did not load from GGUF_CHECKPOINT_PATH").into());
     }
     if !accelerator.is_ready() {
         return Err(Error::other("GpuAccelerator is not ready").into());
@@ -32,28 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Extract embeddings for token IDs: [1045, 2099, 450, 8000, 12]
     // These represent the prompt: "Let's teach this MoE model the language of SNN"
-    let token_ids = vec![402, 11492, 286, 257, 4568, 318, 12056, 4202, 13]; // Simulates: The derivate of a constant is mathematically zero.
-    let mut pooled = vec![0.0f32; EMBEDDING_DIM];
-
-    for &token in &token_ids {
-        let emb = model.extract_token_embedding(token)?;
-        for i in 0..EMBEDDING_DIM {
-            pooled[i] += emb[i];
-        }
-    }
-
-    // 2. Mean-pool into a single [f32; 2048] vector
-    for i in 0..EMBEDDING_DIM {
-        pooled[i] /= token_ids.len() as f32;
-    }
-
-    // Apply L2 Normalization to prevent Routing Collapse from overpowering fatigue
-    let l2_norm = pooled.iter().map(|&v| v * v).sum::<f32>().sqrt();
-    if l2_norm > 1e-8 {
-        for v in pooled.iter_mut() {
-            *v /= l2_norm;
-        }
-    }
+    let pooled = mean_pool_prompt_embeddings(&mut model, &DEFAULT_MATH_PROMPT_TOKEN_IDS)?;
 
     let target_neurons = model.projector_mut().input_neurons();
     if pooled.len() != target_neurons {

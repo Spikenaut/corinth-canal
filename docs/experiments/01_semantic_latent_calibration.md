@@ -16,7 +16,7 @@ I verified the bare-metal GPU temporal loop using a synthetic sine wave. The Spi
 
 ![Routing Collapse](latent_space_exploration_first_real_attempt.png)
 
-I fed real LLM embeddings from the OLMoE GGUF file. The weights were safely cast from F16 to F32, but the raw, unbounded electrical pressure of the semantic vector overpowered the network's fatigue mechanics. This resulted in a 'Winner-Take-All' routing collapse where a single neuron took the entire load for 10,000 ticks.
+I fed real LLM embeddings from the OlmoeRouter GGUF file. The weights were safely cast from F16 to F32, but the raw, unbounded electrical pressure of the semantic vector overpowered the network's fatigue mechanics. This resulted in a 'Winner-Take-All' routing collapse where a single neuron took the entire load for 10,000 ticks.
 
 ---
 

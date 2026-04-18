@@ -1,11 +1,14 @@
-//! CSV replay example: ingest canonical telemetry CSV into HybridModel.
+//! CSV replay example: ingest canonical telemetry CSV into Model.
 //!
 //! Canonical CSV format: timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w
 
+mod support;
+
 use corinth_canal::{
-    EMBEDDING_DIM, FUNNEL_HIDDEN_NEURONS, HybridConfig, HybridError, HybridModel,
-    OlmoeExecutionMode, ProjectionMode, TelemetryFunnel, TelemetrySnapshot,
+    EMBEDDING_DIM, FUNNEL_HIDDEN_NEURONS, HybridError, TelemetryFunnel, model::Model,
+    telemetry::TelemetrySnapshot,
 };
+use support::default_spiking_model_config;
 
 const EXPECTED_HEADER: &str = "timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w";
 const TELEMETRY_THRESHOLDS: [f32; 4] = [1.0, 5.0, 1.0, 5.0];
@@ -28,24 +31,15 @@ fn main() -> corinth_canal::Result<()> {
     }
 
     let csv_path = &args[1];
-    let model_path = std::env::var("OLMOE_PATH").unwrap_or_default();
+    let model_path = support::gguf_checkpoint_path_or_default();
+    let cfg = default_spiking_model_config(model_path, 20);
 
-    let cfg = HybridConfig {
-        olmoe_model_path: model_path,
-        gpu_synapse_tensor_name: "blk.0.attn_q.weight".into(),
-        snn_steps: 20,
-        num_experts: 8,
-        top_k_experts: 1,
-        olmoe_execution_mode: OlmoeExecutionMode::SpikingSim,
-        projection_mode: ProjectionMode::SpikingTernary,
-    };
-
-    let mut model = HybridModel::new_with_projector_neurons(cfg.clone(), FUNNEL_HIDDEN_NEURONS)?;
+    let mut model = Model::new_with_projector_neurons(cfg.clone(), FUNNEL_HIDDEN_NEURONS)?;
     let mut funnel = TelemetryFunnel::new(TELEMETRY_THRESHOLDS, cfg.snn_steps);
     println!(
-        "olmoe_loaded={} olmoe_mode={:?} funnel_hidden_neurons={}",
-        model.olmoe_loaded(),
-        model.config().olmoe_execution_mode,
+        "router_loaded={} routing_mode={:?} funnel_hidden_neurons={}",
+        model.router_loaded(),
+        model.config().routing_mode,
         FUNNEL_HIDDEN_NEURONS,
     );
 
@@ -191,7 +185,7 @@ fn main() -> corinth_canal::Result<()> {
         }
     );
     println!("global_step={}", model.global_step());
-    println!("olmoe_loaded={}", model.olmoe_loaded());
+    println!("router_loaded={}", model.router_loaded());
 
     Ok(())
 }
