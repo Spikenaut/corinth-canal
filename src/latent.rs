@@ -5,8 +5,15 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{HybridError, Result};
-use crate::funnel::{FunnelActivity, FUNNEL_HIDDEN_NEURONS};
+use crate::funnel::{FUNNEL_HIDDEN_NEURONS, FunnelActivity};
 use crate::types::{ModelOutput, TelemetrySnapshot};
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SaaqUpdateRule {
+    #[default]
+    LegacyV1_0,
+    SaaqV1_5SqrtRate,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SnnLatentSnapshot {
@@ -23,11 +30,27 @@ pub struct SnnLatentCalibrator {
     prev_timestamp_ms: Option<u64>,
     prev_mean_membrane: Option<f32>,
     prev_delta_q: f32,
+    update_rule: SaaqUpdateRule,
 }
 
 impl SnnLatentCalibrator {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_update_rule(update_rule: SaaqUpdateRule) -> Self {
+        Self {
+            update_rule,
+            ..Self::default()
+        }
+    }
+
+    pub fn set_update_rule(&mut self, update_rule: SaaqUpdateRule) {
+        self.update_rule = update_rule;
+    }
+
+    pub fn update_rule(&self) -> SaaqUpdateRule {
+        self.update_rule
     }
 
     pub fn observe(
@@ -46,20 +69,26 @@ impl SnnLatentCalibrator {
         let previous_mean_membrane = self.prev_mean_membrane.unwrap_or(mean_membrane);
         let membrane_dv_dt = (mean_membrane - previous_mean_membrane) / dt_seconds;
 
-        let expert_weights = output
-            .expert_weights
-            .as_deref()
-            .ok_or_else(|| HybridError::OlmoeForward("missing expert_weights in ModelOutput".into()))?;
+        let expert_weights = output.expert_weights.as_deref().ok_or_else(|| {
+            HybridError::OlmoeForward("missing expert_weights in ModelOutput".into())
+        })?;
         let routing_entropy = normalized_entropy(expert_weights);
 
         let saaq_delta_q_prev = self.prev_delta_q;
-        let activity_pressure = (avg_pop_firing_rate_hz / 24.0).clamp(0.0, 1.0);
-        let membrane_pressure = (membrane_dv_dt / 12.0).clamp(-1.0, 1.0);
-        let saaq_delta_q_target = 0.52 * saaq_delta_q_prev
-            + 0.28 * activity_pressure
-            + 0.12 * membrane_pressure
-            + 0.20 * routing_entropy
-            - 0.18;
+        let saaq_delta_q_target = match self.update_rule {
+            SaaqUpdateRule::LegacyV1_0 => {
+                let activity_pressure = (avg_pop_firing_rate_hz / 24.0).clamp(0.0, 1.0);
+                let membrane_pressure = (membrane_dv_dt / 12.0).clamp(-1.0, 1.0);
+                0.52 * saaq_delta_q_prev
+                    + 0.28 * activity_pressure
+                    + 0.12 * membrane_pressure
+                    + 0.20 * routing_entropy
+                    - 0.18
+            }
+            SaaqUpdateRule::SaaqV1_5SqrtRate => {
+                0.0573 * avg_pop_firing_rate_hz.max(0.0).sqrt() + 0.496 * saaq_delta_q_prev
+            }
+        };
 
         self.prev_timestamp_ms = Some(snap.timestamp_ms);
         self.prev_mean_membrane = Some(mean_membrane);
@@ -238,5 +267,43 @@ mod tests {
         assert!(lines.next().is_none());
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn saaq_v1_5_uses_sqrt_rate_equation() {
+        let mut calibrator =
+            SnnLatentCalibrator::with_update_rule(SaaqUpdateRule::SaaqV1_5SqrtRate);
+        let snap_a = TelemetrySnapshot {
+            timestamp_ms: 1_000,
+            gpu_temp_c: 60.0,
+            gpu_power_w: 250.0,
+            cpu_tctl_c: 70.0,
+            cpu_package_power_w: 120.0,
+        };
+        let snap_b = TelemetrySnapshot {
+            timestamp_ms: 1_100,
+            ..snap_a.clone()
+        };
+        let output = sample_output(vec![0.7, 0.2, 0.1]);
+
+        let first = calibrator
+            .observe(&snap_a, &sample_activity(0, 0.20), &output)
+            .unwrap();
+        let second = calibrator
+            .observe(&snap_b, &sample_activity(8, 0.35), &output)
+            .unwrap();
+
+        assert_eq!(first.saaq_delta_q_target, 0.0);
+        let expected =
+            0.0573 * second.avg_pop_firing_rate_hz.sqrt() + 0.496 * second.saaq_delta_q_prev;
+        assert!((second.saaq_delta_q_target - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn calibrator_update_rule_can_be_changed() {
+        let mut calibrator = SnnLatentCalibrator::new();
+        assert_eq!(calibrator.update_rule(), SaaqUpdateRule::LegacyV1_0);
+        calibrator.set_update_rule(SaaqUpdateRule::SaaqV1_5SqrtRate);
+        assert_eq!(calibrator.update_rule(), SaaqUpdateRule::SaaqV1_5SqrtRate);
     }
 }
