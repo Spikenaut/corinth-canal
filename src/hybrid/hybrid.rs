@@ -4,7 +4,9 @@ use super::olmoe::OLMoE;
 use super::projector::Projector;
 use crate::error::{HybridError, Result};
 use crate::gpu::{GpuAccelerator, GpuBuffer, GpuError, GpuResult};
-use crate::types::{HybridConfig, HybridOutput, OlmoeExecutionMode, TelemetrySnapshot, EMBEDDING_DIM};
+use crate::types::{
+    EMBEDDING_DIM, HybridConfig, HybridOutput, OlmoeExecutionMode, TelemetrySnapshot,
+};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -22,6 +24,7 @@ pub struct HybridModel {
     projector: Projector,
     pub(crate) olmoe: OLMoE,
     global_step: i64,
+    recurrent_synapse_source: String,
 }
 
 impl HybridModel {
@@ -52,8 +55,9 @@ impl HybridModel {
         }
 
         let projector = Projector::with_input_neurons(config.projection_mode, projector_neurons);
-        let olmoe = OLMoE::load_with_mode(
+        let olmoe = OLMoE::load_with_mode_and_local(
             &config.olmoe_model_path,
+            &config.local_checkpoint_dir,
             config.num_experts,
             config.top_k_experts,
             config.olmoe_execution_mode,
@@ -64,6 +68,7 @@ impl HybridModel {
             projector,
             olmoe,
             global_step: 0,
+            recurrent_synapse_source: "uninitialized".into(),
         })
     }
 
@@ -227,24 +232,32 @@ impl HybridModel {
                 self.olmoe.model_path(),
                 self.config.gpu_synapse_tensor_name
             );
-            let weights = self
+            match self
                 .olmoe
                 .registered_gpu_synapse_weights(&self.config.gpu_synapse_tensor_name)
-                .map_err(|e| {
-                    GpuError::MemoryError(format!("GGUF synapse registration failed: {e}"))
-                })?;
-            accelerator.load_synapse_weights_f16_registered(&signature, weights)?;
-            return Ok(());
+            {
+                Ok(weights) => {
+                    accelerator.load_synapse_weights_f16_registered(&signature, weights)?;
+                    self.recurrent_synapse_source = "real".into();
+                    return Ok(());
+                }
+                Err(_) => {
+                    // Some GGUF checkpoints keep the routing bridge usable but do not expose a
+                    // square F16 attention tensor for direct GPU synapse upload.
+                }
+            }
         }
 
         let fallback_signature = format!("synthetic-f32::{neuron_count}");
         if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
+            self.recurrent_synapse_source = "synthetic-fallback".into();
             return Ok(());
         }
 
         // Stub mode keeps a deterministic fallback path without re-uploading every forward.
         let synthetic_weights = vec![0.0f32; neuron_count * neuron_count];
         accelerator.load_synapse_weights_named(&fallback_signature, &synthetic_weights)?;
+        self.recurrent_synapse_source = "synthetic-fallback".into();
         Ok(())
     }
 
@@ -356,7 +369,43 @@ impl HybridModel {
         self.olmoe.is_loaded()
     }
 
-    /// Extract the embedding vector for a single token ID from the GGUF `token_embd.weight` tensor.
+    pub fn checkpoint_architecture(&self) -> &str {
+        self.olmoe.architecture()
+    }
+
+    pub fn checkpoint_format(&self) -> &str {
+        self.olmoe.checkpoint_format()
+    }
+
+    pub fn checkpoint_hidden_size(&self) -> usize {
+        self.olmoe.hidden_size()
+    }
+
+    pub fn checkpoint_source_hidden_size(&self) -> usize {
+        self.olmoe.source_hidden_size()
+    }
+
+    pub fn checkpoint_num_experts(&self) -> usize {
+        self.olmoe.checkpoint_num_experts()
+    }
+
+    pub fn checkpoint_expert_used_count(&self) -> Option<usize> {
+        self.olmoe.expert_used_count()
+    }
+
+    pub fn routing_tensor_name(&self) -> &str {
+        self.olmoe.routing_tensor_name()
+    }
+
+    pub fn routing_source(&self) -> &str {
+        self.olmoe.routing_source()
+    }
+
+    pub fn recurrent_synapse_source(&self) -> &str {
+        &self.recurrent_synapse_source
+    }
+
+    /// Extract the embedding vector for a single token ID from the active checkpoint backend.
     pub fn extract_token_embedding(&mut self, token_id: usize) -> Result<Vec<f32>> {
         self.olmoe.extract_token_embedding(token_id)
     }
