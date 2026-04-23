@@ -411,6 +411,23 @@ TICKS=64 HEARTBEAT_MATRIX=off \
   cargo run --release --example saaq_latent_calibration
 ```
 
+Stage-0 campaign entrypoint (checked-in lineup config):
+
+```bash
+just saaq-campaign
+```
+
+First smoke-test control settings:
+
+```bash
+SAAQ_RULE=saaq_v1_5 \
+TELEMETRY_SOURCE=synthetic \
+HEARTBEAT_MATRIX=off \
+REPEAT_COUNT=2 \
+STRICT_REPEAT_CHECK=true \
+just saaq-campaign
+```
+
 RE4 corpus run (exact CSV length, zero wraparound):
 
 ```bash

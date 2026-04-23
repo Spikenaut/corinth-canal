@@ -53,7 +53,6 @@ pub(super) struct ParsedCheckpointLayout {
 pub(super) struct GgufMetadata {
     architecture: String,
     quantization: String,
-    strings: HashMap<String, String>,
     numerics: HashMap<String, u64>,
 }
 
@@ -210,7 +209,7 @@ pub(super) fn parse_checkpoint_layout(bytes: &[u8], path: &str) -> Result<Parsed
 
     let mut alignment = 32usize;
     let mut file_type = None;
-    let mut strings = HashMap::new();
+    let mut architecture = None;
     let mut numerics = HashMap::new();
 
     for _ in 0..kv_count {
@@ -225,13 +224,13 @@ pub(super) fn parse_checkpoint_layout(bytes: &[u8], path: &str) -> Result<Parsed
             }
             "general.architecture" => {
                 let value = cursor.read_string(path)?;
-                strings.insert(key, value);
+                architecture = Some(value);
             }
             _ => {
                 if let Some(value) = cursor.read_numeric_value(value_type, path)? {
                     numerics.insert(key, value);
                 } else if value_type == GGUF_VALUE_TYPE_STRING {
-                    strings.insert(key, cursor.read_string(path)?);
+                    let _ = cursor.read_string(path)?;
                 } else {
                     cursor.skip_value(value_type, path)?;
                 }
@@ -281,12 +280,8 @@ pub(super) fn parse_checkpoint_layout(bytes: &[u8], path: &str) -> Result<Parsed
 
     Ok(ParsedCheckpointLayout {
         metadata: GgufMetadata {
-            architecture: strings
-                .get("general.architecture")
-                .cloned()
-                .unwrap_or_else(|| "unknown".into()),
+            architecture: architecture.unwrap_or_else(|| "unknown".into()),
             quantization: quantization_label(file_type),
-            strings,
             numerics,
         },
         tensors,

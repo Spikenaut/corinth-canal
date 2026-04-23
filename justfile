@@ -33,6 +33,12 @@ replay PATH:
 saaq:
     cargo run --release --example saaq_latent_calibration
 
+# Campaign entrypoint: use the checked-in SAAQ 1.5 MoE lineup by default.
+# Callers can still override any env var inline, e.g.:
+#   just saaq-campaign REPEAT_COUNT=2 HEARTBEAT_MATRIX=off
+saaq-campaign:
+    LINEUP_CONFIG=configs/saaq15_moe_lineup.toml cargo run --release --example saaq_latent_calibration
+
 # Force CSV-replay mode for the SAAQ sweep. TELEMETRY_CSV_PATH must be set
 # in the environment or passed explicitly:
 #   just saaq-csv TELEMETRY_CSV_PATH=/path/to/telemetry.csv
