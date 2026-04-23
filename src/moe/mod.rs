@@ -42,6 +42,42 @@ pub(super) const GGUF_VALUE_TYPE_UINT64: u32 = 10;
 pub(super) const GGUF_VALUE_TYPE_INT64: u32 = 11;
 pub(super) const GGUF_VALUE_TYPE_FLOAT64: u32 = 12;
 
+impl RouterMetadata {
+   fn synthetic(
+       family: ModelFamily,
+       num_experts: usize,
+       top_k: usize,
+   ) -> Self {
+       Self {
+           family,
+           architecture: "stub".into(),
+           hidden_size: EMBEDDING_DIM,
+           num_layers: 0,
+           num_experts,
+           expert_used_count: top_k.max(1) ,
+           quantization: "stub".into(),
+           routing_tensor_name: "synthetic".into(),
+           preferred_gpu_synapse_tensor_name: None,
+           synapse_source: "synthetic-fallback".into(),
+           real_gpu_synapse_tensor_name: None,
+       }
+   }
+    fn from_adapter(adapter: &ModelAdapter) -> Self {
+        Self {
+            family: adapter.family,
+            architecture: adapter.architecture.clone(),
+            hidden_size: adapter.hidden_size,
+            num_layers: adapter.num_layers,
+            num_experts: adapter.num_experts,
+            expert_used_count: adapter.expert_used_count,
+            quantization: adapter.quantization.clone(),
+            routing_tensor_name: adapter.routing_tensor.clone(),
+            preferred_gpu_synapse_tensor_name: adapter.preferred_gpu_synapse_tensor.clone(),
+            synapse_source: adapter.synapse_source_label().into(),
+            real_gpu_synapse_tensor_name: adapter.real_gpu_synapse_tensor.clone(),
+        }
+    }    
+            
 pub struct OlmoeRouter {
     model_path: String,
     num_experts: usize,
