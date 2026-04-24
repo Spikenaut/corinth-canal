@@ -2,8 +2,10 @@
 
 mod support;
 
-use corinth_canal::{
-    EMBEDDING_DIM, model::Model, moe::RoutingMode, telemetry::TelemetrySnapshot,
+use corinth_canal::{EMBEDDING_DIM, model::Model, moe::RoutingMode, telemetry::TelemetrySnapshot};
+use support::{
+    config::RunConfig,
+    default_spiking_model_config,
 };
 use support::{RunConfig, default_spiking_model_config};
 
