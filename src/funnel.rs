@@ -10,7 +10,7 @@ const GIF_IZ_NEURONS: usize = 5;
 
 pub fn active_neuron_indices<T>(spikes: &[T]) -> Vec<usize>
 where
-    T:PartialEq + Default,
+    T: PartialEq + Default,
 {
     let zero = T::default();
 

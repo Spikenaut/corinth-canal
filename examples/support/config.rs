@@ -24,7 +24,6 @@ use super::{
     routing_mode_override_from_env, saaq_update_rule_from_env, ticks_from_env,
 };
 
-
 /// Default output root for per-run artifacts when `VALIDATION_OUTPUT_ROOT`
 /// is unset. Repo-relative on purpose so a fresh clone never writes into a
 /// machine-specific consumer directory.

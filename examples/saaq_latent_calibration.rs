@@ -1,8 +1,5 @@
 mod support;
 
-use support::{
-    config::RunConfig,
-};
 use corinth_canal::{
     FunnelActivity, HeartbeatInjector, SaaqUpdateRule, SnnDualLatentCalibrator,
     SnnLatentCsvExporter, gpu::GpuAccelerator, model::Model,
@@ -13,10 +10,11 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Error, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use support::config::RunConfig;
+use corinth_canal::funnel::active_neuron_indices;
 use support::{
-    ResolvedTelemetry, TelemetrySource, ValidationModelSpec,
-    default_spiking_model_config, heartbeat_gain, prompt_embedding_for_validation,
-    telemetry_snapshot_for_tick,
+    ResolvedTelemetry, TelemetrySource, ValidationModelSpec, default_spiking_model_config,
+    heartbeat_gain, prompt_embedding_for_validation, telemetry_snapshot_for_tick,
 };
 
 #[derive(Debug, Serialize)]
@@ -159,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::from_filename(".env.local");
     let cfg = RunConfig::from_env();
 
-    // Effective tick count: when TICKS=0 and CSV replay is live, use the full
+    // Effective tick count: when TICKS=0 and CSV replay are live, use the full
     // CSV length so SR.jl corpus runs cover exactly one loop with zero
     // wraparound contamination (per plan: wraparound is for smoke only).
     let effective_ticks = match (cfg.ticks, cfg.telemetry.source, cfg.telemetry.row_count()) {
@@ -430,7 +428,7 @@ fn run_validation(
                 prompt_embedding.iter().map(|value| value * gain).collect();
 
             // First/last timestamp bookkeeping. `telemetry_snapshot_for_tick`
-            // rewrites timestamps to `tick + 1` for 1-to-1 CSV join but we
+            // rewrites timestamps to `tick + 1` for 1-to-1 CSV join, but we
             // still want the summary to reflect the exact values emitted.
             if metrics.first_timestamp_ms.is_none() {
                 metrics.first_timestamp_ms = Some(snap.timestamp_ms);
@@ -445,12 +443,7 @@ fn run_validation(
             metrics.ticks_completed = elapsed_count;
 
             let spikes = accelerator.temporal_spikes_to_vec(target_neurons)?;
-            let active_neurons: Vec<usize> = spikes
-                .iter()
-                .enumerate()
-                .filter(|(_, value)| **value != 0)
-                .map(|(idx, _)| idx)
-                .collect();
+            let active_neurons = active_neuron_indices(&spikes);
             let potentials = accelerator
                 .temporal_membrane_to_vec(target_neurons)?
                 .into_iter()
@@ -573,7 +566,7 @@ fn build_manifest(
     ctx: &RunContext<'_>,
     config: &corinth_canal::model::ModelConfig,
     model: &Model,
-    run_dir: &std::path::Path,
+    run_dir: &Path,
     prompt_embedding_source: &str,
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
@@ -587,7 +580,7 @@ fn build_manifest(
     // Count only *extra* passes beyond the first. `ticks == rows` is exactly
     // one pass with zero wraparound (SR.jl corpus sweet spot); `ticks =
     // 2*rows` is one wraparound; and so on. This makes the field a clean
-    // predicate for "did this run teach the regressor on looped data?".
+    // predicate for "did this run teach the regressor on looped data".
     let wraparound_loops = telemetry_row_count
         .filter(|rows| *rows > 0 && ctx.ticks > *rows)
         .map(|rows| ((ctx.ticks - rows) as u64) / (rows as u64) + 1)
@@ -631,7 +624,7 @@ fn build_manifest(
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
         // True iff the routing CSV would land in CWD. Since Stage E this
-        // runner always sets `ModelConfig::gpu_routing_telemetry_path` to
+        // runner always since `ModelConfig::gpu_routing_telemetry_path` to
         // an absolute path inside `run_dir`, so CWD contamination is
         // impossible regardless of whether `tick_gpu_temporal` or
         // `forward_gpu_temporal` is used.
@@ -660,26 +653,26 @@ fn write_manifest(
 }
 
 fn write_summary(
-    summary_path: &std::path::Path,
+    summary_path: &Path,
     summary: &RunSummary,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::write(summary_path, serde_json::to_string_pretty(summary)?)?;
     Ok(())
 }
 
-/// Convenience wrapper that builds + writes both `run_manifest.json` and
+/// Convenience wrapper that builds and writes both `run_manifest.json` and
 /// `summary.json`. Lives here (not in config.rs) because it pulls on
-/// several run-local paths + live model state.
+/// several run+local paths and live model state.
 #[allow(clippy::too_many_arguments)]
 fn write_manifest_and_summary(
     ctx: &RunContext<'_>,
     config: &corinth_canal::model::ModelConfig,
     model: &Model,
-    run_dir: &std::path::Path,
+    run_dir: &Path,
     manifest_path: &PathBuf,
-    summary_path: &std::path::Path,
-    tick_path: &std::path::Path,
-    latent_path: &std::path::Path,
+    summary_path: &Path,
+    tick_path: &Path,
+    latent_path: &Path,
     prompt_embedding_source: &str,
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
@@ -722,10 +715,10 @@ fn write_manifest_and_summary(
 fn build_summary(
     ctx: &RunContext<'_>,
     model_family: corinth_canal::ModelFamily,
-    run_dir: &std::path::Path,
-    manifest_path: &std::path::Path,
-    tick_path: &std::path::Path,
-    latent_path: &std::path::Path,
+    run_dir: &Path,
+    manifest_path: &Path,
+    tick_path: &Path,
+    latent_path: &Path,
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
     metrics: &RunMetrics,
@@ -872,11 +865,11 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
-/// Strict-repeat verdict pass. Groups rows by
-/// `(model_slug, telemetry_source, heartbeat_slug, saaq_rule)` and compares
+/// Strict-repeat verdict pass. Groups row by
+/// `(model_slug, telemetry_source, heartbeat_slug, saaq_rule)` and compare
 /// each repeat `k >= 1`'s `latent_telemetry.csv` to repeat `0`'s byte-wise.
 ///
-/// Only rows with `validation_status == "completed"` participate — partial
+/// Only rows with `validation_status == "completed" row` participate — partial
 /// / failed runs can't meaningfully claim determinism. Groups with fewer
 /// than two completed repeats are skipped silently (they can't mismatch).
 ///
@@ -926,7 +919,7 @@ fn apply_strict_repeat_check(
             }
         }
         if group_mismatch {
-            // Mark baseline as mismatch too so the group has a single verdict.
+            // Mark baseline as mismatch to so the group has a single verdict.
             rows[baseline_idx].repeat_determinism = Some("mismatch");
             rewrite_summary_determinism(&rows[baseline_idx].summary_path, "mismatch")?;
         } else {

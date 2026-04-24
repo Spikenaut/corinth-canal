@@ -8,7 +8,6 @@ use super::{
 use crate::funnel::active_neuron_indices;
 use crate::gpu::{GpuAccelerator, GpuError, GpuResult};
 use crate::types::{ModelOutput, TelemetrySnapshot};
-use crate::funnel::active_neuron_indices;
 impl Model {
     /// GPU-only temporal simulation with GIF (Generalized Integrate-and-Fire).
     /// Phase 1: reset + load_synapse_weights + project_snapshot_current
