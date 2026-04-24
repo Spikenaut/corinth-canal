@@ -651,7 +651,7 @@ for idx in 0..target_len {
     let hi = source.ceil().min((input.len() - 1) as f32) as usize;
     if lo == hi {
         out.push(input[lo]);
-        ) else {
+    } else {
             let t = (source - lo as f32);
             out.push(input[lo] * (1.0 - t) + input[hi]);
         }
