@@ -267,18 +267,7 @@ impl OlmoeRouter {
     ) -> Result<(RouterMetadata, MappedGgufCheckpoint)> {
         let (_raw_metadata, checkpoint) = probe_and_map_checkpoint(path)?;
         let adapter = resolve_adapter(checkpoint.metadata(), &checkpoint, family_override, path)?;
-        let metadata = RouterMetadata {
-            family: adapter.family,
-            architecture: adapter.architecture.clone(),
-            hidden_size: adapter.hidden_size,
-            num_layers: adapter.num_layers,
-            num_experts: adapter.num_experts,
-            expert_used_count: adapter.expert_used_count,
-            quantization: adapter.quantization.clone(),
-            routing_tensor_name: adapter.routing_tensor.clone(),
-            preferred_gpu_synapse_tensor_name: adapter.preferred_gpu_synapse_tensor.clone(),
-            synapse_source: adapter.synapse_source_label().into(),
-        };
+        let metadata = RouterMetadata::from_adapter(&adapter);
         Ok((metadata, checkpoint))
     }
 
