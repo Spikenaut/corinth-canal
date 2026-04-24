@@ -139,13 +139,7 @@ impl Model {
         }
 
         let output = self.forward(snap)?;
-        let loss = output
-            .embedding
-            .iter()
-            .zip(target.iter())
-            .map(|(hidden, expected)| (hidden - expected).powi(2))
-            .sum::<f32>()
-            / EMBEDDING_DIM as f32;
+        let loss = crate::metric::mean_squared_error(&output.embedding, target);
 
         Ok(loss)
     }
