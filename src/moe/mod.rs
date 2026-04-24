@@ -63,8 +63,22 @@ impl RouterMetadata {
         }
     }
 
-    fn from_adapter(
-        adapter: ModelAdapter,
+    fn from_adapter(adapter: &ModelAdapter) -> Self {
+        Self {
+            family: adapter.family.clone(),
+            architecture: adapter.architecture.clone(),
+            hidden_size: adapter.hidden_size,
+            num_layers: adapter.num_layers,
+            num_experts: adapter.num_experts,
+            expert_used_count: adapter.expert_used_count,
+            quantization: adapter.quantization.clone(),
+            routing_tensor_name: adapter.routing_tensor.clone(),
+            preferred_gpu_synapse_tensor_name: adapter.preferred_gpu_synapse_tensor.clone(),
+            synapse_source: adapter.synapse_source_label().into(),
+            real_gpu_synapse_tensor_name: adapter.real_gpu_synapse_tensor.clone(),
+        }
+    }
+    adapter: ModelAdapter,
     ) -> Self {
         Self {
             family: adapter.family,
