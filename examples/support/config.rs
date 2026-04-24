@@ -197,6 +197,7 @@ fn load_lineup_file(path: &Path) -> Result<Vec<ValidationModelSpec>, Box<dyn std
             family: parsed_family,
             path: trimmed_path.to_owned(),
             routing_mode: parsed_routing,
+            real_gpu_tensor_name: None,
         });
     }
 
