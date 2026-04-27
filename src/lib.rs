@@ -40,7 +40,6 @@ pub mod model;
 pub mod moe;
 pub mod projector;
 pub mod telemetry;
-mod transformer;
 pub mod types;
 
 pub use error::{HybridError, Result};
@@ -56,7 +55,6 @@ pub use latent::{
 pub use telemetry::TelemetryEncoder;
 pub use types::{EMBEDDING_DIM, HeartbeatConfig, ModelFamily, TelemetrySnapshot};
 
-// Transformer/mod.rs missing tensor crate
 pub mod tensor;
 
 // New folder name metric, came out of triple code duplication
