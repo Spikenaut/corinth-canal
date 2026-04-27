@@ -7,14 +7,13 @@ use corinth_canal::{
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Error, Write};
+use std::io::{BufRead, BufReader, BufWriter, Error, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use support::config::RunConfig;
-use corinth_canal::funnel::active_neuron_indices;
 use support::{
-    ResolvedTelemetry, TelemetrySource, ValidationModelSpec, default_spiking_model_config,
-    heartbeat_gain, prompt_embedding_for_validation, telemetry_snapshot_for_tick,
+    ResolvedTelemetry, RunConfig, TelemetrySource, ValidationModelSpec,
+    default_spiking_model_config, heartbeat_gain, prompt_embedding_for_validation,
+    telemetry_snapshot_for_tick,
 };
 
 #[derive(Debug, Serialize)]
@@ -63,7 +62,6 @@ struct ValidationManifest {
 /// alongside `run_manifest.json` inside every run directory.
 #[derive(Debug, Serialize)]
 struct RunSummary {
-    synapse_source: String,
     run_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     run_tag: Option<String>,
@@ -105,7 +103,6 @@ struct RunMetrics {
 /// stamp `repeat_determinism`.
 #[derive(Debug, Clone)]
 struct PendingIndexRow {
-    synapse_source: String,
     run_id: String,
     run_tag: Option<String>,
     model_slug: String,
@@ -130,11 +127,7 @@ struct PendingIndexRow {
 }
 
 fn heartbeat_slug_for(enabled: bool) -> &'static str {
-    if enabled {
-        "heartbeat_on"
-    } else {
-        "heartbeat_off"
-    }
+    if enabled { "heartbeat_on" } else { "heartbeat_off" }
 }
 
 struct RunContext<'a> {
@@ -159,7 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::from_filename(".env.local");
     let cfg = RunConfig::from_env();
 
-    // Effective tick count: when TICKS=0 and CSV replay are live, use the full
+    // Effective tick count: when TICKS=0 and CSV replay is live, use the full
     // CSV length so SR.jl corpus runs cover exactly one loop with zero
     // wraparound contamination (per plan: wraparound is for smoke only).
     let effective_ticks = match (cfg.ticks, cfg.telemetry.source, cfg.telemetry.row_count()) {
@@ -201,33 +194,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // exactly once at the end of main() after strict-repeat stamping.
     let mut pending: Vec<PendingIndexRow> = Vec::new();
 
-    let sweep_result =
-        (|pending: &mut Vec<PendingIndexRow>| -> Result<(), Box<dyn std::error::Error>> {
-            for spec in &cfg.validation_models {
-                for repeat_idx in 0..cfg.repeat_count {
-                    for &heartbeat_enabled in &cfg.heartbeat_matrix {
-                        let run_id = build_run_id(&cfg.prompt_profile, repeat_idx, run_tag_ref);
-                        let ctx = RunContext {
-                            spec,
-                            prompt_profile: &cfg.prompt_profile,
-                            prompt_text: cfg.prompt_text,
-                            ticks: effective_ticks,
-                            heartbeat_enabled,
-                            repeat_idx,
-                            repeat_count: cfg.repeat_count,
-                            resolved: &cfg.telemetry,
-                            run_id,
-                            output_root: cfg.output_root.clone(),
-                            model_family_override: cfg.model_family_override,
-                            saaq_rule: cfg.saaq_rule,
-                            run_tag: run_tag_ref,
-                        };
-                        run_validation(&ctx, pending)?;
-                    }
+    let sweep_result = (|pending: &mut Vec<PendingIndexRow>| -> Result<(), Box<dyn std::error::Error>> {
+        for spec in &cfg.validation_models {
+            for repeat_idx in 0..cfg.repeat_count {
+                for &heartbeat_enabled in &cfg.heartbeat_matrix {
+                    let run_id = build_run_id(&cfg.prompt_profile, repeat_idx, run_tag_ref);
+                    let ctx = RunContext {
+                        spec,
+                        prompt_profile: &cfg.prompt_profile,
+                        prompt_text: cfg.prompt_text,
+                        ticks: effective_ticks,
+                        heartbeat_enabled,
+                        repeat_idx,
+                        repeat_count: cfg.repeat_count,
+                        resolved: &cfg.telemetry,
+                        run_id,
+                        output_root: cfg.output_root.clone(),
+                        model_family_override: cfg.model_family_override,
+                        saaq_rule: cfg.saaq_rule,
+                        run_tag: run_tag_ref,
+                    };
+                    run_validation(&ctx, pending)?;
                 }
             }
-            Ok(())
-        })(&mut pending);
+        }
+        Ok(())
+    })(&mut pending);
 
     // Strict-repeat verdict only runs on a clean sweep; partial sweeps can't
     // give a trustworthy grouping. On opt-in + success, stamp verdicts into
@@ -288,33 +280,6 @@ fn run_validation(
     let latent_path = run_dir.join("latent_telemetry.csv");
     let manifest_path = run_dir.join("run_manifest.json");
     let summary_path = run_dir.join("summary.json");
-    let generated_files = vec![
-        tick_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-        latent_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-        manifest_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-        summary_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-        routing_csv_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-    ];
 
     // Metrics accumulator. Populated during the tick loop; stamped into
     // summary.json at every terminal status (completed / *_failed).
@@ -339,7 +304,11 @@ fn run_validation(
                     "prompt_embedding_failed",
                     Some(error.to_string()),
                     &metrics,
-                    generated_files.clone(),
+                    collect_generated_files(
+                        &manifest_path,
+                        &summary_path,
+                        &[&tick_path, &latent_path, &routing_csv_path],
+                    ),
                 )?;
                 pending.push(pending_row_from_state(
                     ctx,
@@ -368,7 +337,11 @@ fn run_validation(
         "preflight",
         None,
         &metrics,
-        generated_files.clone(),
+        collect_generated_files(
+            &manifest_path,
+            &summary_path,
+            &[&tick_path, &latent_path, &routing_csv_path],
+        ),
     )?;
 
     if let Err(error) = model.prepare_gpu_temporal(&mut accelerator) {
@@ -386,7 +359,11 @@ fn run_validation(
             "gpu_setup_failed",
             Some(error.to_string()),
             &metrics,
-            generated_files.clone(),
+            collect_generated_files(
+                &manifest_path,
+                &summary_path,
+                &[&tick_path, &latent_path, &routing_csv_path],
+            ),
         )?;
         pending.push(pending_row_from_state(
             ctx,
@@ -430,7 +407,7 @@ fn run_validation(
                 prompt_embedding.iter().map(|value| value * gain).collect();
 
             // First/last timestamp bookkeeping. `telemetry_snapshot_for_tick`
-            // rewrites timestamps to `tick + 1` for 1-to-1 CSV join, but we
+            // rewrites timestamps to `tick + 1` for 1-to-1 CSV join but we
             // still want the summary to reflect the exact values emitted.
             if metrics.first_timestamp_ms.is_none() {
                 metrics.first_timestamp_ms = Some(snap.timestamp_ms);
@@ -445,7 +422,12 @@ fn run_validation(
             metrics.ticks_completed = elapsed_count;
 
             let spikes = accelerator.temporal_spikes_to_vec(target_neurons)?;
-            let active_neurons = active_neuron_indices(&spikes);
+            let active_neurons: Vec<usize> = spikes
+                .iter()
+                .enumerate()
+                .filter(|(_, value)| **value != 0)
+                .map(|(idx, _)| idx)
+                .collect();
             let potentials = accelerator
                 .temporal_membrane_to_vec(target_neurons)?
                 .into_iter()
@@ -489,12 +471,15 @@ fn run_validation(
     // Finalize mean-tick metric (f64 microseconds). Safe for any
     // elapsed_count <= usize::MAX; `as f64` lossiness is acceptable here.
     if elapsed_count > 0 {
-        metrics.mean_tick_elapsed_us = Some(elapsed_sum_us as f64 / elapsed_count as f64);
+        metrics.mean_tick_elapsed_us =
+            Some(elapsed_sum_us as f64 / elapsed_count as f64);
     }
 
     if let Err(error) = run_result {
         let _ = latent_exporter.flush();
         let _ = tick_writer.flush();
+        drop(latent_exporter);
+        drop(tick_writer);
         write_manifest_and_summary(
             ctx,
             &config,
@@ -509,7 +494,11 @@ fn run_validation(
             "tick_failed",
             Some(error.to_string()),
             &metrics,
-            generated_files.clone(),
+            collect_generated_files(
+                &manifest_path,
+                &summary_path,
+                &[&tick_path, &latent_path, &routing_csv_path],
+            ),
         )?;
         pending.push(pending_row_from_state(
             ctx,
@@ -537,7 +526,11 @@ fn run_validation(
         "completed",
         None,
         &metrics,
-        generated_files,
+        collect_generated_files(
+            &manifest_path,
+            &summary_path,
+            &[&tick_path, &latent_path, &routing_csv_path],
+        ),
     )?;
     pending.push(pending_row_from_state(
         ctx,
@@ -568,7 +561,7 @@ fn build_manifest(
     ctx: &RunContext<'_>,
     config: &corinth_canal::model::ModelConfig,
     model: &Model,
-    run_dir: &Path,
+    run_dir: &std::path::Path,
     prompt_embedding_source: &str,
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
@@ -582,7 +575,7 @@ fn build_manifest(
     // Count only *extra* passes beyond the first. `ticks == rows` is exactly
     // one pass with zero wraparound (SR.jl corpus sweet spot); `ticks =
     // 2*rows` is one wraparound; and so on. This makes the field a clean
-    // predicate for "did this run teach the regressor on looped data".
+    // predicate for "did this run teach the regressor on looped data?".
     let wraparound_loops = telemetry_row_count
         .filter(|rows| *rows > 0 && ctx.ticks > *rows)
         .map(|rows| ((ctx.ticks - rows) as u64) / (rows as u64) + 1)
@@ -626,7 +619,7 @@ fn build_manifest(
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
         // True iff the routing CSV would land in CWD. Since Stage E this
-        // runner always since `ModelConfig::gpu_routing_telemetry_path` to
+        // runner always sets `ModelConfig::gpu_routing_telemetry_path` to
         // an absolute path inside `run_dir`, so CWD contamination is
         // impossible regardless of whether `tick_gpu_temporal` or
         // `forward_gpu_temporal` is used.
@@ -655,26 +648,26 @@ fn write_manifest(
 }
 
 fn write_summary(
-    summary_path: &Path,
+    summary_path: &std::path::Path,
     summary: &RunSummary,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::write(summary_path, serde_json::to_string_pretty(summary)?)?;
     Ok(())
 }
 
-/// Convenience wrapper that builds and writes both `run_manifest.json` and
+/// Convenience wrapper that builds + writes both `run_manifest.json` and
 /// `summary.json`. Lives here (not in config.rs) because it pulls on
-/// several run+local paths and live model state.
+/// several run-local paths + live model state.
 #[allow(clippy::too_many_arguments)]
 fn write_manifest_and_summary(
     ctx: &RunContext<'_>,
     config: &corinth_canal::model::ModelConfig,
     model: &Model,
-    run_dir: &Path,
+    run_dir: &std::path::Path,
     manifest_path: &PathBuf,
-    summary_path: &Path,
-    tick_path: &Path,
-    latent_path: &Path,
+    summary_path: &std::path::Path,
+    tick_path: &std::path::Path,
+    latent_path: &std::path::Path,
     prompt_embedding_source: &str,
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
@@ -717,10 +710,10 @@ fn write_manifest_and_summary(
 fn build_summary(
     ctx: &RunContext<'_>,
     model_family: corinth_canal::ModelFamily,
-    run_dir: &Path,
-    manifest_path: &Path,
-    tick_path: &Path,
-    latent_path: &Path,
+    run_dir: &std::path::Path,
+    manifest_path: &std::path::Path,
+    tick_path: &std::path::Path,
+    latent_path: &std::path::Path,
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
     metrics: &RunMetrics,
@@ -792,12 +785,55 @@ fn pending_row_from_state(
     }
 }
 
-const INDEX_CSV_HEADER: &str = "synapse_source,run_id,run_tag,model_slug,model_family,telemetry_source,heartbeat_enabled,repeat_idx,repeat_count,saaq_rule,validation_status,run_dir,ticks_completed,latent_rows,mean_tick_elapsed_us,repeat_determinism";
+/// Build the `generated_files` list stamped into `run_manifest.json`,
+/// including only files that actually exist on disk at the moment of the
+/// call. `manifest_path` and `summary_path` are added unconditionally:
+/// they are about to be (or have just been) written by the calling
+/// `write_manifest_and_summary`. Optional paths are filtered by
+/// `Path::exists()` so failure-path manifests no longer claim files like
+/// `tick_telemetry.txt` or `latent_telemetry.csv` when those terminal
+/// statuses (`prompt_embedding_failed`, `gpu_setup_failed`) bail out
+/// before the corresponding writers are opened.
+fn collect_generated_files(
+    manifest_path: &Path,
+    summary_path: &Path,
+    optional_paths: &[&Path],
+) -> Vec<String> {
+    let mut files = Vec::with_capacity(2 + optional_paths.len());
+    files.push(
+        manifest_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    files.push(
+        summary_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    for path in optional_paths {
+        if path.exists() {
+            files.push(path.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    files
+}
+
+const INDEX_CSV_HEADER: &str =
+    "run_id,run_tag,model_slug,model_family,telemetry_source,heartbeat_enabled,repeat_idx,repeat_count,saaq_rule,validation_status,run_dir,ticks_completed,latent_rows,mean_tick_elapsed_us,repeat_determinism";
 
 /// Append every buffered row to `<output_root>/index.csv`. The file is
 /// opened once per `main()` invocation with `append(true)`; if it's empty
-/// (new file or zero-byte), the header is emitted first. No row that has
-/// already been written out is ever rewritten.
+/// (new file or zero-byte), the header is emitted first.
+///
+/// If an existing `index.csv` has a header that does not match the current
+/// `INDEX_CSV_HEADER` (e.g. left over from a prior schema), it is rotated
+/// out of the way to `index.csv.legacy-<unix_ts>` so new rows never get
+/// appended under a stale, mismatched header. The legacy file is preserved
+/// untouched for offline migration.
 fn flush_index_csv(
     output_root: &Path,
     rows: &[PendingIndexRow],
@@ -807,7 +843,7 @@ fn flush_index_csv(
     }
     fs::create_dir_all(output_root)?;
     let path = output_root.join("index.csv");
-    let needs_header = fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(true);
+    let needs_header = ensure_index_header_compatible(&path)?;
     let file = OpenOptions::new().create(true).append(true).open(&path)?;
     let mut writer = BufWriter::new(file);
     if needs_header {
@@ -818,6 +854,40 @@ fn flush_index_csv(
     }
     writer.flush()?;
     Ok(())
+}
+
+/// Inspect `path` to decide whether `flush_index_csv` should write a fresh
+/// header. Returns `Ok(true)` for missing / empty files and for files whose
+/// existing header matches the current schema slot-for-slot. Returns
+/// `Ok(true)` after rotating a schema-mismatched file out of the way to
+/// `index.csv.legacy-<unix_ts>`. Returns `Ok(false)` only when the existing
+/// file already has the correct header and rows can be appended safely.
+fn ensure_index_header_compatible(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(err) => return Err(err.into()),
+    };
+    let mut first_line = String::new();
+    BufReader::new(file).read_line(&mut first_line)?;
+    let trimmed = first_line.trim_end_matches(['\r', '\n']);
+    if trimmed.is_empty() {
+        return Ok(true);
+    }
+    if trimmed == INDEX_CSV_HEADER {
+        return Ok(false);
+    }
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup = path.with_file_name(format!("index.csv.legacy-{suffix}"));
+    fs::rename(path, &backup)?;
+    eprintln!(
+        "saaq_latent_calibration: rotated incompatible index.csv schema -> {}",
+        backup.display()
+    );
+    Ok(true)
 }
 
 fn format_index_row(row: &PendingIndexRow) -> String {
@@ -867,11 +937,11 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
-/// Strict-repeat verdict pass. Groups row by
-/// `(model_slug, telemetry_source, heartbeat_slug, saaq_rule)` and compare
+/// Strict-repeat verdict pass. Groups rows by
+/// `(model_slug, telemetry_source, heartbeat_slug, saaq_rule)` and compares
 /// each repeat `k >= 1`'s `latent_telemetry.csv` to repeat `0`'s byte-wise.
 ///
-/// Only rows with `validation_status == "completed" row` participate — partial
+/// Only rows with `validation_status == "completed"` participate — partial
 /// / failed runs can't meaningfully claim determinism. Groups with fewer
 /// than two completed repeats are skipped silently (they can't mismatch).
 ///
@@ -921,7 +991,7 @@ fn apply_strict_repeat_check(
             }
         }
         if group_mismatch {
-            // Mark baseline as mismatch to so the group has a single verdict.
+            // Mark baseline as mismatch too so the group has a single verdict.
             rows[baseline_idx].repeat_determinism = Some("mismatch");
             rewrite_summary_determinism(&rows[baseline_idx].summary_path, "mismatch")?;
         } else {
@@ -1017,7 +1087,9 @@ fn format_local_timestamp_compact() -> String {
     // and sortable without depending on the machine's TZ configuration; the
     // full ISO-ish form is still human-readable in the path.
     let (year, month, day, hour, minute, second) = civil_from_unix_secs(secs as i64);
-    format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}")
+    format!(
+        "{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}"
+    )
 }
 
 /// Civil (Y, M, D, h, m, s) in UTC from a unix timestamp.

@@ -93,12 +93,6 @@ pub struct ModelConfig {
     pub gpu_routing_telemetry_path: Option<PathBuf>,
 }
 
-impl ModelConfig {
-    pub(crate) fn model_path(&self) -> &str {
-        &self.gguf_checkpoint_path
-    }
-}
-
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
