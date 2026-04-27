@@ -7,7 +7,7 @@ use corinth_canal::{
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Error, Write};
+use std::io::{BufRead, BufReader, BufWriter, Error, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use support::{
@@ -280,25 +280,6 @@ fn run_validation(
     let latent_path = run_dir.join("latent_telemetry.csv");
     let manifest_path = run_dir.join("run_manifest.json");
     let summary_path = run_dir.join("summary.json");
-    let generated_files = vec![
-        tick_path.file_name().unwrap().to_string_lossy().into_owned(),
-        latent_path.file_name().unwrap().to_string_lossy().into_owned(),
-        manifest_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-        summary_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-        routing_csv_path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned(),
-    ];
 
     // Metrics accumulator. Populated during the tick loop; stamped into
     // summary.json at every terminal status (completed / *_failed).
@@ -323,7 +304,11 @@ fn run_validation(
                     "prompt_embedding_failed",
                     Some(error.to_string()),
                     &metrics,
-                    generated_files.clone(),
+                    collect_generated_files(
+                        &manifest_path,
+                        &summary_path,
+                        &[&tick_path, &latent_path, &routing_csv_path],
+                    ),
                 )?;
                 pending.push(pending_row_from_state(
                     ctx,
@@ -352,7 +337,11 @@ fn run_validation(
         "preflight",
         None,
         &metrics,
-        generated_files.clone(),
+        collect_generated_files(
+            &manifest_path,
+            &summary_path,
+            &[&tick_path, &latent_path, &routing_csv_path],
+        ),
     )?;
 
     if let Err(error) = model.prepare_gpu_temporal(&mut accelerator) {
@@ -370,7 +359,11 @@ fn run_validation(
             "gpu_setup_failed",
             Some(error.to_string()),
             &metrics,
-            generated_files.clone(),
+            collect_generated_files(
+                &manifest_path,
+                &summary_path,
+                &[&tick_path, &latent_path, &routing_csv_path],
+            ),
         )?;
         pending.push(pending_row_from_state(
             ctx,
@@ -485,6 +478,8 @@ fn run_validation(
     if let Err(error) = run_result {
         let _ = latent_exporter.flush();
         let _ = tick_writer.flush();
+        drop(latent_exporter);
+        drop(tick_writer);
         write_manifest_and_summary(
             ctx,
             &config,
@@ -499,7 +494,11 @@ fn run_validation(
             "tick_failed",
             Some(error.to_string()),
             &metrics,
-            generated_files.clone(),
+            collect_generated_files(
+                &manifest_path,
+                &summary_path,
+                &[&tick_path, &latent_path, &routing_csv_path],
+            ),
         )?;
         pending.push(pending_row_from_state(
             ctx,
@@ -527,7 +526,11 @@ fn run_validation(
         "completed",
         None,
         &metrics,
-        generated_files,
+        collect_generated_files(
+            &manifest_path,
+            &summary_path,
+            &[&tick_path, &latent_path, &routing_csv_path],
+        ),
     )?;
     pending.push(pending_row_from_state(
         ctx,
@@ -782,13 +785,55 @@ fn pending_row_from_state(
     }
 }
 
+/// Build the `generated_files` list stamped into `run_manifest.json`,
+/// including only files that actually exist on disk at the moment of the
+/// call. `manifest_path` and `summary_path` are added unconditionally:
+/// they are about to be (or have just been) written by the calling
+/// `write_manifest_and_summary`. Optional paths are filtered by
+/// `Path::exists()` so failure-path manifests no longer claim files like
+/// `tick_telemetry.txt` or `latent_telemetry.csv` when those terminal
+/// statuses (`prompt_embedding_failed`, `gpu_setup_failed`) bail out
+/// before the corresponding writers are opened.
+fn collect_generated_files(
+    manifest_path: &Path,
+    summary_path: &Path,
+    optional_paths: &[&Path],
+) -> Vec<String> {
+    let mut files = Vec::with_capacity(2 + optional_paths.len());
+    files.push(
+        manifest_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    files.push(
+        summary_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    for path in optional_paths {
+        if path.exists() {
+            files.push(path.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    files
+}
+
 const INDEX_CSV_HEADER: &str =
     "run_id,run_tag,model_slug,model_family,telemetry_source,heartbeat_enabled,repeat_idx,repeat_count,saaq_rule,validation_status,run_dir,ticks_completed,latent_rows,mean_tick_elapsed_us,repeat_determinism";
 
 /// Append every buffered row to `<output_root>/index.csv`. The file is
 /// opened once per `main()` invocation with `append(true)`; if it's empty
-/// (new file or zero-byte), the header is emitted first. No row that has
-/// already been written out is ever rewritten.
+/// (new file or zero-byte), the header is emitted first.
+///
+/// If an existing `index.csv` has a header that does not match the current
+/// `INDEX_CSV_HEADER` (e.g. left over from a prior schema), it is rotated
+/// out of the way to `index.csv.legacy-<unix_ts>` so new rows never get
+/// appended under a stale, mismatched header. The legacy file is preserved
+/// untouched for offline migration.
 fn flush_index_csv(
     output_root: &Path,
     rows: &[PendingIndexRow],
@@ -798,7 +843,7 @@ fn flush_index_csv(
     }
     fs::create_dir_all(output_root)?;
     let path = output_root.join("index.csv");
-    let needs_header = fs::metadata(&path).map(|m| m.len() == 0).unwrap_or(true);
+    let needs_header = ensure_index_header_compatible(&path)?;
     let file = OpenOptions::new().create(true).append(true).open(&path)?;
     let mut writer = BufWriter::new(file);
     if needs_header {
@@ -809,6 +854,40 @@ fn flush_index_csv(
     }
     writer.flush()?;
     Ok(())
+}
+
+/// Inspect `path` to decide whether `flush_index_csv` should write a fresh
+/// header. Returns `Ok(true)` for missing / empty files and for files whose
+/// existing header matches the current schema slot-for-slot. Returns
+/// `Ok(true)` after rotating a schema-mismatched file out of the way to
+/// `index.csv.legacy-<unix_ts>`. Returns `Ok(false)` only when the existing
+/// file already has the correct header and rows can be appended safely.
+fn ensure_index_header_compatible(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(err) => return Err(err.into()),
+    };
+    let mut first_line = String::new();
+    BufReader::new(file).read_line(&mut first_line)?;
+    let trimmed = first_line.trim_end_matches(['\r', '\n']);
+    if trimmed.is_empty() {
+        return Ok(true);
+    }
+    if trimmed == INDEX_CSV_HEADER {
+        return Ok(false);
+    }
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup = path.with_file_name(format!("index.csv.legacy-{suffix}"));
+    fs::rename(path, &backup)?;
+    eprintln!(
+        "saaq_latent_calibration: rotated incompatible index.csv schema -> {}",
+        backup.display()
+    );
+    Ok(true)
 }
 
 fn format_index_row(row: &PendingIndexRow) -> String {
