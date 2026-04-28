@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::process::Command;
 use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,17 +34,47 @@ pub fn run_id() -> String {
         })
 }
 
+/// Resolve the git SHA stamped into observability events.
+///
+/// Precedence:
+///   1. `AGENTOS_GIT_SHA` (set by managed CI / AgentOS).
+///   2. `git rev-parse --short HEAD` invoked from the current working
+///      directory. This matches the fallback already used by
+///      `scripts/observability/newrelic_event.sh` and
+///      `scripts/observability/sentry_release.sh`, so Rust traces and
+///      shell-emitted releases / events agree on the SHA for the same
+///      checkout (PR #30 review consistency requirement).
+///   3. Literal `"unknown"` when neither source resolves (e.g. running
+///      from outside a git checkout with the env var unset).
 pub fn git_sha() -> String {
-    std::env::var("AGENTOS_GIT_SHA")
+    if let Some(value) = std::env::var("AGENTOS_GIT_SHA")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "unknown".to_owned())
+    {
+        return value;
+    }
+    if let Ok(output) = Command::new("git").args(["rev-parse", "--short", "HEAD"]).output() {
+        if output.status.success() {
+            let sha = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !sha.is_empty() {
+                return sha;
+            }
+        }
+    }
+    "unknown".to_owned()
 }
 
 pub fn error_category(status: Option<&str>, error: Option<&str>) -> &'static str {
     match status.unwrap_or_default() {
         "completed" => "none",
         "prompt_embedding_failed" => "config_error",
+        // Model::new() and router-load failures both stem from checkpoint
+        // / runtime configuration problems (missing GGUF metadata, bad
+        // family override, unreachable path). Map them deterministically
+        // here so observability dashboards never see them fall through to
+        // the substring heuristic below.
+        "model_setup_failed" => "config_error",
+        "router_load_failed" => "config_error",
         "gpu_setup_failed" => "gpu_error",
         "tick_failed" => "experiment_error",
         _ => {

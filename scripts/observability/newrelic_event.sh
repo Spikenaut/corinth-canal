@@ -6,9 +6,17 @@ command_name="${1:-manual}"
 latency_ms="${2:-0}"
 success="${3:-true}"
 error_category="${4:-none}"
-environment="${SENTRY_ENVIRONMENT:-local}"
+# Tool-agnostic environment label. Falls back to SENTRY_ENVIRONMENT for
+# backwards compatibility with existing AgentOS configurations that only
+# export the Sentry-named variable, then to 'local' for ad-hoc runs.
+environment="${AGENTOS_ENVIRONMENT:-${SENTRY_ENVIRONMENT:-local}}"
 git_sha="${AGENTOS_GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')}"
-run_id="${AGENTOS_RUN_ID:-${repo}-${git_sha}}"
+# Use a millisecond timestamp suffix when AGENTOS_RUN_ID is unset so each
+# invocation gets a distinct run_id, matching the Rust
+# `examples/support/observability.rs::run_id()` fallback. Without this,
+# repeated runs of the same commit collapsed into a single logical run
+# in observability backends (PR #30 review).
+run_id="${AGENTOS_RUN_ID:-${repo}-$(date +%s%3N)}"
 release="${repo}@${git_sha}"
 entity_search="${NEW_RELIC_ENTITY_SEARCH_CORINTH_CANAL:-}"
 actor="${NEW_RELIC_USER:-agentos}"
