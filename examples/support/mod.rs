@@ -34,6 +34,7 @@ pub struct ValidationModelSpec {
     pub routing_mode: Option<RoutingMode>,
 }
 
+#[allow(dead_code)]
 pub fn default_spiking_model_config(gguf_checkpoint_path: String, snn_steps: usize) -> ModelConfig {
     let probe = if gguf_checkpoint_path.trim().is_empty() {
         None
@@ -122,6 +123,7 @@ pub fn saaq_update_rule_from_env() -> SaaqUpdateRule {
     }
 }
 
+#[allow(dead_code)]
 pub fn heartbeat_config_from_env() -> HeartbeatConfig {
     HeartbeatConfig {
         enabled: env_flag("HEARTBEAT_ENABLED", false),
@@ -695,6 +697,7 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
+#[allow(dead_code)]
 fn env_f32(key: &str, default_value: f32) -> f32 {
     std::env::var(key)
         .ok()
