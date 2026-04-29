@@ -475,6 +475,41 @@ impl MappedGgufCheckpoint {
         }
         Ok(out)
     }
+
+    /// Dequantize a full Q5_K tensor to a flat `Vec<f32>`.
+    ///
+    /// Iterates over every row of the tensor and applies the Q5_K
+    /// block-scale dequantization, producing `dims[0] * dims[1]` output
+    /// elements laid out row-major. `dims[0]` must be divisible by 256.
+    pub(super) fn dequantize_q5_k_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+        let info = self.tensor_info(name, path)?.clone();
+        if info.ggml_type != GGML_TYPE_Q5_K {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' must be Q5_K, got ggml_type={}",
+                info.ggml_type
+            )));
+        }
+        if info.dims.is_empty() {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' has no dimensions"
+            )));
+        }
+        let width = info.dims[0];
+        let n_rows = info.dims.get(1).copied().unwrap_or(1);
+        let capacity = width.checked_mul(n_rows).ok_or_else(|| {
+            HybridError::ModelLoad {
+                path: path.to_owned(),
+                reason: format!("tensor '{name}' element count overflow ({width}×{n_rows})"),
+            }
+        })?;
+        let mut out = Vec::with_capacity(capacity);
+        for row in 0..n_rows {
+            let row_bytes = self.row_bytes(&info, row, path, name)?;
+            let dequantized = dequantize_row_q5_k(row_bytes, width)?;
+            out.extend_from_slice(&dequantized);
+        }
+        Ok(out)
+    }
 }
 
 impl RegisteredTensorSliceU16 {

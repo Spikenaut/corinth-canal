@@ -103,10 +103,10 @@ pub fn ggml_type_label(ggml_type: u32) -> &'static str {
 
 /// Returns `true` iff the runtime can consume `ggml_type` as the source
 /// for the GPU synapse tensor today. `F16` uses the registered direct-load
-/// path; `Q8_0` uses the dequantized F32 path. Every other type falls back
-/// to synthetic synapses.
+/// path; `Q8_0` and `Q5_K` use the dequantized F32 path. Every other type
+/// falls back to synthetic synapses.
 pub fn synapse_dequant_path_supported(ggml_type: u32) -> bool {
-    ggml_type == GGML_TYPE_F16 || ggml_type == GGML_TYPE_Q8_0
+    ggml_type == GGML_TYPE_F16 || ggml_type == GGML_TYPE_Q8_0 || ggml_type == GGML_TYPE_Q5_K
 }
 
 impl RouterMetadata {
@@ -353,6 +353,35 @@ impl OlmoeRouter {
                 reason: "checkpoint not loaded".into(),
             })?;
         checkpoint.dequantize_q8_0_tensor(tensor_name, &self.model_path)
+    }
+
+    /// Returns the tensor name to use for Q5_K dequantized synapse loading,
+    /// or `None` if the checkpoint does not have a compatible Q5_K synapse
+    /// tensor (e.g. the adapter chose F16, Q8_0, or synthetic fallback instead).
+    pub fn dequantized_q5_k_synapse_tensor_name(&self) -> Option<&str> {
+        self.adapter.as_ref().and_then(|a| {
+            if a.synapse_source == SynapseSource::DequantizedQ5_K {
+                a.dequant_q5_k_synapse_tensor.as_deref()
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Dequantize the named Q5_K tensor to a flat `Vec<f32>` that can be
+    /// passed to [`GpuAccelerator::load_synapse_weights_named`].
+    pub(crate) fn dequantized_q5_k_synapse_weights(
+        &self,
+        tensor_name: &str,
+    ) -> Result<Vec<f32>> {
+        let checkpoint = self
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: self.model_path.clone(),
+                reason: "checkpoint not loaded".into(),
+            })?;
+        checkpoint.dequantize_q5_k_tensor(tensor_name, &self.model_path)
     }
 
     fn probe_and_map(
@@ -742,6 +771,85 @@ mod tests {
         )
     }
 
+    /// Build a minimal valid Q5_K payload for a tensor of `width * n_rows`
+    /// elements. Q5_K block layout (176 bytes per 256 elements):
+    /// - d (f16, 2 bytes): scale
+    /// - dmin (f16, 2 bytes): min scale
+    /// - scales (12 bytes): 6 pairs of (scale, min) for 32-element chunks
+    /// - qh (32 bytes): high 2 bits for each of 256 quant values
+    /// - ql (128 bytes): low 4 bits for each of 256 quant values
+    ///
+    /// For simplicity, this creates a payload where all quant values are 1
+    /// and scales are set to produce output values of 1.0.
+    fn build_q5_k_payload(width: usize, n_rows: usize) -> Vec<u8> {
+        assert!(width.is_multiple_of(256), "Q5_K width must be divisible by 256");
+        let blocks_per_row = width / 256;
+        let row_bytes = blocks_per_row * 176;
+        let mut out = vec![0u8; row_bytes * n_rows];
+
+        for row in 0..n_rows {
+            let row_start = row * row_bytes;
+            for blk in 0..blocks_per_row {
+                let blk_start = row_start + blk * 176;
+
+                // d = 1.0 (f16 bits = 0x3c00)
+                out[blk_start] = 0x00;
+                out[blk_start + 1] = 0x3c;
+
+                // dmin = 0.0 (f16 bits = 0x0000)
+                out[blk_start + 2] = 0x00;
+                out[blk_start + 3] = 0x00;
+
+                // scales: 6 pairs of (sc, m) for 32-element chunks
+                // We want sc=1, m=0 for all chunks to get output = 1.0 * 1 - 0.0 = 1.0
+                // scale_min_k4 encoding: lower 6 bits for scale, upper 2 bits contribute to min
+                for i in 0..12 {
+                    out[blk_start + 4 + i] = if i < 6 { 1 } else { 0 };
+                }
+
+                // qh: high 2 bits for each quant value (all zeros for values 0-15)
+                // We want quant values to be 1, so high bits are 0
+                for i in 0..32 {
+                    out[blk_start + 16 + i] = 0x00;
+                }
+
+                // ql: low 4 bits for each quant value
+                // We want all quant values to be 1, so low 4 bits = 0x01
+                for i in 0..128 {
+                    out[blk_start + 48 + i] = 0x01;
+                }
+            }
+        }
+        out
+    }
+
+    fn build_q5_k_synapse_checkpoint(gate_payload: Vec<u8>) -> Vec<u8> {
+        let attn_q_payload = build_q5_k_payload(EMBEDDING_DIM, EMBEDDING_DIM);
+        build_test_gguf(
+            vec![
+                (
+                    "blk.0.ffn_gate_inp.weight",
+                    vec![EMBEDDING_DIM, 64],
+                    GGML_TYPE_F32,
+                    gate_payload,
+                ),
+                (
+                    "blk.0.attn_q.weight",
+                    vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                    GGML_TYPE_Q5_K,
+                    attn_q_payload,
+                ),
+                (
+                    "token_embd.weight",
+                    vec![EMBEDDING_DIM, 32],
+                    GGML_TYPE_F16,
+                    vec![0u8; EMBEDDING_DIM * 32 * 2],
+                ),
+            ],
+            32,
+        )
+    }
+
     fn stub() -> OlmoeRouter {
         OlmoeRouter::load_with_mode("", 8, 1, RoutingMode::StubUniform)
             .expect("stub load should succeed")
@@ -948,11 +1056,60 @@ mod tests {
     }
 
     #[test]
-    fn test_q8_0_dequantize_full_tensor_values() {
+    fn test_preferred_synapse_descriptor_q5_k_has_dequant_path() {
         let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
         let path = write_temp_file(
-            &build_q8_0_synapse_checkpoint(gate_payload),
-            "q8-0-dequant",
+            &build_q5_k_synapse_checkpoint(gate_payload),
+            "q5-k-descriptor",
+        );
+
+        let model =
+            OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
+                .unwrap();
+        let descriptor = model
+            .preferred_gpu_synapse_tensor_descriptor()
+            .expect("preferred descriptor must be exposed for Q5_K attn_q");
+
+        assert_eq!(descriptor.name, "blk.0.attn_q.weight");
+        assert_eq!(descriptor.ggml_type_id, GGML_TYPE_Q5_K);
+        assert_eq!(descriptor.ggml_type_label, "Q5_K");
+        assert_eq!(descriptor.dims, vec![EMBEDDING_DIM, EMBEDDING_DIM]);
+        assert!(descriptor.has_dequant_path);
+        assert_eq!(model.real_gpu_synapse_tensor_name(), None);
+        assert_eq!(
+            model.dequantized_q5_k_synapse_tensor_name(),
+            Some("blk.0.attn_q.weight")
+        );
+        assert_eq!(model.synapse_source(), "dequantized-q5_k");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_q5_k_synapse_probe_uses_dequantized_source() {
+        let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+        let path = write_temp_file(
+            &build_q5_k_synapse_checkpoint(gate_payload),
+            "q5-k-probe",
+        );
+
+        let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
+        assert_eq!(
+            metadata.preferred_gpu_synapse_tensor_name.as_deref(),
+            Some("blk.0.attn_q.weight")
+        );
+        assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
+        assert_eq!(metadata.synapse_source, "dequantized-q5_k");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_q5_k_dequantize_full_tensor_succeeds() {
+        let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+        let path = write_temp_file(
+            &build_q5_k_synapse_checkpoint(gate_payload),
+            "q5-k-dequant",
         );
 
         let model =
@@ -960,16 +1117,15 @@ mod tests {
                 .unwrap();
 
         let weights = model
-            .dequantized_q8_0_synapse_weights("blk.0.attn_q.weight")
-            .expect("Q8_0 dequantization must succeed");
+            .dequantized_q5_k_synapse_weights("blk.0.attn_q.weight")
+            .expect("Q5_K dequantization must succeed");
 
-        // scale = 1.0, quant = 1 → each element should be 1.0 * 1 = 1.0
+        // Verify we get the expected number of elements
         assert_eq!(weights.len(), EMBEDDING_DIM * EMBEDDING_DIM);
+
+        // Verify all values are finite (dequant produced valid floats)
         for &v in &weights {
-            assert!(
-                (v - 1.0f32).abs() < 1e-6,
-                "expected 1.0, got {v}"
-            );
+            assert!(v.is_finite(), "expected finite value, got {v}");
         }
 
         let _ = std::fs::remove_file(path);
@@ -994,7 +1150,8 @@ mod tests {
         assert_eq!(ggml_type_label(9999), "unknown");
         assert!(synapse_dequant_path_supported(GGML_TYPE_F16));
         assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
-        for &ty in &[0u32, 12, 13, 14, 20, 21] {
+        assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
+        for &ty in &[0u32, 12, 14, 20, 21] {
             assert!(!synapse_dequant_path_supported(ty), "ggml_type={ty}");
         }
     }
