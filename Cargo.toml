@@ -57,25 +57,6 @@ required-features = ["cuda"]
 name = "synapse_diagnostic"
 required-features = ["cuda"]
 
-[[example]]
-name = "gpu_smoke_test"
-required-features = ["cuda"]
-
-[[example]]
-name = "telemetry_bridge"
-required-features = ["cuda"]
-
-[[example]]
-name = "csv_replay"
-required-features = ["cuda"]
-
-[[example]]
-name = "saaq_latent_calibration"
-required-features = ["cuda"]
-
-[[example]]
-name = "synapse_diagnostic"
-required-features = ["cuda"]
 
 [profile.release]
 opt-level = 3
