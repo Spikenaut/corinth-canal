@@ -90,8 +90,7 @@ fn main() {
     ];
 
     let stub_enabled = env::var_os("CARGO_FEATURE_GPU_STUB").is_some();
-    let cuda_enabled = env::var_os("CARGO_FEATURE_CUDA").is_some();
-    
+
     println!("cargo:rustc-cfg=CUDA_ENABLED");
 
     let nvcc = match find_nvcc() {
