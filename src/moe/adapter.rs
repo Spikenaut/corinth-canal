@@ -9,7 +9,7 @@ use crate::types::ModelFamily;
 pub(super) enum SynapseSource {
     Real,
     DequantizedQ8_0,
-    DequantizedQ5_K,
+    DequantizedQ5K,
     SyntheticFallback,
 }
 
@@ -36,7 +36,7 @@ impl ModelAdapter {
         match self.synapse_source {
             SynapseSource::Real => "real",
             SynapseSource::DequantizedQ8_0 => "dequantized-q8_0",
-            SynapseSource::DequantizedQ5_K => "dequantized-q5_k",
+            SynapseSource::DequantizedQ5K => "dequantized-q5_k",
             SynapseSource::SyntheticFallback => "synthetic-fallback",
         }
     }
@@ -146,7 +146,7 @@ pub(super) fn resolve_adapter(
     } else if dequant_q8_0_synapse_tensor.is_some() {
         SynapseSource::DequantizedQ8_0
     } else if dequant_q5_k_synapse_tensor.is_some() {
-        SynapseSource::DequantizedQ5_K
+        SynapseSource::DequantizedQ5K
     } else {
         SynapseSource::SyntheticFallback
     };
