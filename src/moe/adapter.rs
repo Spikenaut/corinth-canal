@@ -167,13 +167,12 @@ fn infer_family(
         }
     };
 
-    if let Some(expected) = family_override {
-        if expected != inferred {
-            return Err(HybridError::InvalidConfig(format!(
-                "model_family override {:?} does not match GGUF architecture '{architecture}'",
-                expected
-            )));
-        }
+    if let Some(expected) = family_override
+        && expected != inferred {
+        return Err(HybridError::InvalidConfig(format!(
+            "model_family override {:?} does not match GGUF architecture '{architecture}'",
+            expected
+        )));
     }
 
     Ok(inferred)

@@ -197,10 +197,10 @@ fn capture_jit_log(bytes: &[u8]) -> String {
     // fit in a void*. Buffer pointers are passed as their actual pointers.
     let mut option_values: [*mut c_void; 5] = [
         error_buf.as_mut_ptr() as *mut c_void,
-        LOG_CAP as usize as *mut c_void,
+        LOG_CAP as *mut c_void,
         info_buf.as_mut_ptr() as *mut c_void,
-        LOG_CAP as usize as *mut c_void,
-        1usize as *mut c_void,
+        LOG_CAP as *mut c_void,
+        ptr::dangling_mut::<c_void>(),
     ];
 
     let mut module: cuda::CUmodule = ptr::null_mut();

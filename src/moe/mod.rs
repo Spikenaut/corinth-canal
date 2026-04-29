@@ -694,7 +694,7 @@ mod tests {
     /// elements.  Each block uses `scale_bits` as the raw F16 scale and
     /// `quant_val` for every quantized byte.
     fn build_q8_0_payload(width: usize, n_rows: usize, scale_bits: u16, quant_val: i8) -> Vec<u8> {
-        assert!(width % 32 == 0, "Q8_0 width must be divisible by 32");
+        assert!(width.is_multiple_of(32), "Q8_0 width must be divisible by 32");
         let blocks_per_row = width / 32;
         let row_bytes = blocks_per_row * 34;
         let mut out = vec![0u8; row_bytes * n_rows];
