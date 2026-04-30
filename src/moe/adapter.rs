@@ -118,9 +118,7 @@ pub(super) fn resolve_adapter(
     let dequant_q8_0_synapse_tensor = if real_gpu_synapse_tensor.is_none() {
         preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
             let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q8_0
-                && info.dims.len() == 2
-                && info.dims[0] % 32 == 0)
+            (info.ggml_type == GGML_TYPE_Q8_0 && info.dims.len() == 2 && info.dims[0] % 32 == 0)
                 .then(|| name.clone())
         })
     } else {
@@ -132,9 +130,7 @@ pub(super) fn resolve_adapter(
     {
         preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
             let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q5_K
-                && info.dims.len() == 2
-                && info.dims[0] % 256 == 0)
+            (info.ggml_type == GGML_TYPE_Q5_K && info.dims.len() == 2 && info.dims[0] % 256 == 0)
                 .then(|| name.clone())
         })
     } else {
@@ -188,7 +184,8 @@ fn infer_family(
     };
 
     if let Some(expected) = family_override
-        && expected != inferred {
+        && expected != inferred
+    {
         return Err(HybridError::InvalidConfig(format!(
             "model_family override {:?} does not match GGUF architecture '{architecture}'",
             expected

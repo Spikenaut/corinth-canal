@@ -2,7 +2,7 @@
 
 use super::Model;
 use super::{
-    core::{resolve_gpu_routing_telemetry_path, IZ_NEURONS, N_NEURONS},
+    core::{IZ_NEURONS, N_NEURONS, resolve_gpu_routing_telemetry_path},
     telemetry_io::append_gpu_routing_telemetry_row,
 };
 use crate::funnel::active_neuron_indices;
@@ -135,8 +135,10 @@ impl Model {
             if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
                 return Ok(());
             }
-            let signature =
-                format!("dequantized-q8_0::{}::{tensor_name}", self.router.model_path());
+            let signature = format!(
+                "dequantized-q8_0::{}::{tensor_name}",
+                self.router.model_path()
+            );
             if accelerator.synapse_signature() != Some(signature.as_str()) {
                 let weights = self
                     .router
@@ -162,7 +164,7 @@ impl Model {
         // the preferred tensor is Q5_K with width divisible by 256.  We check
         // the GPU signature before dequantizing to avoid the allocation cost
         // on repeated calls.
-        if let Some(tensor_name)= self
+        if let Some(tensor_name) = self
             .router
             .dequantized_q5_k_synapse_tensor_name()
             .map(str::to_owned)
@@ -171,8 +173,10 @@ impl Model {
             if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
                 return Ok(());
             }
-            let signature =
-                format!("dequantized-q5_k::{}::{tensor_name}", self.router.model_path());
+            let signature = format!(
+                "dequantized-q5_k::{}::{tensor_name}",
+                self.router.model_path()
+            );
             if accelerator.synapse_signature() != Some(signature.as_str()) {
                 let weights = self
                     .router
