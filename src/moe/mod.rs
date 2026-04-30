@@ -9,9 +9,9 @@ mod adapter;
 mod checkpoint;
 mod routing;
 
-use self::adapter::{resolve_adapter, ModelAdapter, SynapseSource};
+use self::adapter::{ModelAdapter, SynapseSource, resolve_adapter};
 use self::checkpoint::{
-    extract_named_token_embedding_from_checkpoint, probe_and_map_checkpoint, MappedGgufCheckpoint,
+    MappedGgufCheckpoint, extract_named_token_embedding_from_checkpoint, probe_and_map_checkpoint,
 };
 use self::routing::{
     checkpoint_gate_scores, normalize_l2, normalize_to_internal_embedding_dim, resample_embedding,
@@ -19,7 +19,7 @@ use self::routing::{
 };
 use crate::error::{HybridError, Result};
 pub use crate::types::RoutingMode;
-use crate::types::{ModelFamily, EMBEDDING_DIM};
+use crate::types::{EMBEDDING_DIM, ModelFamily};
 
 pub(super) const GGUF_MAGIC: [u8; 4] = [b'G', b'G', b'U', b'F'];
 pub(super) const GGUF_VERSION: u32 = 3;
@@ -342,10 +342,8 @@ impl OlmoeRouter {
 
     /// Dequantize the named Q8_0 tensor to a flat `Vec<f32>` that can be
     /// passed to [`GpuAccelerator::load_synapse_weights_named`].
-    pub(crate) fn dequantized_q8_0_synapse_weights(
-        &self,
-        tensor_name: &str,
-    ) -> Result<Vec<f32>> {
+    #[allow(dead_code)]
+    pub(crate) fn dequantized_q8_0_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
             .as_ref()
@@ -371,10 +369,7 @@ impl OlmoeRouter {
 
     /// Dequantize the named Q5_K tensor to a flat `Vec<f32>` that can be
     /// passed to [`GpuAccelerator::load_synapse_weights_named`].
-    pub(crate) fn dequantized_q5_k_synapse_weights(
-        &self,
-        tensor_name: &str,
-    ) -> Result<Vec<f32>> {
+    pub(crate) fn dequantized_q5_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
             .as_ref()
@@ -724,7 +719,10 @@ mod tests {
     /// elements.  Each block uses `scale_bits` as the raw F16 scale and
     /// `quant_val` for every quantized byte.
     fn build_q8_0_payload(width: usize, n_rows: usize, scale_bits: u16, quant_val: i8) -> Vec<u8> {
-        assert!(width.is_multiple_of(32), "Q8_0 width must be divisible by 32");
+        assert!(
+            width.is_multiple_of(32),
+            "Q8_0 width must be divisible by 32"
+        );
         let blocks_per_row = width / 32;
         let row_bytes = blocks_per_row * 34;
         let mut out = vec![0u8; row_bytes * n_rows];
@@ -745,8 +743,7 @@ mod tests {
 
     fn build_q8_0_synapse_checkpoint(gate_payload: Vec<u8>) -> Vec<u8> {
         // Q8_0 payload: scale = 1.0 (f16 bits = 0x3c00), quant = 1
-        let attn_q_payload =
-            build_q8_0_payload(EMBEDDING_DIM, EMBEDDING_DIM, 0x3c00, 1);
+        let attn_q_payload = build_q8_0_payload(EMBEDDING_DIM, EMBEDDING_DIM, 0x3c00, 1);
         build_test_gguf(
             vec![
                 (
@@ -783,7 +780,10 @@ mod tests {
     /// For simplicity, this creates a payload where all quant values are 1
     /// and scales are set to produce output values of 1.0.
     fn build_q5_k_payload(width: usize, n_rows: usize) -> Vec<u8> {
-        assert!(width.is_multiple_of(256), "Q5_K width must be divisible by 256");
+        assert!(
+            width.is_multiple_of(256),
+            "Q5_K width must be divisible by 256"
+        );
         let blocks_per_row = width / 256;
         let row_bytes = blocks_per_row * 176;
         let mut out = vec![0u8; row_bytes * n_rows];
@@ -1040,10 +1040,7 @@ mod tests {
     #[test]
     fn test_q8_0_synapse_probe_uses_dequantized_source() {
         let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
-        let path = write_temp_file(
-            &build_q8_0_synapse_checkpoint(gate_payload),
-            "q8-0-probe",
-        );
+        let path = write_temp_file(&build_q8_0_synapse_checkpoint(gate_payload), "q8-0-probe");
 
         let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
         assert_eq!(
@@ -1089,10 +1086,7 @@ mod tests {
     #[test]
     fn test_q5_k_synapse_probe_uses_dequantized_source() {
         let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
-        let path = write_temp_file(
-            &build_q5_k_synapse_checkpoint(gate_payload),
-            "q5-k-probe",
-        );
+        let path = write_temp_file(&build_q5_k_synapse_checkpoint(gate_payload), "q5-k-probe");
 
         let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
         assert_eq!(
@@ -1108,10 +1102,7 @@ mod tests {
     #[test]
     fn test_q5_k_dequantize_full_tensor_succeeds() {
         let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
-        let path = write_temp_file(
-            &build_q5_k_synapse_checkpoint(gate_payload),
-            "q5-k-dequant",
-        );
+        let path = write_temp_file(&build_q5_k_synapse_checkpoint(gate_payload), "q5-k-dequant");
 
         let model =
             OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
@@ -1124,23 +1115,23 @@ mod tests {
         // Verify we get the expected number of elements
         assert_eq!(weights.len(), EMBEDDING_DIM * EMBEDDING_DIM);
 
-         // Verify a few deterministic sample values from the synthetic
-         // checkpoint payload so this test catches dequantization bugs such as
-         // incorrect scale/min handling or nibble interpretation.
-         let expected_samples = [
-             (0usize, 1.0f32),
-             (1usize, 1.0f32),
-             (2usize, 1.0f32),
-             (3usize, 1.0f32),
-         ];
-         for (idx, expected) in expected_samples {
-             let actual = weights[idx];
-             assert!(
-                 (actual - expected).abs() <= 1e-6,
-                 "unexpected dequantized value at index {idx}: expected {expected}, got {actual}"
-             );
-         }
-         /*
+        // Verify a few deterministic sample values from the synthetic
+        // checkpoint payload so this test catches dequantization bugs such as
+        // incorrect scale/min handling or nibble interpretation.
+        let expected_samples = [
+            (0usize, 1.0f32),
+            (1usize, 1.0f32),
+            (2usize, 1.0f32),
+            (3usize, 1.0f32),
+        ];
+        for (idx, expected) in expected_samples {
+            let actual = weights[idx];
+            assert!(
+                (actual - expected).abs() <= 1e-6,
+                "unexpected dequantized value at index {idx}: expected {expected}, got {actual}"
+            );
+        }
+        /*
         Also keep the broad sanity check that every produced value is finite.
         */
         for &v in &weights {

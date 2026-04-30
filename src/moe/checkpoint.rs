@@ -452,6 +452,7 @@ impl MappedGgufCheckpoint {
     /// Iterates over every row of the tensor and applies the Q8_0
     /// block-scale dequantization, producing `dims[0] * dims[1]` output
     /// elements laid out row-major. `dims[0]` must be divisible by 32.
+    #[allow(dead_code)]
     pub(super) fn dequantize_q8_0_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_Q8_0 {
@@ -467,12 +468,12 @@ impl MappedGgufCheckpoint {
         }
         let width = info.dims[0];
         let n_rows = info.dims.get(1).copied().unwrap_or(1);
-        let capacity = width.checked_mul(n_rows).ok_or_else(|| {
-            HybridError::ModelLoad {
+        let capacity = width
+            .checked_mul(n_rows)
+            .ok_or_else(|| HybridError::ModelLoad {
                 path: path.to_owned(),
                 reason: format!("tensor '{name}' element count overflow ({width}×{n_rows})"),
-            }
-        })?;
+            })?;
         let mut out = Vec::with_capacity(capacity);
         for row in 0..n_rows {
             let row_bytes = self.row_bytes(&info, row, path, name)?;
@@ -502,12 +503,12 @@ impl MappedGgufCheckpoint {
         }
         let width = info.dims[0];
         let n_rows = info.dims.get(1).copied().unwrap_or(1);
-        let capacity = width.checked_mul(n_rows).ok_or_else(|| {
-            HybridError::ModelLoad {
+        let capacity = width
+            .checked_mul(n_rows)
+            .ok_or_else(|| HybridError::ModelLoad {
                 path: path.to_owned(),
                 reason: format!("tensor '{name}' element count overflow ({width}×{n_rows})"),
-            }
-        })?;
+            })?;
         let mut out = Vec::with_capacity(capacity);
         for row in 0..n_rows {
             let row_bytes = self.row_bytes(&info, row, path, name)?;
@@ -704,6 +705,7 @@ fn quantization_label(file_type: Option<u32>) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn page_size_bytes(path: &str) -> Result<usize> {
     // SAFETY: `sysconf` is a pure query with no preconditions; valid to call at any time.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
