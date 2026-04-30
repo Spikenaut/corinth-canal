@@ -255,7 +255,7 @@ mod tests {
     use crate::gpu::wrappers::context::GpuContext;
 
     #[test]
-    #[ignore] // requires GPU + driver ≥ 570
+    #[cfg_attr(not(feature = "cuda"), ignore)] // requires GPU + driver ≥ 570
     fn test_load_kernels() {
         let _ctx = GpuContext::init().expect("Failed to initialize GPU context");
         let kernels = KernelModule::load().expect("Failed to load kernels");
