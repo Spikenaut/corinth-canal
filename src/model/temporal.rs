@@ -158,7 +158,7 @@ impl Model {
         // the preferred tensor is Q5_K with width divisible by 256.  We check
         // the GPU signature before dequantizing to avoid the allocation cost
         // on repeated calls.
-        if let Some(tensor_name) = self
+        if let Some(tensor_name)= self
             .router
             .dequantized_q5_k_synapse_tensor_name()
             .map(str::to_owned)
