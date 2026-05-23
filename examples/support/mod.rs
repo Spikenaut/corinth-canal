@@ -11,9 +11,7 @@ pub use lineup::{
     safetensors_lineup_path_from_env,
 };
 
-use corinth_canal::{
-    HeartbeatConfig, ModelFamily, SaaqUpdateRule, moe::OlmoeRouter, moe::RoutingMode,
-};
+use corinth_canal::{ModelFamily, SaaqUpdateRule, moe::OlmoeRouter, moe::RoutingMode};
 #[cfg(feature = "cuda")]
 use corinth_canal::{model::ModelConfig, projector::ProjectionMode};
 use std::io::Error;
@@ -66,8 +64,8 @@ pub fn default_spiking_model_config(gguf_checkpoint_path: String, snn_steps: usi
         routing_mode: RoutingMode::SpikingSim,
         snn_steps,
         projection_mode: ProjectionMode::SpikingTernary,
-        heartbeat: heartbeat_config_from_env(),
         gpu_routing_telemetry_path: None,
+        ..Default::default()
     }
 }
 
@@ -129,30 +127,6 @@ pub fn saaq_update_rule_from_env() -> SaaqUpdateRule {
         "legacy" | "legacy_v1_0" | "v1_0" | "saaq_v1_0" => SaaqUpdateRule::LegacyV1_0,
         _ => SaaqUpdateRule::SaaqV1_5SqrtRate,
     }
-}
-
-#[allow(dead_code)]
-pub fn heartbeat_config_from_env() -> HeartbeatConfig {
-    HeartbeatConfig {
-        enabled: env_flag("HEARTBEAT_ENABLED", false),
-        amplitude: env_f32("HEARTBEAT_AMPLITUDE", 0.85),
-        period_ticks: env_usize("HEARTBEAT_PERIOD_TICKS", 48),
-        duty_cycle: env_f32("HEARTBEAT_DUTY_CYCLE", 0.25),
-        phase_offset_ticks: env_usize("HEARTBEAT_PHASE_OFFSET_TICKS", 0),
-    }
-}
-
-pub fn heartbeat_modes_for_matrix() -> Vec<bool> {
-    if let Ok(value) = std::env::var("HEARTBEAT_MATRIX") {
-        let lower = value.to_ascii_lowercase();
-        if lower == "off" {
-            return vec![false];
-        }
-        if lower == "on" {
-            return vec![true];
-        }
-    }
-    vec![false, true]
 }
 
 #[allow(dead_code)]
@@ -501,8 +475,6 @@ pub fn load_csv_telemetry_rows(
             gpu_power_w,
             cpu_tctl_c,
             cpu_package_power_w,
-            heartbeat_signal: 0.0,
-            heartbeat_enabled: false,
         });
     }
 
@@ -628,15 +600,8 @@ pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot 
         gpu_power_w: 232.0 + phase.cos() * 11.5,
         cpu_tctl_c: 73.0 + (phase * 0.9).sin() * 2.2,
         cpu_package_power_w: 116.0 + (phase * 1.1).cos() * 7.4,
-        heartbeat_signal: 0.0,
-        heartbeat_enabled: false,
         timestamp_ms: tick as u64,
     }
-}
-
-#[allow(dead_code)]
-pub fn heartbeat_gain(signal: f32) -> f32 {
-    (1.0 + signal * 0.28).max(0.15)
 }
 
 /// Scale factor applied to the prompt embedding before GPU temporal upload.
@@ -843,8 +808,6 @@ mod tests {
                 gpu_power_w: 100.0,
                 cpu_tctl_c: 20.0,
                 cpu_package_power_w: 200.0,
-                heartbeat_signal: 0.0,
-                heartbeat_enabled: false,
             },
             corinth_canal::TelemetrySnapshot {
                 timestamp_ms: 222,
@@ -852,8 +815,6 @@ mod tests {
                 gpu_power_w: 300.0,
                 cpu_tctl_c: 40.0,
                 cpu_package_power_w: 400.0,
-                heartbeat_signal: 0.0,
-                heartbeat_enabled: false,
             },
         ];
         let resolved = ResolvedTelemetry {

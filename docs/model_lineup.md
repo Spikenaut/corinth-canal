@@ -78,7 +78,7 @@ Every onboarding issue must carry:
 | **Target** | Local or cloud |
 | **Provider format** | For cloud: nvcf-nim, openai-compat, vertex-ai, etc. |
 | **Required env vars** | Env var names needed for cloud execution (no values) |
-| **SAAQ scope** | SAAQ version, telemetry source, heartbeat mode |
+| **SAAQ scope** | SAAQ version and telemetry source |
 
 ## Non-goals
 

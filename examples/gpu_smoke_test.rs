@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>> {
     let run_cfg = RunConfig::from_env();
-    let mut safe = SafeDiagnosticData::default().with_heartbeat_enabled(false);
+    let mut safe = SafeDiagnosticData::default();
     if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.gguf_checkpoint_path) {
         safe = safe.with_model_slug(&model_slug);
         observer.annotate(safe);

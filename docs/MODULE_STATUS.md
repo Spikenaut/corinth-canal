@@ -17,7 +17,7 @@ Status legend: `reference` · `stabilizing` · `proven` · `frozen`
 | `src/moe/routing.rs` | stabilizing | `rmems-moe` | Stateless routing math. Low-risk promotion candidate. |
 | `src/projector.rs` | stabilizing | `rmems-projector` | `ProjectionMode` surface is stable; `SpikingTernary` remains the live research path. |
 | `src/funnel.rs` | reference | `rmems-funnel` | CPU GIF hidden layer is still shared with the broader runtime and validation path. |
-| `src/telemetry.rs` | stabilizing | `rmems-telemetry` | Telemetry encoding surface is small and stable. `TelemetrySnapshot` now includes heartbeat fields in addition to physical telemetry channels. |
+| `src/telemetry.rs` | stabilizing | `rmems-telemetry` | Telemetry encoding surface is small and stable. `TelemetrySnapshot` carries physical telemetry channels and timestamps. |
 | `src/latent.rs` | stabilizing | `rmems-latent` | Dual-SAAQ emission is in place. Determinism and campaign validation remain the main graduation gate. |
 | `src/gpu/*` | reference | `rmems-gpu` | Kernel sources and cust wrappers remain coupled to the reference repo build/runtime assumptions. Promotion is still blocked on portability and validation breadth. |
 | `examples/support/config.rs` | reference | n/a | Intentionally stays here — it is the env-truth surface for the reference repo only. |

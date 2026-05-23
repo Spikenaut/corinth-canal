@@ -34,28 +34,6 @@ impl ModelFamily {
     }
 }
 
-/// Deterministic pulse configuration used to perturb telemetry during validation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HeartbeatConfig {
-    pub enabled: bool,
-    pub amplitude: f32,
-    pub period_ticks: usize,
-    pub duty_cycle: f32,
-    pub phase_offset_ticks: usize,
-}
-
-impl Default for HeartbeatConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            amplitude: 0.0,
-            period_ticks: 64,
-            duty_cycle: 0.25,
-            phase_offset_ticks: 0,
-        }
-    }
-}
-
 /// Minimal local telemetry payload used to seed deterministic spike patterns.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TelemetrySnapshot {
@@ -63,10 +41,6 @@ pub struct TelemetrySnapshot {
     pub gpu_power_w: f32,
     pub cpu_tctl_c: f32,
     pub cpu_package_power_w: f32,
-    #[serde(default)]
-    pub heartbeat_signal: f32,
-    #[serde(default)]
-    pub heartbeat_enabled: bool,
     pub timestamp_ms: u64,
 }
 
@@ -87,7 +61,6 @@ pub struct ModelConfig {
     pub routing_mode: RoutingMode,
     pub snn_steps: usize,
     pub projection_mode: ProjectionMode,
-    pub heartbeat: HeartbeatConfig,
     /// Destination path for the GPU routing telemetry CSV written by
     /// `Model::forward_gpu_temporal` (and `Model::forward` on the GPU path).
     /// When `None`, the runtime falls back to the legacy CWD-relative
@@ -108,7 +81,6 @@ impl Default for ModelConfig {
             routing_mode: RoutingMode::SpikingSim,
             snn_steps: 20,
             projection_mode: ProjectionMode::SpikingTernary,
-            heartbeat: HeartbeatConfig::default(),
             gpu_routing_telemetry_path: None,
         }
     }

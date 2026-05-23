@@ -26,7 +26,6 @@
 ## SAAQ scope
 - SAAQ version:
 - Telemetry source:
-- Heartbeat mode:
 - Tensor/synapse target:
 - Expected output artifacts:
 

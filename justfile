@@ -33,25 +33,20 @@ replay PATH:
 saaq:
     cargo run --release --example saaq_latent_calibration
 
-# Phases: synthetic/heartbeat-off, csv/heartbeat-off, csv/heartbeat-on.
+# Phases: synthetic baseline, csv replay baseline.
 # Reads LINEUP_CONFIG and (for phases 2-3) TELEMETRY_CSV_PATH from .env.local.
 # Falls back to configs/saaq15_moe_lineup.toml when LINEUP_CONFIG is unset.
-# Full SAAQ 1.5 MoE baseline campaign (3 phases x REPEAT_COUNT runs per model).
+# Full SAAQ 1.5 MoE baseline campaign (2 phases x REPEAT_COUNT runs per model).
 saaq-campaign:
-    @echo ">>> phase 1/3: synthetic, heartbeat off, repeat=2"
+    @echo ">>> phase 1/2: synthetic baseline, repeat=2"
     LINEUP_CONFIG="${LINEUP_CONFIG:-configs/saaq15_moe_lineup.toml}" \
         SAAQ_RULE=saaq_v1_5 REPEAT_COUNT=2 TELEMETRY_SOURCE=synthetic \
-        HEARTBEAT_MATRIX=off RUN_TAG=campaign_syn_off \
+        RUN_TAG=campaign_syn \
         cargo run --release --example saaq_latent_calibration
-    @echo ">>> phase 2/3: csv, heartbeat off, repeat=2"
+    @echo ">>> phase 2/2: csv replay baseline, repeat=2"
     LINEUP_CONFIG="${LINEUP_CONFIG:-configs/saaq15_moe_lineup.toml}" \
         SAAQ_RULE=saaq_v1_5 REPEAT_COUNT=2 TELEMETRY_SOURCE=csv \
-        HEARTBEAT_MATRIX=off RUN_TAG=campaign_csv_off \
-        cargo run --release --example saaq_latent_calibration
-    @echo ">>> phase 3/3: csv, heartbeat on, repeat=2"
-    LINEUP_CONFIG="${LINEUP_CONFIG:-configs/saaq15_moe_lineup.toml}" \
-        SAAQ_RULE=saaq_v1_5 REPEAT_COUNT=2 TELEMETRY_SOURCE=csv \
-        HEARTBEAT_MATRIX=on  RUN_TAG=campaign_csv_on \
+        RUN_TAG=campaign_csv \
         cargo run --release --example saaq_latent_calibration
     @echo "ok: campaign finished; see artifacts/index.csv"
 
@@ -61,9 +56,9 @@ saaq-campaign:
 saaq-csv:
     TELEMETRY_SOURCE=csv cargo run --release --example saaq_latent_calibration
 
-# Matrix sweep: both heartbeat modes, both SAAQ rules (dual emission).
+# Matrix sweep over configured models/telemetry with dual SAAQ emission.
 saaq-sweep:
-    HEARTBEAT_MATRIX= cargo run --release --example saaq_latent_calibration
+    cargo run --release --example saaq_latent_calibration
 
 # Telemetry bridge demo (routing_mode switchable via ROUTING_MODE env).
 bridge:
@@ -71,8 +66,8 @@ bridge:
 
 # Probe the configured lineup (LINEUP_CONFIG / GGUF_CHECKPOINT_PATH /
 # autodiscovery) and print the preferred GPU synapse tensor + ggml_type per
-# model. Writes <output_root>/synapse_diagnostic.json. No SAAQ ticks, no
-# heartbeat, no campaign side-effects (issue #31).
+# model. Writes <output_root>/synapse_diagnostic.json. No SAAQ ticks and no
+# campaign side-effects (issue #31).
 synapse-diag:
     cargo run --release --example synapse_diagnostic
 

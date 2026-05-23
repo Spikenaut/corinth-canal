@@ -60,9 +60,7 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
     }
 
     let run_cfg = RunConfig::from_env();
-    let mut safe = SafeDiagnosticData::default()
-        .with_telemetry_source("csv")
-        .with_heartbeat_enabled(false);
+    let mut safe = SafeDiagnosticData::default().with_telemetry_source("csv");
     if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.gguf_checkpoint_path) {
         safe = safe.with_model_slug(&model_slug);
         observer.annotate(safe);
@@ -153,8 +151,6 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
             gpu_power_w,
             cpu_tctl_c,
             cpu_package_power_w,
-            heartbeat_signal: 0.0,
-            heartbeat_enabled: false,
         };
 
         let activity = funnel.encode_snapshot(&snap);

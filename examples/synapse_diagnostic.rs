@@ -7,7 +7,7 @@
 //! `src/moe/adapter.rs::resolve_adapter`. Writes a JSON report to
 //! `<output_root>/synapse_diagnostic.json`.
 //!
-//! No SAAQ ticks, no heartbeat, no GPU bring-up, no campaign side effects.
+//! No SAAQ ticks, no GPU bring-up, no campaign side effects.
 
 mod support;
 

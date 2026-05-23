@@ -66,7 +66,6 @@ pub mod error;
 pub mod funnel;
 #[cfg(feature = "cuda")]
 pub mod gpu;
-pub mod heartbeat;
 pub mod latent;
 #[cfg(feature = "cuda")]
 pub mod model;
@@ -80,15 +79,14 @@ pub use funnel::{
     FUNNEL_HIDDEN_NEURONS, FUNNEL_INPUT_NEURONS, FunnelActivity, SignedSplitBankBridge,
     SparseGifHiddenLayer, TelemetryFunnel,
 };
-pub use heartbeat::HeartbeatInjector;
 pub use latent::{
     SaaqUpdateRule, SnnDualLatentCalibrator, SnnLatentCalibrator, SnnLatentCsvExporter,
     SnnLatentSnapshot,
 };
 pub use telemetry::TelemetryEncoder;
 pub use types::{
-    CloudModelSpec, EMBEDDING_DIM, HeartbeatConfig, ModelArchitectureClass, ModelFamily,
-    ModelTarget, TelemetrySnapshot,
+    CloudModelSpec, EMBEDDING_DIM, ModelArchitectureClass, ModelFamily, ModelTarget,
+    TelemetrySnapshot,
 };
 
 pub mod tensor;
