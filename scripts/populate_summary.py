@@ -16,9 +16,10 @@ with open(INDEX_PATH, newline="") as f:
 # Group by (model_slug, repeat_idx) and keep the one with the latest run_id
 latest_runs = {}
 for r in rows:
+    heartbeat_enabled = r.get("heartbeat_enabled")
     if r.get("model_slug") in TARGET_MODELS and \
        r.get("telemetry_source") == "csv_re4_path_tracing_telemetry" and \
-       r.get("heartbeat_enabled") == "false":
+       (heartbeat_enabled is None or heartbeat_enabled == "false"):
         key = (r["model_slug"], r["repeat_idx"])
         # Use run_id for sorting; it starts with a timestamp
         if key not in latest_runs or r["run_id"] > latest_runs[key]["run_id"]:
