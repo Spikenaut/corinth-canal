@@ -156,7 +156,7 @@ struct LayoutFamilyEvidence {
     seen_granitemoe: bool,
     seen_afmoe: bool,
     seen_lfm2_moe: bool,
-    seen_llama_moe: bool,
+    seen_deepseek_v3_family: bool,
     has_router: bool,
     has_expert: bool,
 }
@@ -168,7 +168,7 @@ impl LayoutFamilyEvidence {
             parts.lower.contains("granitemoe") || parts.lower.contains("granite_moe");
         self.seen_afmoe |= parts.lower.contains("afmoe") || parts.lower.contains("af_moe");
         self.seen_lfm2_moe |= parts.lower.contains("lfm2_moe") || parts.lower.contains("lfm2moe");
-        self.seen_llama_moe |=
+        self.seen_deepseek_v3_family |=
             parts.lower.contains("moonlight") || parts.lower.contains("block_sparse_moe");
         self.has_router |= is_router;
         self.has_expert |= is_expert;
@@ -190,8 +190,8 @@ impl LayoutFamilyEvidence {
         if self.seen_lfm2_moe {
             return Some("lfm2_moe");
         }
-        if self.seen_llama_moe {
-            return Some("llama_moe");
+        if self.seen_deepseek_v3_family {
+            return Some("deepseek_v3_family");
         }
         Some("generic_moe")
     }

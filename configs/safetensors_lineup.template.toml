@@ -49,7 +49,7 @@ family = "qwen3_moe"
 path = "/absolute/path/to/.models/safetensors/microsoft/Phi-tiny-MoE-instruct"
 target = "local"
 
-# ── slowfastai/Moonlight-16B-A3B-bnb-4bit (MoE, 2 shards, bnb 4bit quant) ──
+# ── Moonshot AI Moonlight-16B-A3B / DeepSeek-V3-family layout (MoE, 2 shards, bnb 4bit quant) ──
 [[model]]
 slug = "moonlight_16b_a3b_bnb_4bit"
 family = "deepseek2"

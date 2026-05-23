@@ -637,8 +637,8 @@ fn generic_dense_ffn_names_are_not_moe_expert_candidates() {
 }
 
 #[test]
-fn detects_llama_style_block_sparse_moe_layout() {
-    let dir = temp_dir("llama-style");
+fn detects_deepseek_v3_family_block_sparse_moe_layout() {
+    let dir = temp_dir("deepseek-v3-family");
     let path = dir.join("model.safetensors");
     write_safetensors(
         &path,
@@ -654,7 +654,7 @@ fn detects_llama_style_block_sparse_moe_layout() {
     let manifest = inspect_safetensors_checkpoint(&path).unwrap();
     assert_eq!(
         manifest.candidates.detected_layout_family,
-        Some("llama_moe")
+        Some("deepseek_v3_family")
     );
     assert_eq!(
         manifest.candidates.router_tensors,
