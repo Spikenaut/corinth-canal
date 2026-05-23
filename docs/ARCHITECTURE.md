@@ -266,7 +266,7 @@ The example binaries share observability helpers under
 - Sentry is opt-in only. If `SENTRY_DSN` is unset or blank, the examples remain
   local/offline.
 - The wrappers attach only safe diagnostic fields such as `repo`, `command`,
-  `git_sha`, `model_slug`, `telemetry_source`, `heartbeat_enabled`,
-  `validation_status`, and `error_category`.
+  `git_sha`, `model_slug`, `telemetry_source`, `validation_status`, and
+  `error_category`.
 - Absolute checkpoint paths and artifact paths are not attached as Sentry tags
   by the wrappers.

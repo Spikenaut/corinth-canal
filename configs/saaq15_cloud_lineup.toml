@@ -31,7 +31,6 @@
 # Defaults applied by the runner unless overridden per-entry:
 #   SAAQ_RULE        = "saaq_v1_5"
 #   TELEMETRY_SOURCE = "synthetic" | "csv"
-#   HEARTBEAT        = "off" | "on"
 #   REPEAT_COUNT     = 2
 #
 # No Terraform, no cloud credentials, no provider SDK code.

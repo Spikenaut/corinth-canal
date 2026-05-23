@@ -20,7 +20,6 @@ const REPO_NAME: &str = "corinth-canal";
 pub struct SafeDiagnosticData<'a> {
     pub model_slug: Option<&'a str>,
     pub telemetry_source: Option<&'a str>,
-    pub heartbeat_enabled: Option<bool>,
     pub validation_status: Option<&'a str>,
     pub error_category: Option<&'a str>,
 }
@@ -33,11 +32,6 @@ impl<'a> SafeDiagnosticData<'a> {
 
     pub fn with_telemetry_source(mut self, telemetry_source: &'a str) -> Self {
         self.telemetry_source = Some(telemetry_source);
-        self
-    }
-
-    pub fn with_heartbeat_enabled(mut self, heartbeat_enabled: bool) -> Self {
-        self.heartbeat_enabled = Some(heartbeat_enabled);
         self
     }
 
@@ -71,7 +65,6 @@ const SUBPROCESS_PROBE_ARG: &str = "__observability_probe";
 struct OwnedDiagnosticData {
     model_slug: Option<String>,
     telemetry_source: Option<String>,
-    heartbeat_enabled: Option<bool>,
     validation_status: Option<String>,
     error_category: Option<String>,
 }
@@ -83,9 +76,6 @@ impl OwnedDiagnosticData {
         }
         if let Some(telemetry_source) = data.telemetry_source {
             self.telemetry_source = Some(telemetry_source.to_owned());
-        }
-        if let Some(heartbeat_enabled) = data.heartbeat_enabled {
-            self.heartbeat_enabled = Some(heartbeat_enabled);
         }
         if let Some(validation_status) = data.validation_status {
             self.validation_status = Some(validation_status.to_owned());
@@ -105,7 +95,6 @@ impl OwnedDiagnosticData {
         SafeDiagnosticData {
             model_slug: self.model_slug.as_deref(),
             telemetry_source: self.telemetry_source.as_deref(),
-            heartbeat_enabled: self.heartbeat_enabled,
             validation_status: self.validation_status.as_deref(),
             error_category: self.error_category.as_deref(),
         }
@@ -423,11 +412,6 @@ fn apply_scope(
     } else {
         scope.remove_tag("telemetry_source");
     }
-    if let Some(heartbeat_enabled) = data.heartbeat_enabled {
-        scope.set_tag("heartbeat_enabled", heartbeat_enabled.to_string());
-    } else {
-        scope.remove_tag("heartbeat_enabled");
-    }
     if let Some(validation_status) = data.validation_status {
         scope.set_tag("validation_status", validation_status);
     } else {
@@ -623,8 +607,7 @@ mod tests {
         data.merge(
             SafeDiagnosticData::default()
                 .with_model_slug("model_a")
-                .with_telemetry_source("csv")
-                .with_heartbeat_enabled(false),
+                .with_telemetry_source("csv"),
         );
 
         let merged_data = data.clone().with_status("tick_failed", "experiment_error");
@@ -632,7 +615,6 @@ mod tests {
 
         assert_eq!(merged.model_slug, Some("model_a"));
         assert_eq!(merged.telemetry_source, Some("csv"));
-        assert_eq!(merged.heartbeat_enabled, Some(false));
         assert_eq!(merged.validation_status, Some("tick_failed"));
         assert_eq!(merged.error_category, Some("experiment_error"));
     }

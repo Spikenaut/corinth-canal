@@ -1,8 +1,8 @@
 mod support;
 
 use corinth_canal::{
-    FunnelActivity, HeartbeatInjector, SaaqUpdateRule, SnnDualLatentCalibrator,
-    SnnLatentCsvExporter, gpu::GpuAccelerator, model::Model,
+    FunnelActivity, SaaqUpdateRule, SnnDualLatentCalibrator, SnnLatentCsvExporter,
+    gpu::GpuAccelerator, model::Model,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use support::{
     ResolvedTelemetry, RunConfig, TelemetrySource, ValidationModelSpec,
-    default_spiking_model_config, heartbeat_gain, input_drive_gain_from_env,
+    default_spiking_model_config, input_drive_gain_from_env,
     observability::{self, CommandObserver, SafeDiagnosticData},
     prompt_embedding_for_validation, telemetry_snapshot_for_tick,
 };
@@ -35,11 +35,6 @@ struct ValidationManifest {
     saaq_dual_emit: bool,
     validation_status: &'static str,
     error: Option<String>,
-    heartbeat_enabled: bool,
-    heartbeat_amplitude: f32,
-    heartbeat_period_ticks: usize,
-    heartbeat_duty_cycle: f32,
-    heartbeat_phase_offset_ticks: usize,
     telemetry_source: String,
     telemetry_csv_path: Option<String>,
     telemetry_row_count: Option<usize>,
@@ -69,7 +64,6 @@ struct RunSummary {
     model_slug: String,
     model_family: String,
     telemetry_source: String,
-    heartbeat_enabled: bool,
     repeat_idx: usize,
     repeat_count: usize,
     saaq_rule: &'static str,
@@ -109,8 +103,6 @@ struct PendingIndexRow {
     model_slug: String,
     model_family: String,
     telemetry_source: String,
-    heartbeat_enabled: bool,
-    heartbeat_slug: &'static str,
     repeat_idx: usize,
     repeat_count: usize,
     saaq_rule: &'static str,
@@ -127,14 +119,6 @@ struct PendingIndexRow {
     repeat_determinism: Option<&'static str>,
 }
 
-fn heartbeat_slug_for(enabled: bool) -> &'static str {
-    if enabled {
-        "heartbeat_on"
-    } else {
-        "heartbeat_off"
-    }
-}
-
 fn emit_validation_finish(
     observer: &CommandObserver,
     ctx: &RunContext<'_>,
@@ -147,7 +131,6 @@ fn emit_validation_finish(
         SafeDiagnosticData::default()
             .with_model_slug(&ctx.spec.slug)
             .with_telemetry_source(&ctx.resolved.source_label)
-            .with_heartbeat_enabled(ctx.heartbeat_enabled)
             .with_validation_status(status)
             .with_error_category(category),
     );
@@ -158,7 +141,6 @@ fn emit_validation_finish(
         run_id = %ctx.run_id,
         git_sha = %observability::git_sha(),
         model_slug = %ctx.spec.slug,
-        heartbeat_enabled = ctx.heartbeat_enabled,
         repeat_idx = ctx.repeat_idx,
         repeat_count = ctx.repeat_count,
         ticks = ctx.ticks,
@@ -174,7 +156,6 @@ struct RunContext<'a> {
     prompt_profile: &'a str,
     prompt_text: &'a str,
     ticks: usize,
-    heartbeat_enabled: bool,
     repeat_idx: usize,
     repeat_count: usize,
     resolved: &'a ResolvedTelemetry,
@@ -247,25 +228,22 @@ fn run_main(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>
         (|pending: &mut Vec<PendingIndexRow>| -> Result<(), Box<dyn std::error::Error>> {
             for spec in &cfg.validation_models {
                 for repeat_idx in 0..cfg.repeat_count {
-                    for &heartbeat_enabled in &cfg.heartbeat_matrix {
-                        let run_id = build_run_id(&cfg.prompt_profile, repeat_idx, run_tag_ref);
-                        let ctx = RunContext {
-                            spec,
-                            prompt_profile: &cfg.prompt_profile,
-                            prompt_text: cfg.prompt_text,
-                            ticks: effective_ticks,
-                            heartbeat_enabled,
-                            repeat_idx,
-                            repeat_count: cfg.repeat_count,
-                            resolved: &cfg.telemetry,
-                            run_id,
-                            output_root: cfg.output_root.clone(),
-                            model_family_override: cfg.model_family_override,
-                            saaq_rule: cfg.saaq_rule,
-                            run_tag: run_tag_ref,
-                        };
-                        run_validation(observer, &ctx, pending)?;
-                    }
+                    let run_id = build_run_id(&cfg.prompt_profile, repeat_idx, run_tag_ref);
+                    let ctx = RunContext {
+                        spec,
+                        prompt_profile: &cfg.prompt_profile,
+                        prompt_text: cfg.prompt_text,
+                        ticks: effective_ticks,
+                        repeat_idx,
+                        repeat_count: cfg.repeat_count,
+                        resolved: &cfg.telemetry,
+                        run_id,
+                        output_root: cfg.output_root.clone(),
+                        model_family_override: cfg.model_family_override,
+                        saaq_rule: cfg.saaq_rule,
+                        run_tag: run_tag_ref,
+                    };
+                    run_validation(observer, &ctx, pending)?;
                 }
             }
             Ok(())
@@ -304,8 +282,7 @@ fn run_validation(
     observer.annotate(
         SafeDiagnosticData::default()
             .with_model_slug(&ctx.spec.slug)
-            .with_telemetry_source(&ctx.resolved.source_label)
-            .with_heartbeat_enabled(ctx.heartbeat_enabled),
+            .with_telemetry_source(&ctx.resolved.source_label),
     );
     tracing::info!(
         event = "validation_start",
@@ -314,7 +291,6 @@ fn run_validation(
         run_id = %ctx.run_id,
         git_sha = %observability::git_sha(),
         model_slug = %ctx.spec.slug,
-        heartbeat_enabled = ctx.heartbeat_enabled,
         repeat_idx = ctx.repeat_idx,
         repeat_count = ctx.repeat_count,
         ticks = ctx.ticks,
@@ -329,7 +305,6 @@ fn run_validation(
 
     let mut config = default_spiking_model_config(ctx.spec.path.clone(), 1);
     config.model_family = ctx.model_family_override.or(ctx.spec.family);
-    config.heartbeat.enabled = ctx.heartbeat_enabled;
     config.gpu_routing_telemetry_path = Some(routing_csv_path.clone());
     // Per-model routing mode override from lineup config (Stage-campaign).
     if let Some(rm) = ctx.spec.routing_mode {
@@ -485,15 +460,12 @@ fn run_validation(
     let mut tick_writer = BufWriter::new(File::create(&tick_path)?);
     let mut latent_exporter = SnnLatentCsvExporter::create(&latent_path)?;
     let mut calibrator = SnnDualLatentCalibrator::new(saaq_rule);
-    let heartbeat = HeartbeatInjector::new(config.heartbeat.clone());
-
     let drive_gain = input_drive_gain_from_env();
     println!(
-        "validation_start model_slug={} family={:?} architecture={} heartbeat_enabled={} ticks={} repeat={}/{} routing_tensor={} synapse_source={} telemetry_source={} input_drive_gain={:.1}",
+        "validation_start model_slug={} family={:?} architecture={} ticks={} repeat={}/{} routing_tensor={} synapse_source={} telemetry_source={} input_drive_gain={:.1}",
         ctx.spec.slug,
         model.router_family(),
         model.router_architecture(),
-        ctx.heartbeat_enabled,
         ctx.ticks,
         ctx.repeat_idx + 1,
         ctx.repeat_count,
@@ -508,11 +480,9 @@ fn run_validation(
     let run_result = (|| -> Result<(), Box<dyn std::error::Error>> {
         for tick in 0..ctx.ticks {
             let snap = telemetry_snapshot_for_tick(tick, ctx.resolved);
-            let snap = heartbeat.apply(&snap, tick);
-            let gain = heartbeat_gain(snap.heartbeat_signal);
             let input_spikes: Vec<f32> = prompt_embedding
                 .iter()
-                .map(|value| value * gain * drive_gain)
+                .map(|value| value * drive_gain)
                 .collect();
 
             // First/last timestamp bookkeeping. `telemetry_snapshot_for_tick`
@@ -560,11 +530,10 @@ fn run_validation(
 
             writeln!(
                 tick_writer,
-                "tick={} best_walker={} elapsed_us={} heartbeat_signal={:.6} gpu_temp_c={:.3} gpu_power_w={:.3} cpu_tctl_c={:.3} cpu_package_power_w={:.3}",
+                "tick={} best_walker={} elapsed_us={} gpu_temp_c={:.3} gpu_power_w={:.3} cpu_tctl_c={:.3} cpu_package_power_w={:.3}",
                 tick + 1,
                 best_walker,
                 elapsed_us,
-                snap.heartbeat_signal,
                 snap.gpu_temp_c,
                 snap.gpu_power_w,
                 snap.cpu_tctl_c,
@@ -659,9 +628,8 @@ fn run_validation(
     ));
 
     println!(
-        "validation_complete model_slug={} heartbeat_enabled={} repeat={}/{} run_dir={}",
+        "validation_complete model_slug={} repeat={}/{} run_dir={}",
         ctx.spec.slug,
-        ctx.heartbeat_enabled,
         ctx.repeat_idx + 1,
         ctx.repeat_count,
         run_dir.display()
@@ -717,11 +685,6 @@ fn build_manifest(
         saaq_dual_emit: true,
         validation_status,
         error,
-        heartbeat_enabled: ctx.heartbeat_enabled,
-        heartbeat_amplitude: config.heartbeat.amplitude,
-        heartbeat_period_ticks: config.heartbeat.period_ticks,
-        heartbeat_duty_cycle: config.heartbeat.duty_cycle,
-        heartbeat_phase_offset_ticks: config.heartbeat.phase_offset_ticks,
         telemetry_source: ctx.resolved.source_label.clone(),
         telemetry_csv_path: ctx
             .resolved
@@ -843,7 +806,6 @@ fn build_summary(
         model_slug: ctx.spec.slug.clone(),
         model_family: format!("{model_family:?}"),
         telemetry_source: ctx.resolved.source_label.clone(),
-        heartbeat_enabled: ctx.heartbeat_enabled,
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
         saaq_rule: saaq_rule_label(saaq_rule),
@@ -888,8 +850,6 @@ fn pending_row_from_state(
         model_slug: ctx.spec.slug.clone(),
         model_family: format!("{:?}", model.router_family()),
         telemetry_source: ctx.resolved.source_label.clone(),
-        heartbeat_enabled: ctx.heartbeat_enabled,
-        heartbeat_slug: heartbeat_slug_for(ctx.heartbeat_enabled),
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
         saaq_rule: saaq_rule_label(ctx.saaq_rule),
@@ -941,7 +901,7 @@ fn collect_generated_files(
     files
 }
 
-const INDEX_CSV_HEADER: &str = "run_id,run_tag,model_slug,model_family,telemetry_source,heartbeat_enabled,repeat_idx,repeat_count,saaq_rule,validation_status,run_dir,ticks_completed,latent_rows,mean_tick_elapsed_us,repeat_determinism";
+const INDEX_CSV_HEADER: &str = "run_id,run_tag,model_slug,model_family,telemetry_source,repeat_idx,repeat_count,saaq_rule,validation_status,run_dir,ticks_completed,latent_rows,mean_tick_elapsed_us,repeat_determinism";
 
 /// Append every buffered row to `<output_root>/index.csv`. The file is
 /// opened once per `main()` invocation with `append(true)`; if it's empty
@@ -1021,7 +981,6 @@ fn format_index_row(row: &PendingIndexRow) -> String {
         csv_escape(&row.model_slug),
         csv_escape(&row.model_family),
         csv_escape(&row.telemetry_source),
-        row.heartbeat_enabled.to_string(),
         row.repeat_idx.to_string(),
         row.repeat_count.to_string(),
         csv_escape(row.saaq_rule),
@@ -1056,7 +1015,7 @@ fn csv_escape(s: &str) -> String {
 }
 
 /// Strict-repeat verdict pass. Groups rows by
-/// `(model_slug, telemetry_source, heartbeat_slug, saaq_rule)` and compares
+/// `(model_slug, telemetry_source, saaq_rule)` and compares
 /// each repeat `k >= 1`'s `latent_telemetry.csv` to repeat `0`'s byte-wise.
 ///
 /// Only rows with `validation_status == "completed"` participate — partial
@@ -1071,7 +1030,7 @@ fn csv_escape(s: &str) -> String {
 fn apply_strict_repeat_check(
     rows: &mut [PendingIndexRow],
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    type GroupKey = (String, String, &'static str, &'static str);
+    type GroupKey = (String, String, &'static str);
     let mut groups: BTreeMap<GroupKey, Vec<usize>> = BTreeMap::new();
     for (idx, row) in rows.iter().enumerate() {
         if row.validation_status != "completed" {
@@ -1080,7 +1039,6 @@ fn apply_strict_repeat_check(
         let key = (
             row.model_slug.clone(),
             row.telemetry_source.clone(),
-            row.heartbeat_slug,
             row.saaq_rule,
         );
         groups.entry(key).or_default().push(idx);
@@ -1185,7 +1143,6 @@ fn build_run_dir(ctx: &RunContext<'_>) -> Result<PathBuf, Box<dyn std::error::Er
         .output_root
         .join(&ctx.spec.slug)
         .join(&ctx.resolved.source_label)
-        .join(heartbeat_slug_for(ctx.heartbeat_enabled))
         .join(&ctx.run_id))
 }
 

@@ -1,6 +1,6 @@
 # Run Profiles
 
-Every validated tuple of `(example, telemetry source, heartbeat, SAAQ rule)`
+Every validated tuple of `(example, telemetry source, SAAQ rule)`
 is catalogued here with the exact command. Anything not in this table has
 not been blessed and should be considered experimental.
 
@@ -11,14 +11,12 @@ not been blessed and should be considered experimental.
 
 ## SAAQ latent calibration (primary research loop)
 
-| Profile | Telemetry | Heartbeat | SAAQ rule | Command |
-|---------|-----------|-----------|-----------|---------|
-| Smoke, synthetic | synthetic | both | 1.5 | `just saaq` |
-| SR.jl corpus, full loop | csv (RE4) | both | 1.5 + 1.0 dual | `TICKS=0 just saaq-csv` |
-| Wraparound sanity | csv (RE4) | both | 1.5 | `TICKS=2000 just saaq-csv` |
-| Heartbeat OFF only | synthetic | off | 1.5 | `HEARTBEAT_MATRIX=off just saaq` |
-| Heartbeat ON only | synthetic | on | 1.5 | `HEARTBEAT_MATRIX=on just saaq` |
-| Legacy rule parity | synthetic | both | 1.0 | `SAAQ_RULE=legacy just saaq` |
+| Profile | Telemetry | SAAQ rule | Command |
+|---------|-----------|-----------|---------|
+| Smoke, synthetic | synthetic | 1.5 | `just saaq` |
+| SR.jl corpus, full loop | csv (RE4) | 1.5 + 1.0 dual | `TICKS=0 just saaq-csv` |
+| Wraparound sanity | csv (RE4) | 1.5 | `TICKS=2000 just saaq-csv` |
+| Legacy rule parity | synthetic | 1.0 | `SAAQ_RULE=legacy just saaq` |
 
 Dual-SAAQ columns are emitted regardless of `SAAQ_RULE`; the env var only
 selects which rule fills the legacy compatibility columns.

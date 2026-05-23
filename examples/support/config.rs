@@ -19,9 +19,9 @@ use serde::Deserialize;
 use super::lineup::SafetensorsModelEntry;
 use super::{
     ResolvedTelemetry, ValidationModelSpec, cloud_execution_guard, cloud_lineup_path_from_env,
-    discover_validation_models, env_flag, heartbeat_modes_for_matrix, load_cloud_lineup,
-    load_safetensors_lineup, model_family_override_from_env, parse_family_slug, parse_routing_mode,
-    prompt_profile_slug, prompt_text_for_profile, repeat_count_from_env, resolve_telemetry_source,
+    discover_validation_models, env_flag, load_cloud_lineup, load_safetensors_lineup,
+    model_family_override_from_env, parse_family_slug, parse_routing_mode, prompt_profile_slug,
+    prompt_text_for_profile, repeat_count_from_env, resolve_telemetry_source,
     routing_mode_override_from_env, saaq_update_rule_from_env, safetensors_lineup_path_from_env,
     ticks_from_env,
 };
@@ -47,7 +47,6 @@ pub struct RunConfig {
     pub prompt_text: &'static str,
     pub ticks: usize,
     pub repeat_count: usize,
-    pub heartbeat_matrix: Vec<bool>,
     pub telemetry: ResolvedTelemetry,
     pub output_root: PathBuf,
     pub model_family_override: Option<ModelFamily>,
@@ -60,7 +59,7 @@ pub struct RunConfig {
     pub run_tag: Option<String>,
     /// When `true` and `repeat_count >= 2`, the calibration runner asserts
     /// byte-equality of `latent_telemetry.csv` across repeats per
-    /// `(model_slug, telemetry_source, heartbeat_slug, saaq_rule)` group.
+    /// `(model_slug, telemetry_source, saaq_rule)` group.
     pub strict_repeat_check: bool,
 }
 
@@ -86,7 +85,6 @@ impl RunConfig {
             prompt_text,
             ticks: ticks_from_env(DEFAULT_TICKS),
             repeat_count: repeat_count_from_env(),
-            heartbeat_matrix: heartbeat_modes_for_matrix(),
             telemetry: resolve_telemetry_source(),
             output_root: output_root_from_env(),
             model_family_override: model_family_override_from_env(),

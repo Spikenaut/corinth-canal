@@ -91,7 +91,7 @@ Supported families in code:
 - `DenseSim`
 - `SpikingSim`
 
-### Telemetry / heartbeat
+### Telemetry
 
 `TelemetrySnapshot` carries:
 
@@ -99,8 +99,6 @@ Supported families in code:
 - `gpu_power_w`
 - `cpu_tctl_c`
 - `cpu_package_power_w`
-- `heartbeat_signal`
-- `heartbeat_enabled`
 - `timestamp_ms`
 
 ### SAAQ calibration
