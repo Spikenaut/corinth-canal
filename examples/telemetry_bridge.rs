@@ -50,7 +50,6 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
             cpu_tctl_c: 48.0 + phase * 20.0,
             cpu_package_power_w: 70.0 + phase * 40.0,
             timestamp_ms: (step as u64) * 1000,
-            ..Default::default()
         };
 
         let output = model.forward(&snap)?;

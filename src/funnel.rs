@@ -260,7 +260,6 @@ mod tests {
             cpu_tctl_c,
             cpu_package_power_w,
             timestamp_ms: 0,
-            ..Default::default()
         }
     }
 

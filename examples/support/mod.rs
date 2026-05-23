@@ -475,7 +475,6 @@ pub fn load_csv_telemetry_rows(
             gpu_power_w,
             cpu_tctl_c,
             cpu_package_power_w,
-            ..Default::default()
         });
     }
 
@@ -602,7 +601,6 @@ pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot 
         cpu_tctl_c: 73.0 + (phase * 0.9).sin() * 2.2,
         cpu_package_power_w: 116.0 + (phase * 1.1).cos() * 7.4,
         timestamp_ms: tick as u64,
-        ..Default::default()
     }
 }
 
@@ -810,7 +808,6 @@ mod tests {
                 gpu_power_w: 100.0,
                 cpu_tctl_c: 20.0,
                 cpu_package_power_w: 200.0,
-                ..Default::default()
             },
             corinth_canal::TelemetrySnapshot {
                 timestamp_ms: 222,
@@ -818,7 +815,6 @@ mod tests {
                 gpu_power_w: 300.0,
                 cpu_tctl_c: 40.0,
                 cpu_package_power_w: 400.0,
-                ..Default::default()
             },
         ];
         let resolved = ResolvedTelemetry {

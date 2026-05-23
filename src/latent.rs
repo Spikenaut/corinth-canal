@@ -326,7 +326,6 @@ mod tests {
             gpu_power_w: 250.0,
             cpu_tctl_c: 70.0,
             cpu_package_power_w: 120.0,
-            ..Default::default()
         };
         let snap_b = TelemetrySnapshot {
             timestamp_ms: 1_100,
@@ -399,7 +398,6 @@ mod tests {
             gpu_power_w: 250.0,
             cpu_tctl_c: 70.0,
             cpu_package_power_w: 120.0,
-            ..Default::default()
         };
         let snap_b = TelemetrySnapshot {
             timestamp_ms: 1_100,
@@ -441,7 +439,6 @@ mod tests {
             gpu_power_w: 245.0,
             cpu_tctl_c: 71.0,
             cpu_package_power_w: 118.0,
-            ..Default::default()
         };
 
         for step in 0..6 {
@@ -483,7 +480,6 @@ mod tests {
             gpu_power_w: 240.0,
             cpu_tctl_c: 70.0,
             cpu_package_power_w: 120.0,
-            ..Default::default()
         };
         let merged = dual
             .observe(&snap, &sample_activity(4, 0.25), &output)

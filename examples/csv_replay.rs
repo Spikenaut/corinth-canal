@@ -151,7 +151,6 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
             gpu_power_w,
             cpu_tctl_c,
             cpu_package_power_w,
-            ..Default::default()
         };
 
         let activity = funnel.encode_snapshot(&snap);
