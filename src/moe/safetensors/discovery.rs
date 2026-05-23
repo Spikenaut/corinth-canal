@@ -219,7 +219,7 @@ fn router_candidate_score(
         || lower.contains("block_sparse_moe/gate/weight")
     {
         score += 90;
-        reasons.push("llama_block_sparse_moe_gate");
+        reasons.push("deepseek_v3_family_block_sparse_moe_gate");
     }
     if lower.contains("moe.gate.weight")
         || lower.contains("moe/gate/weight")
