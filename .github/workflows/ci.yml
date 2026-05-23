@@ -69,7 +69,9 @@ jobs:
   cpu-tests-ryzen:
     name: CPU Heavy (Self-hosted Ryzen)
     needs: cpu-tests-github
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      always() &&
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64, ryzen]
     timeout-minutes: 60
     steps:
