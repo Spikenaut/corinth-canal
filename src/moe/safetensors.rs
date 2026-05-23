@@ -56,8 +56,31 @@ pub struct SafetensorsTensorRecord {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SafetensorsCandidateSummary {
+    pub detected_layout_family: Option<&'static str>,
     pub router_tensors: Vec<String>,
     pub expert_tensors: Vec<String>,
+    pub router_candidates: Vec<SafetensorsRouterCandidate>,
+    pub expert_groups: Vec<SafetensorsExpertGroup>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SafetensorsRouterCandidate {
+    pub name: String,
+    pub layer_hint: Option<usize>,
+    pub source_shard: String,
+    pub shape: Vec<usize>,
+    pub score: u32,
+    pub reasons: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SafetensorsExpertGroup {
+    pub group_key: String,
+    pub layer_hint: Option<usize>,
+    pub expert_indices: Vec<usize>,
+    pub tensor_names: Vec<String>,
+    pub source_shards: Vec<String>,
+    pub weight_kinds: Vec<&'static str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -282,19 +305,10 @@ fn build_manifest(
             .cmp(&right.name)
             .then(left.source_shard.cmp(&right.source_shard))
     });
-    let router_tensors = tensors
-        .iter()
-        .filter(|tensor| tensor.labels.contains(&"moe_router_candidate"))
-        .map(|tensor| tensor.name.clone())
-        .collect();
-    let expert_tensors = tensors
-        .iter()
-        .filter(|tensor| tensor.labels.contains(&"moe_expert_candidate"))
-        .map(|tensor| tensor.name.clone())
-        .collect();
+    let candidates = discover_candidates(&tensors);
 
     SafetensorsManifest {
-        manifest_version: 1,
+        manifest_version: 2,
         format: "safetensors",
         checkpoint: SafetensorsCheckpointSource {
             input_kind: input_kind.to_string(),
@@ -304,10 +318,52 @@ fn build_manifest(
             metadata,
         },
         tensors,
-        candidates: SafetensorsCandidateSummary {
-            router_tensors,
-            expert_tensors,
-        },
+        candidates,
+    }
+}
+
+fn discover_candidates(tensors: &[SafetensorsTensorRecord]) -> SafetensorsCandidateSummary {
+    let detected_layout_family = infer_layout_family(tensors);
+
+    let mut router_candidates = tensors
+        .iter()
+        .filter_map(|tensor| {
+            let (score, reasons) = router_candidate_score(&tensor.name, &tensor.shape)?;
+            Some(SafetensorsRouterCandidate {
+                name: tensor.name.clone(),
+                layer_hint: extract_layer_hint(&tensor.name),
+                source_shard: tensor.source_shard.clone(),
+                shape: tensor.shape.clone(),
+                score,
+                reasons,
+            })
+        })
+        .collect::<Vec<_>>();
+    router_candidates.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then(left.name.cmp(&right.name))
+            .then(left.source_shard.cmp(&right.source_shard))
+    });
+
+    let expert_groups = discover_expert_groups(tensors);
+    let expert_tensors = expert_groups
+        .iter()
+        .flat_map(|group| group.tensor_names.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    SafetensorsCandidateSummary {
+        detected_layout_family,
+        router_tensors: router_candidates
+            .iter()
+            .map(|candidate| candidate.name.clone())
+            .collect(),
+        expert_tensors,
+        router_candidates,
+        expert_groups,
     }
 }
 
@@ -451,39 +507,292 @@ fn parse_header(
 }
 
 fn classify_tensor(name: &str, shape: &[usize]) -> Vec<&'static str> {
-    let lower = name.to_ascii_lowercase();
     let mut labels = Vec::new();
 
-    let router_name = lower.contains("router")
-        || lower.contains("gate_inp")
-        || lower.ends_with(".gate.weight")
-        || lower.ends_with("/gate/weight");
-    let router_shape = shape.len() == 2
+    if expert_tensor_parts(name).is_some() {
+        labels.push("moe_expert_candidate");
+    } else if router_candidate_score(name, shape).is_some() {
+        labels.push("moe_router_candidate");
+    } else if router_shape_hint(shape) {
+        labels.push("possible_moe_router_shape");
+    }
+
+    labels
+}
+
+fn router_candidate_score(name: &str, shape: &[usize]) -> Option<(u32, Vec<&'static str>)> {
+    let lower = name.to_ascii_lowercase();
+    let mut score = 0u32;
+    let mut reasons = Vec::new();
+
+    if lower.contains("router") {
+        score += 80;
+        reasons.push("router_name");
+    }
+    if lower.contains("gate_inp") {
+        score += 80;
+        reasons.push("gate_inp_name");
+    }
+    if lower.contains("block_sparse_moe.gate.weight")
+        || lower.contains("block_sparse_moe/gate/weight")
+    {
+        score += 90;
+        reasons.push("llama_block_sparse_moe_gate");
+    }
+    if lower.contains("moe.gate.weight")
+        || lower.contains("moe/gate/weight")
+        || lower.contains("feed_forward.gate.weight")
+        || lower.contains("feed_forward/gate/weight")
+        || lower.contains("ffn.gate.weight")
+        || lower.contains("ffn/gate/weight")
+    {
+        score += 70;
+        reasons.push("moe_gate_name");
+    }
+    if lower.contains("gating.weight") || lower.contains("gating/weight") {
+        score += 65;
+        reasons.push("gating_name");
+    }
+
+    let gate_weight_suffix = lower.ends_with(".gate.weight") || lower.ends_with("/gate/weight");
+    if gate_weight_suffix && has_moe_context(&lower) {
+        score += 60;
+        reasons.push("moe_context_gate_weight");
+    } else if gate_weight_suffix && router_shape_hint(shape) {
+        score += 45;
+        reasons.push("shape_guarded_gate_weight");
+    }
+
+    if router_shape_hint(shape) {
+        score += 30;
+        reasons.push("router_shape");
+    }
+
+    (!reasons.is_empty() && score >= 60).then_some((score, reasons))
+}
+
+fn router_shape_hint(shape: &[usize]) -> bool {
+    shape.len() == 2
         && shape
             .iter()
             .copied()
             .min()
             .is_some_and(|v| (2..=512).contains(&v))
-        && shape.iter().copied().max().is_some_and(|v| v >= 512);
+        && shape.iter().copied().max().is_some_and(|v| v >= 512)
+}
 
-    let has_expert_context =
-        lower.contains("experts") || lower.contains(".expert") || lower.contains("/expert");
-    let expert_weight_name = lower.contains("gate_proj")
-        || lower.contains("up_proj")
-        || lower.contains("down_proj")
-        || lower.contains(".w1.")
-        || lower.contains(".w2.")
-        || lower.contains(".w3.");
-    let expert_name = has_expert_context && expert_weight_name;
-    if expert_name {
-        labels.push("moe_expert_candidate");
-    } else if router_name {
-        labels.push("moe_router_candidate");
-    } else if router_shape {
-        labels.push("possible_moe_router_shape");
+fn has_moe_context(lower_name: &str) -> bool {
+    lower_name.contains("moe")
+        || lower_name.contains("experts")
+        || lower_name.contains(".expert")
+        || lower_name.contains("/expert")
+}
+
+fn infer_layout_family(tensors: &[SafetensorsTensorRecord]) -> Option<&'static str> {
+    let names = tensors
+        .iter()
+        .map(|tensor| tensor.name.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    if names
+        .iter()
+        .any(|name| name.contains("phimoe") || name.contains("phi_moe"))
+    {
+        return Some("phimoe");
+    }
+    if names
+        .iter()
+        .any(|name| name.contains("granitemoe") || name.contains("granite_moe"))
+    {
+        return Some("granitemoe");
+    }
+    if names
+        .iter()
+        .any(|name| name.contains("afmoe") || name.contains("af_moe"))
+    {
+        return Some("afmoe");
+    }
+    if names
+        .iter()
+        .any(|name| name.contains("lfm2_moe") || name.contains("lfm2moe"))
+    {
+        return Some("lfm2_moe");
+    }
+    if names
+        .iter()
+        .any(|name| name.contains("moonlight") || name.contains("block_sparse_moe"))
+    {
+        return Some("llama_moe");
     }
 
-    labels
+    let has_router = tensors
+        .iter()
+        .any(|tensor| router_candidate_score(&tensor.name, &tensor.shape).is_some());
+    let has_expert = tensors
+        .iter()
+        .any(|tensor| expert_tensor_parts(&tensor.name).is_some());
+    (has_router && has_expert).then_some("generic_moe")
+}
+
+fn discover_expert_groups(tensors: &[SafetensorsTensorRecord]) -> Vec<SafetensorsExpertGroup> {
+    let mut groups: BTreeMap<String, ExpertGroupBuilder> = BTreeMap::new();
+    for tensor in tensors {
+        let Some(parts) = expert_tensor_parts(&tensor.name) else {
+            continue;
+        };
+        let group_key = expert_group_key(&tensor.name, parts.layer_hint);
+        groups
+            .entry(group_key.clone())
+            .or_insert_with(|| ExpertGroupBuilder::new(group_key, parts.layer_hint))
+            .push(tensor, parts.expert_index, parts.weight_kind);
+    }
+
+    groups
+        .into_values()
+        .map(ExpertGroupBuilder::build)
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+struct ExpertTensorParts {
+    layer_hint: Option<usize>,
+    expert_index: Option<usize>,
+    weight_kind: &'static str,
+}
+
+#[derive(Debug)]
+struct ExpertGroupBuilder {
+    group_key: String,
+    layer_hint: Option<usize>,
+    expert_indices: BTreeSet<usize>,
+    tensor_names: BTreeSet<String>,
+    source_shards: BTreeSet<String>,
+    weight_kinds: BTreeSet<&'static str>,
+}
+
+impl ExpertGroupBuilder {
+    fn new(group_key: String, layer_hint: Option<usize>) -> Self {
+        Self {
+            group_key,
+            layer_hint,
+            expert_indices: BTreeSet::new(),
+            tensor_names: BTreeSet::new(),
+            source_shards: BTreeSet::new(),
+            weight_kinds: BTreeSet::new(),
+        }
+    }
+
+    fn push(
+        &mut self,
+        tensor: &SafetensorsTensorRecord,
+        expert_index: Option<usize>,
+        weight_kind: &'static str,
+    ) {
+        if let Some(expert_index) = expert_index {
+            self.expert_indices.insert(expert_index);
+        }
+        self.tensor_names.insert(tensor.name.clone());
+        self.source_shards.insert(tensor.source_shard.clone());
+        self.weight_kinds.insert(weight_kind);
+    }
+
+    fn build(self) -> SafetensorsExpertGroup {
+        SafetensorsExpertGroup {
+            group_key: self.group_key,
+            layer_hint: self.layer_hint,
+            expert_indices: self.expert_indices.into_iter().collect(),
+            tensor_names: self.tensor_names.into_iter().collect(),
+            source_shards: self.source_shards.into_iter().collect(),
+            weight_kinds: self.weight_kinds.into_iter().collect(),
+        }
+    }
+}
+
+fn expert_tensor_parts(name: &str) -> Option<ExpertTensorParts> {
+    let lower = name.to_ascii_lowercase();
+    if !has_moe_context(&lower) {
+        return None;
+    }
+    let weight_kind = expert_weight_kind(&lower)?;
+    Some(ExpertTensorParts {
+        layer_hint: extract_layer_hint(&lower),
+        expert_index: extract_expert_index(&lower),
+        weight_kind,
+    })
+}
+
+fn expert_weight_kind(lower_name: &str) -> Option<&'static str> {
+    [
+        ("gate_proj", "gate_proj"),
+        ("up_proj", "up_proj"),
+        ("down_proj", "down_proj"),
+        ("ffn_up", "ffn_up"),
+        ("ffn_down", "ffn_down"),
+        ("linear_1", "linear_1"),
+        ("linear_2", "linear_2"),
+        ("linear_3", "linear_3"),
+        ("fc1", "fc1"),
+        ("fc2", "fc2"),
+        ("fc3", "fc3"),
+        ("w1", "w1"),
+        ("w2", "w2"),
+        ("w3", "w3"),
+    ]
+    .into_iter()
+    .find_map(|(needle, kind)| expert_name_has_weight_kind(lower_name, needle).then_some(kind))
+}
+
+fn expert_name_has_weight_kind(lower_name: &str, needle: &str) -> bool {
+    if needle.contains('_') {
+        return lower_name
+            .split(['.', '/'])
+            .any(|segment| segment == needle);
+    }
+    name_has_segment(lower_name, needle)
+}
+
+fn extract_layer_hint(name: &str) -> Option<usize> {
+    number_after_any_segment(name, &["layers", "layer", "blocks", "block", "h"])
+}
+
+fn extract_expert_index(name: &str) -> Option<usize> {
+    number_after_any_segment(name, &["experts", "expert"])
+}
+
+fn expert_group_key(name: &str, layer_hint: Option<usize>) -> String {
+    if let Some(layer_hint) = layer_hint {
+        return format!("layer:{layer_hint}");
+    }
+    if let Some((prefix, _)) = name
+        .split_once(".experts.")
+        .or_else(|| name.split_once("/experts/"))
+        .or_else(|| name.split_once(".expert."))
+        .or_else(|| name.split_once("/expert/"))
+    {
+        return prefix.to_string();
+    }
+    "unknown".to_string()
+}
+
+fn number_after_any_segment(name: &str, markers: &[&str]) -> Option<usize> {
+    let segments = name_segments(name);
+    segments.windows(2).find_map(|window| {
+        markers
+            .contains(&window[0].as_str())
+            .then(|| window[1].parse::<usize>().ok())
+            .flatten()
+    })
+}
+
+fn name_has_segment(name: &str, needle: &str) -> bool {
+    name_segments(name).iter().any(|segment| segment == needle)
+}
+
+fn name_segments(name: &str) -> Vec<String> {
+    name.split(['.', '/', '_'])
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 fn read_index(path: &Path) -> Result<RawIndex> {
@@ -1072,6 +1381,14 @@ mod tests {
         assert_eq!(manifest.tensors[0].source_shard, "model.safetensors");
         assert_eq!(manifest.candidates.router_tensors.len(), 1);
         assert_eq!(manifest.candidates.expert_tensors.len(), 1);
+        assert_eq!(
+            manifest.candidates.detected_layout_family,
+            Some("generic_moe")
+        );
+        assert_eq!(manifest.candidates.router_candidates[0].layer_hint, Some(0));
+        assert_eq!(manifest.candidates.expert_groups.len(), 1);
+        assert_eq!(manifest.candidates.expert_groups[0].layer_hint, Some(0));
+        assert_eq!(manifest.candidates.expert_groups[0].expert_indices, vec![0]);
     }
 
     #[test]
@@ -1626,5 +1943,147 @@ mod tests {
         let labels = classify_tensor("model.layers.0.block_sparse_moe.gate.weight", &[8, 2048]);
         assert!(labels.contains(&"moe_router_candidate"));
         assert!(!labels.contains(&"moe_expert_candidate"));
+    }
+
+    #[test]
+    fn detects_llama_style_block_sparse_moe_layout() {
+        let dir = temp_dir("llama-style");
+        let path = dir.join("model.safetensors");
+        write_safetensors(
+            &path,
+            r#"{
+                "model.layers.0.block_sparse_moe.gate.weight": {"dtype": "F32", "shape": [8, 2048], "data_offsets": [0, 65536]},
+                "model.layers.0.block_sparse_moe.experts.0.w1.weight": {"dtype": "F16", "shape": [2, 2], "data_offsets": [65536, 65544]},
+                "model.layers.0.block_sparse_moe.experts.0.w2.weight": {"dtype": "F16", "shape": [2, 2], "data_offsets": [65544, 65552]},
+                "model.layers.0.block_sparse_moe.experts.0.w3.weight": {"dtype": "F16", "shape": [2, 2], "data_offsets": [65552, 65560]}
+            }"#,
+            65_560,
+        );
+
+        let manifest = inspect_safetensors_checkpoint(&path).unwrap();
+        assert_eq!(
+            manifest.candidates.detected_layout_family,
+            Some("llama_moe")
+        );
+        assert_eq!(
+            manifest.candidates.router_tensors,
+            vec!["model.layers.0.block_sparse_moe.gate.weight"]
+        );
+        assert_eq!(manifest.candidates.expert_groups.len(), 1);
+        let group = &manifest.candidates.expert_groups[0];
+        assert_eq!(group.group_key, "layer:0");
+        assert_eq!(group.layer_hint, Some(0));
+        assert_eq!(group.expert_indices, vec![0]);
+        assert_eq!(group.weight_kinds, vec!["w1", "w2", "w3"]);
+        assert_eq!(group.source_shards, vec!["model.safetensors"]);
+    }
+
+    #[test]
+    fn detects_requested_named_moe_families() {
+        for (family, router_name, expert_name) in [
+            (
+                "phimoe",
+                "phimoe.model.layers.0.moe.gate.weight",
+                "phimoe.model.layers.0.moe.experts.1.fc1.weight",
+            ),
+            (
+                "granitemoe",
+                "granitemoe.model.layers.0.moe.gate.weight",
+                "granitemoe.model.layers.0.moe.experts.1.gate_proj.weight",
+            ),
+            (
+                "afmoe",
+                "afmoe.model.layers.0.moe.gating.weight",
+                "afmoe.model.layers.0.moe.experts.1.linear_1.weight",
+            ),
+            (
+                "lfm2_moe",
+                "lfm2_moe.model.layers.0.feed_forward.gate.weight",
+                "lfm2_moe.model.layers.0.feed_forward.experts.1.ffn_up.weight",
+            ),
+        ] {
+            let router = SafetensorsTensorRecord {
+                name: router_name.to_string(),
+                dtype: "F32".into(),
+                shape: vec![16, 2048],
+                byte_size: 131_072,
+                source_shard: "router.safetensors".into(),
+                data_offsets: [0, 131_072],
+                labels: classify_tensor(router_name, &[16, 2048]),
+            };
+            let expert = SafetensorsTensorRecord {
+                name: expert_name.to_string(),
+                dtype: "F16".into(),
+                shape: vec![2, 2],
+                byte_size: 8,
+                source_shard: "experts.safetensors".into(),
+                data_offsets: [0, 8],
+                labels: classify_tensor(expert_name, &[2, 2]),
+            };
+
+            let candidates = discover_candidates(&[router, expert]);
+            assert_eq!(candidates.detected_layout_family, Some(family));
+            assert_eq!(candidates.router_tensors, vec![router_name]);
+            assert_eq!(candidates.expert_tensors, vec![expert_name]);
+            assert_eq!(candidates.expert_groups.len(), 1);
+            assert_eq!(candidates.expert_groups[0].expert_indices, vec![1]);
+        }
+    }
+
+    #[test]
+    fn shape_guard_prevents_ambiguous_dense_gate_router_candidate() {
+        let labels = classify_tensor("model.layers.0.mlp.gate.weight", &[4096, 2048]);
+        assert!(!labels.contains(&"moe_router_candidate"));
+
+        let labels = classify_tensor("model.layers.0.mlp.gate.weight", &[8, 2048]);
+        assert!(labels.contains(&"moe_router_candidate"));
+    }
+
+    #[test]
+    fn groups_experts_across_hugging_face_index_shards() {
+        let dir = temp_dir("hf-expert-groups");
+        let router_shard = dir.join("model-00001-of-00002.safetensors");
+        let expert_shard = dir.join("model-00002-of-00002.safetensors");
+        write_safetensors(
+            &router_shard,
+            r#"{"model.layers.2.block_sparse_moe.gate.weight": {"dtype": "F32", "shape": [8, 2048], "data_offsets": [0, 65536]}}"#,
+            65_536,
+        );
+        write_safetensors(
+            &expert_shard,
+            r#"{
+                "model.layers.2.block_sparse_moe.experts.0.w1.weight": {"dtype": "F16", "shape": [2, 2], "data_offsets": [0, 8]},
+                "model.layers.2.block_sparse_moe.experts.1.w1.weight": {"dtype": "F16", "shape": [2, 2], "data_offsets": [8, 16]}
+            }"#,
+            16,
+        );
+        fs::write(
+            dir.join("model.safetensors.index.json"),
+            r#"{
+                "weight_map": {
+                    "model.layers.2.block_sparse_moe.gate.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.2.block_sparse_moe.experts.0.w1.weight": "model-00002-of-00002.safetensors",
+                    "model.layers.2.block_sparse_moe.experts.1.w1.weight": "model-00002-of-00002.safetensors"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let manifest = inspect_safetensors_checkpoint(&dir).unwrap();
+        assert_eq!(manifest.checkpoint.input_kind, "hf_index");
+        assert_eq!(manifest.candidates.expert_groups.len(), 1);
+        let group = &manifest.candidates.expert_groups[0];
+        assert_eq!(group.group_key, "layer:2");
+        assert_eq!(group.expert_indices, vec![0, 1]);
+        assert_eq!(
+            group.source_shards,
+            vec!["model-00002-of-00002.safetensors"]
+        );
+        assert!(
+            manifest
+                .tensors
+                .iter()
+                .all(|tensor| tensor.source_shard.ends_with(".safetensors"))
+        );
     }
 }

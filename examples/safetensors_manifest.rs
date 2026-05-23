@@ -40,6 +40,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         manifest.candidates.router_tensors.len(),
         manifest.candidates.expert_tensors.len()
     );
+    println!(
+        "detected_layout_family={} detailed_router_candidates={} expert_groups={}",
+        manifest
+            .candidates
+            .detected_layout_family
+            .unwrap_or("unknown"),
+        manifest.candidates.router_candidates.len(),
+        manifest.candidates.expert_groups.len()
+    );
 
     Ok(())
 }
