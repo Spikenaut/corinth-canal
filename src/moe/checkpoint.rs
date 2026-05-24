@@ -791,22 +791,25 @@ fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
         let ql = &block[18..146];
         let qh = &block[146..210];
         // Two passes of 128 values each (ql/qh advance by 64/32 per pass).
+        // Each pass reads 8 of the 16 scale entries: pass 0 uses scales[0..8],
+        // pass 1 uses scales[8..16]. Within each pass, the 4 output values per
+        // iteration read different scale offsets (matching ggml's sc[is + offset]).
         for pass in 0..2u8 {
             let base = (pass as usize) * 64;
             let qh_base = (pass as usize) * 32;
+            let sc_pass_base = (pass as usize) * 8;
             for l in 0..32 {
-                let sc_idx = l / 16;
-                let sc = scales[sc_idx] as f32;
+                let is = l / 16;
                 let q1 = ((ql[base + l] & 0x0F) | ((qh[qh_base + l] & 3) << 4)) as i8 - 32;
                 let q2 =
                     ((ql[base + 32 + l] & 0x0F) | (((qh[qh_base + l] >> 2) & 3) << 4)) as i8 - 32;
                 let q3 = ((ql[base + l] >> 4) | (((qh[qh_base + l] >> 4) & 3) << 4)) as i8 - 32;
                 let q4 =
                     ((ql[base + 32 + l] >> 4) | (((qh[qh_base + l] >> 6) & 3) << 4)) as i8 - 32;
-                out.push(d * sc * q1 as f32);
-                out.push(d * sc * q2 as f32);
-                out.push(d * sc * q3 as f32);
-                out.push(d * sc * q4 as f32);
+                out.push(d * scales[sc_pass_base + is] as f32 * q1 as f32);
+                out.push(d * scales[sc_pass_base + is + 2] as f32 * q2 as f32);
+                out.push(d * scales[sc_pass_base + is + 4] as f32 * q3 as f32);
+                out.push(d * scales[sc_pass_base + is + 6] as f32 * q4 as f32);
             }
         }
     }
