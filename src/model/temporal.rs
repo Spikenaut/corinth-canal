@@ -123,37 +123,37 @@ impl Model {
         }
 
         // Try each dequantized path in priority order (Q8_0 > Q5_K > Q6_K).
-        for (label, get_name, get_weights) in [
-            (
-                "q8_0",
-                OlmoeRouter::dequantized_q8_0_synapse_tensor_name
-                    as fn(&OlmoeRouter) -> Option<&str>,
-                OlmoeRouter::dequantized_q8_0_synapse_weights,
-            ),
-            (
-                "q5_k",
-                OlmoeRouter::dequantized_q5_k_synapse_tensor_name
-                    as fn(&OlmoeRouter) -> Option<&str>,
-                OlmoeRouter::dequantized_q5_k_synapse_weights,
-            ),
-            (
-                "q6_k",
-                OlmoeRouter::dequantized_q6_k_synapse_tensor_name
-                    as fn(&OlmoeRouter) -> Option<&str>,
-                OlmoeRouter::dequantized_q6_k_synapse_weights,
-            ),
-        ] {
-            if let Some(tensor_name) = get_name(&self.router).map(str::to_owned) {
-                let result = self.try_load_dequant_synapse(
-                    accelerator,
-                    neuron_count,
-                    &tensor_name,
-                    label,
-                    &get_weights,
-                )?;
-                if result {
-                    return Ok(());
-                }
+        if let Some(name) = self
+            .router
+            .dequantized_q8_0_synapse_tensor_name()
+            .map(str::to_owned)
+        {
+            if self.try_load_dequant(accelerator, neuron_count, &name, "q8_0", |r, n| {
+                r.dequantized_q8_0_synapse_weights(n)
+            })? {
+                return Ok(());
+            }
+        }
+        if let Some(name) = self
+            .router
+            .dequantized_q5_k_synapse_tensor_name()
+            .map(str::to_owned)
+        {
+            if self.try_load_dequant(accelerator, neuron_count, &name, "q5_k", |r, n| {
+                r.dequantized_q5_k_synapse_weights(n)
+            })? {
+                return Ok(());
+            }
+        }
+        if let Some(name) = self
+            .router
+            .dequantized_q6_k_synapse_tensor_name()
+            .map(str::to_owned)
+        {
+            if self.try_load_dequant(accelerator, neuron_count, &name, "q6_k", |r, n| {
+                r.dequantized_q6_k_synapse_weights(n)
+            })? {
+                return Ok(());
             }
         }
 
@@ -170,13 +170,13 @@ impl Model {
     /// Attempt to load a dequantized synapse tensor. Returns `Ok(true)` on
     /// success, `Ok(false)` if the tensor was already loaded (signature match),
     /// or `Err` on failure.
-    fn try_load_dequant_synapse(
+    fn try_load_dequant(
         &self,
         accelerator: &mut GpuAccelerator,
         neuron_count: usize,
         tensor_name: &str,
         label: &str,
-        get_weights: &dyn Fn(&OlmoeRouter, &str) -> crate::error::Result<Vec<f32>>,
+        get_weights: impl FnOnce(&super::OlmoeRouter, &str) -> crate::error::Result<Vec<f32>>,
     ) -> GpuResult<bool> {
         let fallback_signature = format!("synthetic-f32::{neuron_count}");
         if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
