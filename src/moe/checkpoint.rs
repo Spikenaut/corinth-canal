@@ -797,7 +797,7 @@ fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
             for l in 0..32 {
                 let sc_idx = l / 16;
                 let sc = scales[sc_idx] as f32;
-                let q1 = ((ql[base + l] & 0x0F) | (((qh[qh_base + l] >> 0) & 3) << 4)) as i8 - 32;
+                let q1 = ((ql[base + l] & 0x0F) | ((qh[qh_base + l] & 3) << 4)) as i8 - 32;
                 let q2 =
                     ((ql[base + 32 + l] & 0x0F) | (((qh[qh_base + l] >> 2) & 3) << 4)) as i8 - 32;
                 let q3 = ((ql[base + l] >> 4) | (((qh[qh_base + l] >> 4) & 3) << 4)) as i8 - 32;
