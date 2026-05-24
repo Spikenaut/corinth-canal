@@ -189,6 +189,8 @@ mod tests {
     fn model_family_slug_covers_new_variants() {
         assert_eq!(ModelFamily::Zaya.slug(), "zaya");
         assert_eq!(ModelFamily::Glm4.slug(), "glm4");
+        assert_eq!(ModelFamily::Moonlight16BA3B.slug(), "moonlight_16b_a3b");
+        assert_eq!(ModelFamily::Granite31A800M.slug(), "granite_3_1_a800m");
     }
 
     #[test]
