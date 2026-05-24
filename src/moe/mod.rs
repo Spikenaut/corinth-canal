@@ -880,6 +880,74 @@ mod tests {
         out
     }
 
+    fn build_q6_k_payload(width: usize, n_rows: usize) -> Vec<u8> {
+        assert!(
+            width.is_multiple_of(256),
+            "Q6_K width must be divisible by 256"
+        );
+        let blocks_per_row = width / 256;
+        // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
+        let row_bytes = blocks_per_row * 210;
+        let mut out = vec![0u8; row_bytes * n_rows];
+
+        for row in 0..n_rows {
+            let row_start = row * row_bytes;
+            for blk in 0..blocks_per_row {
+                let blk_start = row_start + blk * 210;
+
+                // d = 1.0 (f16 bits = 0x3c00)
+                out[blk_start] = 0x00;
+                out[blk_start + 1] = 0x3c;
+
+                // scales: 16 bytes, all set to 1
+                for i in 0..16 {
+                    out[blk_start + 2 + i] = 0x01;
+                }
+
+                // ql: each byte packs two 4-bit quant values.
+                // 0x00 sets both nibbles to 0.
+                for i in 0..128 {
+                    out[blk_start + 18 + i] = 0x00;
+                }
+
+                // qh: high 2 bits for each quant value (all zeros).
+                // With ql=0x00 and qh=0x00, combined = 0, value = 0 - 32 = -32.
+                // Output = d * scale * value = 1.0 * 1 * (-32) = -32.0 for every element.
+                for i in 0..64 {
+                    out[blk_start + 146 + i] = 0x00;
+                }
+            }
+        }
+        out
+    }
+
+    fn build_q6_k_synapse_checkpoint(gate_payload: Vec<u8>) -> Vec<u8> {
+        let attn_q_payload = build_q6_k_payload(EMBEDDING_DIM, EMBEDDING_DIM);
+        build_test_gguf(
+            vec![
+                (
+                    "blk.0.ffn_gate_inp.weight",
+                    vec![EMBEDDING_DIM, 64],
+                    GGML_TYPE_F32,
+                    gate_payload,
+                ),
+                (
+                    "blk.0.attn_q.weight",
+                    vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                    GGML_TYPE_Q6_K,
+                    attn_q_payload,
+                ),
+                (
+                    "token_embd.weight",
+                    vec![EMBEDDING_DIM, 32],
+                    GGML_TYPE_F16,
+                    vec![0u8; EMBEDDING_DIM * 32 * 2],
+                ),
+            ],
+            32,
+        )
+    }
+
     fn build_q5_k_synapse_checkpoint(gate_payload: Vec<u8>) -> Vec<u8> {
         let attn_q_payload = build_q5_k_payload(EMBEDDING_DIM, EMBEDDING_DIM);
         build_test_gguf(
@@ -1255,6 +1323,22 @@ mod tests {
     }
 
     #[test]
+    fn test_q6_k_synapse_probe_uses_dequantized_source() {
+        let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+        let path = write_temp_file(&build_q6_k_synapse_checkpoint(gate_payload), "q6-k-probe");
+
+        let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
+        assert_eq!(
+            metadata.preferred_gpu_synapse_tensor_name.as_deref(),
+            Some("blk.0.attn_q.weight")
+        );
+        assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
+        assert_eq!(metadata.synapse_source, "dequantized-q6_k");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn test_q5_k_dequantize_full_tensor_succeeds() {
         let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
         let path = write_temp_file(&build_q5_k_synapse_checkpoint(gate_payload), "q5-k-dequant");
@@ -1303,6 +1387,45 @@ mod tests {
         assert_eq!(weights[127], 1.0_f32, "element 127 should be 1.0");
         assert_eq!(weights[128], 1.0_f32, "element 128 should be 1.0");
         assert_eq!(weights[255], 1.0_f32, "element 255 should be 1.0");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_q6_k_dequantize_full_tensor_succeeds() {
+        let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+        let path = write_temp_file(&build_q6_k_synapse_checkpoint(gate_payload), "q6-k-dequant");
+
+        let model =
+            OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
+                .unwrap();
+
+        let weights = model
+            .dequantized_q6_k_synapse_weights("blk.0.attn_q.weight")
+            .expect("Q6_K dequantization must succeed");
+
+        // Verify we get the expected number of elements
+        assert_eq!(weights.len(), EMBEDDING_DIM * EMBEDDING_DIM);
+
+        // Verify all values are finite
+        for &v in &weights {
+            assert!(v.is_finite(), "expected finite value, got {v}");
+        }
+
+        // Verify deterministic values from the known payload:
+        // - d=1.0, scales=1, ql=0x00, qh=0x00
+        // - combined = 0, value = 0 - 32 = -32
+        // - output = 1.0 * 1 * (-32) = -32.0 for every element
+        assert!(
+            (weights[0] - (-32.0_f32)).abs() < 1e-4,
+            "element 0 should be -32.0, got {}",
+            weights[0]
+        );
+        assert!(
+            (weights[255] - (-32.0_f32)).abs() < 1e-4,
+            "element 255 should be -32.0, got {}",
+            weights[255]
+        );
 
         let _ = std::fs::remove_file(path);
     }
