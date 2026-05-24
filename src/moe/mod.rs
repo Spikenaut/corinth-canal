@@ -384,7 +384,8 @@ impl OlmoeRouter {
         checkpoint.dequantize_q5_k_tensor(tensor_name, &self.model_path)
     }
 
-    pub fn dequantized_q6_k_synapse_tensor_name(&self) -> Option<&str> {
+    #[allow(dead_code)]
+    pub(crate) fn dequantized_q6_k_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
             if a.synapse_source == SynapseSource::DequantizedQ6K {
                 a.dequant_q6_k_synapse_tensor.as_deref()

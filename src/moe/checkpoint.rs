@@ -706,7 +706,8 @@ fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
                     "Q6_K tensor width {width} is not divisible by 256"
                 )));
             }
-            Ok((width / 256) * (2 + 2 + 12 + 128))
+            // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
+            Ok((width / 256) * 210)
         }
         other => Err(HybridError::UnsupportedFormat(format!(
             "row-size lookup is not implemented for ggml_type={other}"
@@ -781,30 +782,30 @@ fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
             reason: format!("Q6_K width {width} is not divisible by 256"),
         });
     }
+    // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
+    // Matches the ggml block_q6_K layout from llama.cpp.
     let mut out = Vec::with_capacity(width);
-    for block in row.chunks_exact(144) {
+    for block in row.chunks_exact(210) {
         let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
-        let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
-        let scales = &block[4..16];
-        let ql = &block[16..144];
-        let mut is = 0usize;
-        let mut u = 1u8;
-        for ql_chunk in ql.chunks_exact(32) {
-            let (sc1, m1) = scale_min_k4(is, scales);
-            let (sc2, m2) = scale_min_k4(is + 1, scales);
-            let d1 = d * sc1 as f32;
-            let mn1 = dmin * m1 as f32;
-            let d2 = d * sc2 as f32;
-            let mn2 = dmin * m2 as f32;
-            for &q in ql_chunk.iter() {
-                let qh_byte = 0u8;
-                let hi1 = if qh_byte & u != 0 { 16 } else { 0 };
-                let hi2 = if qh_byte & (u << 1) != 0 { 16 } else { 0 };
-                out.push(d1 * ((q & 0x0F) + hi1) as f32 - mn1);
-                out.push(d2 * ((q >> 4) + hi2) as f32 - mn2);
+        let scales = &block[2..18];
+        let ql = &block[18..146];
+        let qh = &block[146..210];
+        // Two passes of 128 values each (ql/qh advance by 64/32 per pass).
+        for pass in 0..2u8 {
+            let base = (pass as usize) * 64;
+            let qh_base = (pass as usize) * 32;
+            for l in 0..32 {
+                let sc_idx = l / 16;
+                let sc = scales[sc_idx] as f32;
+                let q1 = ((ql[base + l] & 0x0F) | (((qh[qh_base + l] >> 0) & 3) << 4)) as i8 - 32;
+                let q2 = ((ql[base + 32 + l] & 0x0F) | (((qh[qh_base + l] >> 2) & 3) << 4)) as i8 - 32;
+                let q3 = ((ql[base + l] >> 4) | (((qh[qh_base + l] >> 4) & 3) << 4)) as i8 - 32;
+                let q4 = ((ql[base + 32 + l] >> 4) | (((qh[qh_base + l] >> 6) & 3) << 4)) as i8 - 32;
+                out.push(d * sc * q1 as f32);
+                out.push(d * sc * q2 as f32);
+                out.push(d * sc * q3 as f32);
+                out.push(d * sc * q4 as f32);
             }
-            is += 2;
-            u <<= 2;
         }
     }
     Ok(out)
