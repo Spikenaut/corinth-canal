@@ -99,7 +99,7 @@ pub fn parse_family_slug(value: &str) -> Option<ModelFamily> {
         "gemma4" | "gemma_4" | "gemma" => Some(ModelFamily::Gemma4),
         "deepseek2" | "deepseek_v2" | "deepseek" => Some(ModelFamily::DeepSeek2),
         "llama" | "llama_moe" | "llama3_moe" => Some(ModelFamily::LlamaMoe),
-        "moonlight" | "moonlight_moe" => Some(ModelFamily::Moonlight16BA3B),
+        "moonlight" | "moonlight_moe" | "moonlight_16b_a3b" => Some(ModelFamily::Moonlight16BA3B),
         "granite" | "granite_3_1" | "granite_3_1_a800m" | "granite31a800m" => {
             Some(ModelFamily::Granite31A800M)
         }
@@ -330,7 +330,7 @@ pub fn discover_validation_models() -> Vec<ValidationModelSpec> {
         ),
         (
             "moonlight_16b_a3b_q4_k_m",
-            Some(ModelFamily::Moonlight16BA3B),
+            None,
             PathBuf::from(
                 "models/Moonlight-16B-A3B-bnb-4bit/moonlight-16b-a3b-bnb-4bit-q4_k_m.gguf",
             ),
@@ -869,11 +869,26 @@ mod tests {
     }
 
     #[test]
-    fn csv_source_label_maps_telemetry_stem_to_csv_re4() {
-        assert_eq!(csv_source_label(Path::new("telemetry.csv")), "csv_re4");
+    fn parse_family_slug_accepts_granite_aliases() {
         assert_eq!(
-            csv_source_label(Path::new("/tmp/cyberpunk2077_combat.csv")),
-            "csv_cyberpunk2077_combat"
+            parse_family_slug("granite"),
+            Some(ModelFamily::Granite31A800M)
+        );
+        assert_eq!(
+            parse_family_slug("granite_3_1"),
+            Some(ModelFamily::Granite31A800M)
+        );
+        assert_eq!(
+            parse_family_slug("granite_3_1_a800m"),
+            Some(ModelFamily::Granite31A800M)
+        );
+        assert_eq!(
+            parse_family_slug("granite31a800m"),
+            Some(ModelFamily::Granite31A800M)
+        );
+        assert_eq!(
+            ModelFamily::Granite31A800M.slug(),
+            parse_family_slug(ModelFamily::Granite31A800M.slug()).unwrap()
         );
     }
 

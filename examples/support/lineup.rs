@@ -9,7 +9,7 @@ fn parse_family_slug(value: &str) -> Option<ModelFamily> {
         "gemma4" | "gemma_4" | "gemma" => Some(ModelFamily::Gemma4),
         "deepseek2" | "deepseek_v2" | "deepseek" => Some(ModelFamily::DeepSeek2),
         "llama" | "llama_moe" | "llama3_moe" => Some(ModelFamily::LlamaMoe),
-        "moonlight" | "moonlight_moe" => Some(ModelFamily::Moonlight16BA3B),
+        "moonlight" | "moonlight_moe" | "moonlight_16b_a3b" => Some(ModelFamily::Moonlight16BA3B),
         "granite" | "granite_3_1" | "granite_3_1_a800m" | "granite31a800m" => {
             Some(ModelFamily::Granite31A800M)
         }
