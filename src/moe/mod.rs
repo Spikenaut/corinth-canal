@@ -29,6 +29,7 @@ pub(super) const GGML_TYPE_F32: u32 = 0;
 pub(super) const GGML_TYPE_F16: u32 = 1;
 pub(super) const GGML_TYPE_Q8_0: u32 = 8;
 pub(super) const GGML_TYPE_Q5_K: u32 = 13;
+pub(super) const GGML_TYPE_Q6_K: u32 = 14;
 pub(super) const GGML_TYPE_IQ3_S: u32 = 21;
 pub(super) const GGUF_VALUE_TYPE_UINT8: u32 = 0;
 pub(super) const GGUF_VALUE_TYPE_INT8: u32 = 1;
@@ -105,10 +106,10 @@ pub fn ggml_type_label(ggml_type: u32) -> &'static str {
 
 /// Returns `true` iff the runtime can consume `ggml_type` as the source
 /// for the GPU synapse tensor today. `F16` uses the registered direct-load
-/// path; `Q8_0` and `Q5_K` use the dequantized F32 path. Every other type
-/// falls back to synthetic synapses.
+/// path; `Q8_0`, `Q5_K`, and `Q6_K` use the dequantized F32 path. Every other
+/// type falls back to synthetic synapses.
 pub fn synapse_dequant_path_supported(ggml_type: u32) -> bool {
-    ggml_type == GGML_TYPE_F16 || ggml_type == GGML_TYPE_Q8_0 || ggml_type == GGML_TYPE_Q5_K
+    ggml_type == GGML_TYPE_F16 || ggml_type == GGML_TYPE_Q8_0 || ggml_type == GGML_TYPE_Q5_K || ggml_type == GGML_TYPE_Q6_K
 }
 
 impl RouterMetadata {
@@ -381,6 +382,28 @@ impl OlmoeRouter {
                 reason: "checkpoint not loaded".into(),
             })?;
         checkpoint.dequantize_q5_k_tensor(tensor_name, &self.model_path)
+    }
+
+    pub fn dequantized_q6_k_synapse_tensor_name(&self) -> Option<&str> {
+        self.adapter.as_ref().and_then(|a| {
+            if a.synapse_source == SynapseSource::DequantizedQ6K {
+                a.dequant_q6_k_synapse_tensor.as_deref()
+            } else {
+                None
+            }
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn dequantized_q6_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+        let checkpoint = self
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: self.model_path.clone(),
+                reason: "checkpoint not loaded".into(),
+            })?;
+        checkpoint.dequantize_q6_k_tensor(tensor_name, &self.model_path)
     }
 
     /// `(src_rows, src_cols)` matching the row-major layout produced by
@@ -1309,7 +1332,8 @@ mod tests {
         assert!(synapse_dequant_path_supported(GGML_TYPE_F16));
         assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
         assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
-        for &ty in &[0u32, 12, 14, 20, 21] {
+        assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
+        for &ty in &[0u32, 12, 20, 21] {
             assert!(!synapse_dequant_path_supported(ty), "ggml_type={ty}");
         }
     }

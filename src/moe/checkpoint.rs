@@ -1,7 +1,7 @@
 //! GGUF checkpoint parsing and mapped tensor access for the router bridge.
 
 use super::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q8_0, GGUF_MAGIC,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0, GGUF_MAGIC,
     GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL, GGUF_VALUE_TYPE_FLOAT32, GGUF_VALUE_TYPE_FLOAT64,
     GGUF_VALUE_TYPE_INT8, GGUF_VALUE_TYPE_INT16, GGUF_VALUE_TYPE_INT32, GGUF_VALUE_TYPE_INT64,
     GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT8, GGUF_VALUE_TYPE_UINT16, GGUF_VALUE_TYPE_UINT32,
@@ -128,6 +128,9 @@ impl MappedGgufCheckpoint {
             }
             GGML_TYPE_Q5_K => {
                 dequantize_row_q5_k(self.row_bytes(&info, token_id, path, tensor_name)?, d0)
+            }
+            GGML_TYPE_Q6_K => {
+                dequantize_row_q6_k(self.row_bytes(&info, token_id, path, tensor_name)?, d0)
             }
             GGML_TYPE_IQ3_S => Err(HybridError::UnsupportedFormat(format!(
                 "tensor '{tensor_name}' uses IQ3_S token embeddings; checkpoint-backed token embedding extraction is unsupported for this quantization"
@@ -553,6 +556,36 @@ impl MappedGgufCheckpoint {
         }
         Ok(out)
     }
+    #[allow(dead_code)]
+    pub(super) fn dequantize_q6_k_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+        let info = self.tensor_info(name, path)?.clone();
+        if info.ggml_type != GGML_TYPE_Q6_K {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' must be Q6_K, got ggml_type={}",
+                info.ggml_type
+            )));
+        }
+        if info.dims.is_empty() {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' has no dimensions"
+            )));
+        }
+        let width = info.dims[0];
+        let n_rows = info.dims.get(1).copied().unwrap_or(1);
+        let capacity = width
+            .checked_mul(n_rows)
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: path.to_owned(),
+                reason: format!("tensor '{name}' element count overflow ({width}x{n_rows})"),
+            })?;
+        let mut out = Vec::with_capacity(capacity);
+        for row in 0..n_rows {
+            let row_bytes = self.row_bytes(&info, row, path, name)?;
+            let dequantized = dequantize_row_q6_k(row_bytes, width)?;
+            out.extend_from_slice(&dequantized);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(feature = "cuda")]
@@ -667,6 +700,14 @@ fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
             }
             Ok((width / 256) * (2 + 2 + 12 + 32 + 128))
         }
+        GGML_TYPE_Q6_K => {
+            if !width.is_multiple_of(256) {
+                return Err(HybridError::UnsupportedFormat(format!(
+                    "Q6_K tensor width {width} is not divisible by 256"
+                )));
+            }
+            Ok((width / 256) * (2 + 2 + 12 + 128))
+        }
         other => Err(HybridError::UnsupportedFormat(format!(
             "row-size lookup is not implemented for ggml_type={other}"
         ))),
@@ -728,6 +769,42 @@ fn dequantize_row_q5_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
             is += 2;
             u1 <<= 2;
             u2 <<= 2;
+        }
+    }
+    Ok(out)
+}
+
+fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
+    if !width.is_multiple_of(256) {
+        return Err(HybridError::ModelLoad {
+            path: "".into(),
+            reason: format!("Q6_K width {width} is not divisible by 256"),
+        });
+    }
+    let mut out = Vec::with_capacity(width);
+    for block in row.chunks_exact(144) {
+        let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+        let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
+        let scales = &block[4..16];
+        let ql = &block[16..144];
+        let mut is = 0usize;
+        let mut u = 1u8;
+        for ql_chunk in ql.chunks_exact(32) {
+            let (sc1, m1) = scale_min_k4(is, scales);
+            let (sc2, m2) = scale_min_k4(is + 1, scales);
+            let d1 = d * sc1 as f32;
+            let mn1 = dmin * m1 as f32;
+            let d2 = d * sc2 as f32;
+            let mn2 = dmin * m2 as f32;
+            for &q in ql_chunk.iter() {
+                let qh_byte = 0u8;
+                let hi1 = if qh_byte & u != 0 { 16 } else { 0 };
+                let hi2 = if qh_byte & (u << 1) != 0 { 16 } else { 0 };
+                out.push(d1 * ((q & 0x0F) + hi1) as f32 - mn1);
+                out.push(d2 * ((q >> 4) + hi2) as f32 - mn2);
+            }
+            is += 2;
+            u <<= 2;
         }
     }
     Ok(out)

@@ -206,6 +206,46 @@ impl Model {
             }
         }
 
+        // Q6_K dequantized path: only invoked when the adapter confirmed that
+        // the preferred tensor is Q6_K with width divisible by 256.
+        if let Some(tensor_name) = self
+            .router
+            .dequantized_q6_k_synapse_tensor_name()
+            .map(str::to_owned)
+        {
+            let fallback_signature = format!("synthetic-f32::{neuron_count}");
+            if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
+                return Ok(());
+            }
+            let signature = format!(
+                "dequantized-q6_k::{}::{tensor_name}",
+                self.router.model_path()
+            );
+            if accelerator.synapse_signature() != Some(signature.as_str()) {
+                let weights = self
+                    .router
+                    .dequantized_q6_k_synapse_weights(&tensor_name)
+                    .map_err(|e| {
+                        GpuError::MemoryError(format!("Q6_K dequantization failed: {e}"))
+                    })?;
+                let (src_rows, src_cols) = self
+                    .router
+                    .synapse_tensor_row_major_shape(&tensor_name)
+                    .map_err(|e| {
+                        GpuError::MemoryError(format!("synapse tensor shape lookup failed: {e}"))
+                    })?;
+                let final_weights = if src_rows == neuron_count && src_cols == neuron_count {
+                    weights
+                } else {
+                    Self::resample_weights_to_square(&weights, neuron_count, src_rows, src_cols)
+                };
+                accelerator.load_synapse_weights_named(&signature, &final_weights)?;
+                return Ok(());
+            } else {
+                return Ok(());
+            }
+        }
+
         let fallback_signature = format!("synthetic-f32::{neuron_count}");
         if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
             return Ok(());
