@@ -109,7 +109,10 @@ pub fn ggml_type_label(ggml_type: u32) -> &'static str {
 /// path; `Q8_0`, `Q5_K`, and `Q6_K` use the dequantized F32 path. Every other
 /// type falls back to synthetic synapses.
 pub fn synapse_dequant_path_supported(ggml_type: u32) -> bool {
-    ggml_type == GGML_TYPE_F16 || ggml_type == GGML_TYPE_Q8_0 || ggml_type == GGML_TYPE_Q5_K || ggml_type == GGML_TYPE_Q6_K
+    ggml_type == GGML_TYPE_F16
+        || ggml_type == GGML_TYPE_Q8_0
+        || ggml_type == GGML_TYPE_Q5_K
+        || ggml_type == GGML_TYPE_Q6_K
 }
 
 impl RouterMetadata {
