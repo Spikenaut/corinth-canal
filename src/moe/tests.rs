@@ -836,3 +836,31 @@ fn test_real_checkpoint_probe_via_env() {
     assert!(metadata.num_experts > 0);
     assert!(!metadata.routing_tensor_name.is_empty());
 }
+
+#[test]
+fn test_ggml_type_label_covers_all_constants() {
+    // Exercise every named constant through ggml_type_label
+    let cases = [
+        (GGML_TYPE_F32, "F32"),
+        (GGML_TYPE_F16, "F16"),
+        (GGML_TYPE_Q8_0, "Q8_0"),
+        (GGML_TYPE_Q5_K, "Q5_K"),
+        (GGML_TYPE_Q6_K, "Q6_K"),
+        (GGML_TYPE_IQ3_S, "IQ3_S"),
+    ];
+    for (ty, expected) in cases {
+        assert_eq!(ggml_type_label(ty), expected, "ggml_type={ty}");
+    }
+    // Unknown type
+    assert_eq!(ggml_type_label(9999), "unknown");
+}
+
+#[test]
+fn test_synapse_dequant_path_supported_exercises_all_named_types() {
+    assert!(synapse_dequant_path_supported(GGML_TYPE_F16));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
+    assert!(!synapse_dequant_path_supported(GGML_TYPE_F32));
+    assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
+}
