@@ -784,6 +784,16 @@ fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
     }
     // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
     // Matches the ggml block_q6_K layout from llama.cpp.
+    let expected_len = (width / 256) * 210;
+    if row.len() != expected_len {
+        return Err(HybridError::ModelLoad {
+            path: "".into(),
+            reason: format!(
+                "Q6_K row length mismatch: expected {expected_len} bytes for width {width}, got {}",
+                row.len()
+            ),
+        });
+    }
     let mut out = Vec::with_capacity(width);
     for block in row.chunks_exact(210) {
         let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
@@ -806,10 +816,10 @@ fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
                 let q3 = ((ql[base + l] >> 4) | (((qh[qh_base + l] >> 4) & 3) << 4)) as i8 - 32;
                 let q4 =
                     ((ql[base + 32 + l] >> 4) | (((qh[qh_base + l] >> 6) & 3) << 4)) as i8 - 32;
-                out.push(d * scales[sc_pass_base + is] as f32 * q1 as f32);
-                out.push(d * scales[sc_pass_base + is + 2] as f32 * q2 as f32);
-                out.push(d * scales[sc_pass_base + is + 4] as f32 * q3 as f32);
-                out.push(d * scales[sc_pass_base + is + 6] as f32 * q4 as f32);
+                out.push(d * (scales[sc_pass_base + is] as i8) as f32 * q1 as f32);
+                out.push(d * (scales[sc_pass_base + is + 2] as i8) as f32 * q2 as f32);
+                out.push(d * (scales[sc_pass_base + is + 4] as i8) as f32 * q3 as f32);
+                out.push(d * (scales[sc_pass_base + is + 6] as i8) as f32 * q4 as f32);
             }
         }
     }

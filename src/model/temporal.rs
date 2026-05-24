@@ -123,6 +123,8 @@ impl Model {
         }
 
         // Try each dequantized path in priority order (Q8_0 > Q5_K > Q6_K).
+        // If a dequant tensor name exists, either load it or recognize it is
+        // already loaded (signature match) and return immediately.
         if let Some(name) = self
             .router
             .dequantized_q8_0_synapse_tensor_name()
