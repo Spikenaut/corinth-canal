@@ -176,6 +176,8 @@ fn infer_family(
         "gemma4" => ModelFamily::Gemma4,
         "deepseek2" => ModelFamily::DeepSeek2,
         "llama" => ModelFamily::LlamaMoe,
+        "moonlight" => ModelFamily::Moonlight16BA3B,
+        "granite" | "granitemoe" => ModelFamily::Granite31A800M,
         "zaya" => ModelFamily::Zaya,
         "glm4" | "glm4moe" => ModelFamily::Glm4,
         other => {
@@ -215,6 +217,30 @@ mod tests {
         assert_eq!(
             infer_family("glm4moe", None, "test.gguf").unwrap(),
             ModelFamily::Glm4
+        );
+    }
+
+    #[test]
+    fn infer_family_supports_granite_architecture() {
+        assert_eq!(
+            infer_family("granite", None, "test.gguf").unwrap(),
+            ModelFamily::Granite31A800M
+        );
+    }
+
+    #[test]
+    fn infer_family_supports_moonlight_architecture() {
+        assert_eq!(
+            infer_family("moonlight", None, "test.gguf").unwrap(),
+            ModelFamily::Moonlight16BA3B
+        );
+    }
+
+    #[test]
+    fn infer_family_supports_granitemoe_architecture() {
+        assert_eq!(
+            infer_family("granitemoe", None, "test.gguf").unwrap(),
+            ModelFamily::Granite31A800M
         );
     }
 }
