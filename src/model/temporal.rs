@@ -122,119 +122,39 @@ impl Model {
             return Ok(());
         }
 
-        // Q8_0 dequantized path: only invoked when the adapter confirmed that
-        // the preferred tensor is Q8_0 with width divisible by 32.  We check
-        // the GPU signature before dequantizing to avoid the allocation cost
-        // on repeated calls.
-        if let Some(tensor_name) = self
-            .router
-            .dequantized_q8_0_synapse_tensor_name()
-            .map(str::to_owned)
-        {
-            let fallback_signature = format!("synthetic-f32::{neuron_count}");
-            if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
-                return Ok(());
+        // Try each dequantized path in priority order (Q8_0 > Q5_K > Q6_K).
+        for (label, get_name, get_weights) in [
+            (
+                "q8_0",
+                OlmoeRouter::dequantized_q8_0_synapse_tensor_name
+                    as fn(&OlmoeRouter) -> Option<&str>,
+                OlmoeRouter::dequantized_q8_0_synapse_weights,
+            ),
+            (
+                "q5_k",
+                OlmoeRouter::dequantized_q5_k_synapse_tensor_name
+                    as fn(&OlmoeRouter) -> Option<&str>,
+                OlmoeRouter::dequantized_q5_k_synapse_weights,
+            ),
+            (
+                "q6_k",
+                OlmoeRouter::dequantized_q6_k_synapse_tensor_name
+                    as fn(&OlmoeRouter) -> Option<&str>,
+                OlmoeRouter::dequantized_q6_k_synapse_weights,
+            ),
+        ] {
+            if let Some(tensor_name) = get_name(&self.router).map(str::to_owned) {
+                let result = self.try_load_dequant_synapse(
+                    accelerator,
+                    neuron_count,
+                    &tensor_name,
+                    label,
+                    &get_weights,
+                )?;
+                if result {
+                    return Ok(());
+                }
             }
-            let signature = format!(
-                "dequantized-q8_0::{}::{tensor_name}",
-                self.router.model_path()
-            );
-            if accelerator.synapse_signature() == Some(signature.as_str()) {
-                return Ok(());
-            }
-            let weights = self
-                .router
-                .dequantized_q8_0_synapse_weights(&tensor_name)
-                .map_err(|e| GpuError::MemoryError(format!("Q8_0 dequantization failed: {e}")))?;
-            let (src_rows, src_cols) = self
-                .router
-                .synapse_tensor_row_major_shape(&tensor_name)
-                .map_err(|e| {
-                    GpuError::MemoryError(format!("synapse tensor shape lookup failed: {e}"))
-                })?;
-            let final_weights = if src_rows == neuron_count && src_cols == neuron_count {
-                weights
-            } else {
-                Self::resample_weights_to_square(&weights, neuron_count, src_rows, src_cols)
-            };
-            accelerator.load_synapse_weights_named(&signature, &final_weights)?;
-            return Ok(());
-        }
-
-        // Q5_K dequantized path: only invoked when the adapter confirmed that
-        // the preferred tensor is Q5_K with width divisible by 256.  We check
-        // the GPU signature before dequantizing to avoid the allocation cost
-        // on repeated calls.
-        if let Some(tensor_name) = self
-            .router
-            .dequantized_q5_k_synapse_tensor_name()
-            .map(str::to_owned)
-        {
-            let fallback_signature = format!("synthetic-f32::{neuron_count}");
-            if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
-                return Ok(());
-            }
-            let signature = format!(
-                "dequantized-q5_k::{}::{tensor_name}",
-                self.router.model_path()
-            );
-            if accelerator.synapse_signature() == Some(signature.as_str()) {
-                return Ok(());
-            }
-            let weights = self
-                .router
-                .dequantized_q5_k_synapse_weights(&tensor_name)
-                .map_err(|e| GpuError::MemoryError(format!("Q5_K dequantization failed: {e}")))?;
-            let (src_rows, src_cols) = self
-                .router
-                .synapse_tensor_row_major_shape(&tensor_name)
-                .map_err(|e| {
-                    GpuError::MemoryError(format!("synapse tensor shape lookup failed: {e}"))
-                })?;
-            let final_weights = if src_rows == neuron_count && src_cols == neuron_count {
-                weights
-            } else {
-                Self::resample_weights_to_square(&weights, neuron_count, src_rows, src_cols)
-            };
-            accelerator.load_synapse_weights_named(&signature, &final_weights)?;
-            return Ok(());
-        }
-
-        // Q6_K dequantized path: only invoked when the adapter confirmed that
-        // the preferred tensor is Q6_K with width divisible by 256.
-        if let Some(tensor_name) = self
-            .router
-            .dequantized_q6_k_synapse_tensor_name()
-            .map(str::to_owned)
-        {
-            let fallback_signature = format!("synthetic-f32::{neuron_count}");
-            if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
-                return Ok(());
-            }
-            let signature = format!(
-                "dequantized-q6_k::{}::{tensor_name}",
-                self.router.model_path()
-            );
-            if accelerator.synapse_signature() == Some(signature.as_str()) {
-                return Ok(());
-            }
-            let weights = self
-                .router
-                .dequantized_q6_k_synapse_weights(&tensor_name)
-                .map_err(|e| GpuError::MemoryError(format!("Q6_K dequantization failed: {e}")))?;
-            let (src_rows, src_cols) = self
-                .router
-                .synapse_tensor_row_major_shape(&tensor_name)
-                .map_err(|e| {
-                    GpuError::MemoryError(format!("synapse tensor shape lookup failed: {e}"))
-                })?;
-            let final_weights = if src_rows == neuron_count && src_cols == neuron_count {
-                weights
-            } else {
-                Self::resample_weights_to_square(&weights, neuron_count, src_rows, src_cols)
-            };
-            accelerator.load_synapse_weights_named(&signature, &final_weights)?;
-            return Ok(());
         }
 
         let fallback_signature = format!("synthetic-f32::{neuron_count}");
@@ -245,6 +165,45 @@ impl Model {
         let synthetic_weights = vec![0.0f32; neuron_count * neuron_count];
         accelerator.load_synapse_weights_named(&fallback_signature, &synthetic_weights)?;
         Ok(())
+    }
+
+    /// Attempt to load a dequantized synapse tensor. Returns `Ok(true)` on
+    /// success, `Ok(false)` if the tensor was already loaded (signature match),
+    /// or `Err` on failure.
+    fn try_load_dequant_synapse(
+        &self,
+        accelerator: &mut GpuAccelerator,
+        neuron_count: usize,
+        tensor_name: &str,
+        label: &str,
+        get_weights: &dyn Fn(&OlmoeRouter, &str) -> crate::error::Result<Vec<f32>>,
+    ) -> GpuResult<bool> {
+        let fallback_signature = format!("synthetic-f32::{neuron_count}");
+        if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
+            return Ok(false);
+        }
+        let signature = format!(
+            "dequantized-{label}::{}::{tensor_name}",
+            self.router.model_path()
+        );
+        if accelerator.synapse_signature() == Some(signature.as_str()) {
+            return Ok(false);
+        }
+        let weights = get_weights(&self.router, tensor_name)
+            .map_err(|e| GpuError::MemoryError(format!("{label} dequantization failed: {e}")))?;
+        let (src_rows, src_cols) = self
+            .router
+            .synapse_tensor_row_major_shape(tensor_name)
+            .map_err(|e| {
+                GpuError::MemoryError(format!("synapse tensor shape lookup failed: {e}"))
+            })?;
+        let final_weights = if src_rows == neuron_count && src_cols == neuron_count {
+            weights
+        } else {
+            Self::resample_weights_to_square(&weights, neuron_count, src_rows, src_cols)
+        };
+        accelerator.load_synapse_weights_named(&signature, &final_weights)?;
+        Ok(true)
     }
 
     /// Resample a non-square weight tensor into a `[neuron_count × neuron_count]`
