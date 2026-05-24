@@ -16,6 +16,8 @@ pub enum ModelFamily {
     Gemma4,
     DeepSeek2,
     LlamaMoe,
+    Moonlight16BA3B,
+    Granite31A800M,
     Zaya,
     Glm4,
 }
@@ -28,6 +30,8 @@ impl ModelFamily {
             Self::Gemma4 => "gemma4",
             Self::DeepSeek2 => "deepseek2",
             Self::LlamaMoe => "llama_moe",
+            Self::Moonlight16BA3B => "moonlight_16b_a3b",
+            Self::Granite31A800M => "granite_3_1_a800m",
             Self::Zaya => "zaya",
             Self::Glm4 => "glm4",
         }
