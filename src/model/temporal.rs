@@ -116,13 +116,31 @@ impl Model {
             return Ok(());
         }
 
-        if let Some(r) = self.try_dequant("q8_0", accelerator, neuron_count)? {
+        if self.load_dequant_synapse(
+            "q8_0",
+            |r| r.dequantized_q8_0_synapse_tensor_name(),
+            |r, n| r.dequantized_q8_0_synapse_weights(n),
+            accelerator,
+            neuron_count,
+        )? {
             return Ok(());
         }
-        if let Some(r) = self.try_dequant("q5_k", accelerator, neuron_count)? {
+        if self.load_dequant_synapse(
+            "q5_k",
+            |r| r.dequantized_q5_k_synapse_tensor_name(),
+            |r, n| r.dequantized_q5_k_synapse_weights(n),
+            accelerator,
+            neuron_count,
+        )? {
             return Ok(());
         }
-        if let Some(r) = self.try_dequant("q6_k", accelerator, neuron_count)? {
+        if self.load_dequant_synapse(
+            "q6_k",
+            |r| r.dequantized_q6_k_synapse_tensor_name(),
+            |r, n| r.dequantized_q6_k_synapse_weights(n),
+            accelerator,
+            neuron_count,
+        )? {
             return Ok(());
         }
 
@@ -135,49 +153,34 @@ impl Model {
         Ok(())
     }
 
-    fn try_dequant(
-        &self,
+    /// Attempt to load a dequantized synapse tensor for the given quantization
+    /// format. Returns `Ok(true)` if weights were loaded or already present on
+    /// the GPU, `Ok(false)` if no tensor is available for this format.
+    fn load_dequant_synapse(
+        &mut self,
         label: &str,
+        get_name: fn(&crate::moe::OlmoeRouter) -> Option<&str>,
+        get_weights: fn(&crate::moe::OlmoeRouter, &str) -> crate::error::Result<Vec<f32>>,
         accelerator: &mut GpuAccelerator,
         neuron_count: usize,
-    ) -> GpuResult<Option<()>> {
-        let tensor_name = match label {
-            "q8_0" => self
-                .router
-                .dequantized_q8_0_synapse_tensor_name()
-                .map(str::to_owned),
-            "q5_k" => self
-                .router
-                .dequantized_q5_k_synapse_tensor_name()
-                .map(str::to_owned),
-            "q6_k" => self
-                .router
-                .dequantized_q6_k_synapse_tensor_name()
-                .map(str::to_owned),
-            _ => None,
-        };
-        let tensor_name = match tensor_name {
-            Some(n) => n,
-            None => return Ok(None),
+    ) -> GpuResult<bool> {
+        let tensor_name = match get_name(&self.router) {
+            Some(n) => n.to_owned(),
+            None => return Ok(false),
         };
         let fallback_signature = format!("synthetic-f32::{neuron_count}");
         if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
-            return Ok(None);
+            return Ok(false);
         }
         let signature = format!(
             "dequantized-{label}::{}::{tensor_name}",
             self.router.model_path()
         );
         if accelerator.synapse_signature() == Some(signature.as_str()) {
-            return Ok(Some(()));
+            return Ok(true);
         }
-        let weights = match label {
-            "q8_0" => self.router.dequantized_q8_0_synapse_weights(&tensor_name),
-            "q5_k" => self.router.dequantized_q5_k_synapse_weights(&tensor_name),
-            "q6_k" => self.router.dequantized_q6_k_synapse_weights(&tensor_name),
-            _ => unreachable!(),
-        }
-        .map_err(|e| GpuError::MemoryError(format!("{label} dequantization failed: {e}")))?;
+        let weights = get_weights(&self.router, &tensor_name)
+            .map_err(|e| GpuError::MemoryError(format!("{label} dequantization failed: {e}")))?;
         let (src_rows, src_cols) = self
             .router
             .synapse_tensor_row_major_shape(&tensor_name)
@@ -190,7 +193,7 @@ impl Model {
             Self::resample_weights_to_square(&weights, neuron_count, src_rows, src_cols)
         };
         accelerator.load_synapse_weights_named(&signature, &final_weights)?;
-        Ok(Some(()))
+        Ok(true)
     }
 
     /// Resample a non-square weight tensor into a `[neuron_count × neuron_count]`
