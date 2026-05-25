@@ -8,6 +8,11 @@ Formula provenance was cross-checked against the external
 `corinth-canal` latent telemetry for SymbolicRegression.jl discovery and
 paired-run validation; it does not define simulator runtime math.
 
+An older checked-in raw-telemetry artifact from
+`outputs/20260414_194227_v2pNMk/hall_of_fame.csv` (and its identical `.bak`
+copy) was also inspected. That artifact predates the latent SAAQ 1.0 / 1.5
+rules below and comes from `SAAQ_discovery.jl`, not `SAAQ_latent_discovery.jl`.
+
 ## SAAQ 1.0 — `LegacyV1_0`
 
 **Config name:** `saaq_v1_0` (env `SAAQ_RULE=legacy` or `SAAQ_RULE=saaq_v1_0`)
@@ -117,6 +122,56 @@ as follows:
 - `SAAQ_discovery.jl` is an older raw-telemetry discovery harness. Its
   `ideal_compression_y = (gpu_power_w + cpu_package_power_w) / 400.0` target is
   not one of the SAAQ 1.0 or SAAQ 1.5 latent update formulas.
+
+## Earlier Raw Discovery Artifact
+
+The older `Surrogate_Viz.jl` artifact at
+`outputs/20260414_194227_v2pNMk/hall_of_fame.csv` uses the feature order from
+`SAAQ_discovery.jl`:
+
+- `x1 = gpu_temp_c`
+- `x2 = gpu_power_w`
+- `x3 = cpu_package_power_w`
+- `x4 = snn_firing_rate = gpu_temp_c / 100.0`
+
+Its target is:
+
+```
+ideal_compression_y = (gpu_power_w + cpu_package_power_w) / 400.0
+```
+
+The first non-constant discovered formula in that artifact is:
+
+```
+x2 / 280.9163511387151
+```
+
+which is simply:
+
+```
+gpu_power_w / 280.9163511387151
+```
+
+The best low-loss expression in that same hall-of-fame is:
+
+```
+((x2 / 203.92689231637638) - ((x2 - x3) / 407.26879801609624)) * 1.02021806662029
+```
+
+This numerically reduces to approximately:
+
+```
+0.00250 * gpu_power_w + 0.00251 * cpu_package_power_w
+```
+
+which is effectively a rediscovery of:
+
+```
+(gpu_power_w + cpu_package_power_w) / 400.0
+```
+
+This artifact is useful provenance for the earliest surrogate-discovery stage,
+but it is not the source of the later latent `LegacyV1_0` runtime formula.
 
 ## Caveats
 

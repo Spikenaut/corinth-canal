@@ -490,7 +490,13 @@ pub fn new_relic_env_status() -> Vec<(&'static str, Option<String>)> {
 pub fn new_relic_is_configured() -> bool {
     NR_ENV_VARS
         .iter()
-        .any(|&var| std::env::var(var).as_deref().map(str::trim).filter(|s| !s.is_empty()).is_some())
+        .any(|&var| {
+            std::env::var(var)
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+                .is_some()
+        })
 }
 
 /// Returns a human-readable summary of New Relic verification status, suitable
