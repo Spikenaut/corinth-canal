@@ -22,6 +22,8 @@ pub struct SafeDiagnosticData<'a> {
     pub telemetry_source: Option<&'a str>,
     pub validation_status: Option<&'a str>,
     pub error_category: Option<&'a str>,
+    pub prompt_profile: Option<&'a str>,
+    pub saaq_rule: Option<&'a str>,
 }
 
 impl<'a> SafeDiagnosticData<'a> {
@@ -42,6 +44,16 @@ impl<'a> SafeDiagnosticData<'a> {
 
     pub fn with_error_category(mut self, error_category: &'a str) -> Self {
         self.error_category = Some(error_category);
+        self
+    }
+
+    pub fn with_prompt_profile(mut self, prompt_profile: &'a str) -> Self {
+        self.prompt_profile = Some(prompt_profile);
+        self
+    }
+
+    pub fn with_saaq_rule(mut self, saaq_rule: &'a str) -> Self {
+        self.saaq_rule = Some(saaq_rule);
         self
     }
 }
@@ -67,6 +79,8 @@ struct OwnedDiagnosticData {
     telemetry_source: Option<String>,
     validation_status: Option<String>,
     error_category: Option<String>,
+    prompt_profile: Option<String>,
+    saaq_rule: Option<String>,
 }
 
 impl OwnedDiagnosticData {
@@ -83,6 +97,12 @@ impl OwnedDiagnosticData {
         if let Some(error_category) = data.error_category {
             self.error_category = Some(error_category.to_owned());
         }
+        if let Some(prompt_profile) = data.prompt_profile {
+            self.prompt_profile = Some(prompt_profile.to_owned());
+        }
+        if let Some(saaq_rule) = data.saaq_rule {
+            self.saaq_rule = Some(saaq_rule.to_owned());
+        }
     }
 
     fn with_status(mut self, validation_status: &str, error_category: &str) -> Self {
@@ -97,6 +117,8 @@ impl OwnedDiagnosticData {
             telemetry_source: self.telemetry_source.as_deref(),
             validation_status: self.validation_status.as_deref(),
             error_category: self.error_category.as_deref(),
+            prompt_profile: self.prompt_profile.as_deref(),
+            saaq_rule: self.saaq_rule.as_deref(),
         }
     }
 }
@@ -422,7 +444,74 @@ fn apply_scope(
     } else {
         scope.remove_tag("error_category");
     }
+    if let Some(prompt_profile) = data.prompt_profile {
+        scope.set_tag("prompt_profile", prompt_profile);
+    } else {
+        scope.remove_tag("prompt_profile");
+    }
+    if let Some(saaq_rule) = data.saaq_rule {
+        scope.set_tag("saaq_rule", saaq_rule);
+    } else {
+        scope.remove_tag("saaq_rule");
+    }
     scope.set_extra("run_id", json!(run_id));
+}
+
+/// New Relic telemetry verification helpers.
+///
+/// These functions check whether New Relic environment variables are set and
+/// provide dry-run verification so SAAQ experiment runs can document telemetry
+/// health without requiring a live New Relic connection. All functions are
+/// safe to call when New Relic env vars are unset — they simply report the
+/// missing state.
+
+/// New Relic environment variables used by the SAAQ observability pipeline.
+pub const NR_ENV_VARS: &[&str] = &[
+    "NR_INSERT_KEY",
+    "NR_ACCOUNT_ID",
+    "NR_QUERY_KEY",
+    "NEW_RELIC_APP_NAME",
+];
+
+/// Returns a summary of which New Relic env vars are set, for telemetry
+/// verification. Never fails — missing env vars are reported as `None`.
+pub fn new_relic_env_status() -> Vec<(&'static str, Option<String>)> {
+    NR_ENV_VARS
+        .iter()
+        .map(|&var| {
+            let value = std::env::var(var).ok().filter(|v| !v.trim().is_empty());
+            (var, value.map(|v| format!("{}chars", v.len())))
+        })
+        .collect()
+}
+
+/// Returns `true` if at least one New Relic env var is set, indicating that
+/// the New Relic integration is configured.
+pub fn new_relic_is_configured() -> bool {
+    NR_ENV_VARS
+        .iter()
+        .any(|&var| std::env::var(var).as_deref().map(str::trim).filter(|s| !s.is_empty()).is_some())
+}
+
+/// Returns a human-readable summary of New Relic verification status, suitable
+/// for writing into experiment logs and run manifests.
+pub fn new_relic_verification_summary() -> String {
+    let status = new_relic_env_status();
+    let configured = new_relic_is_configured();
+    let mut lines = Vec::new();
+    lines.push(format!("new_relic_configured: {configured}"));
+    for (var, value) in &status {
+        match value {
+            Some(masked) => lines.push(format!("  {var}: set ({masked})")),
+            None => lines.push(format!("  {var}: unset")),
+        }
+    }
+    if configured {
+        lines.push("telemetry_status: new_relic_available".to_owned());
+    } else {
+        lines.push("telemetry_status: dry_run_no_new_relic".to_owned());
+    }
+    lines.join("\n")
 }
 
 pub fn error_category(status: Option<&str>, error: Option<&str>) -> &'static str {

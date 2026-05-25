@@ -25,6 +25,12 @@ pub const DEFAULT_RUST_SYNTAX_PROMPT_TEXT: &str =
 
 pub const DEFAULT_ENGLISH_SNN_PROMPT_TEXT: &str = "Let's teach this MoE model about SNN.";
 
+pub const DEFAULT_ENGLISH_EXPLANATION_PROMPT_TEXT: &str =
+    "Explain to me how Mixture of Experts models work";
+
+pub const DEFAULT_PROGRAMMING_RUST_PROMPT_TEXT: &str =
+    "Write a Rust function that parses a comma-separated list of integers into a Vec, returning a Result with a helpful error on invalid input.";
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ValidationModelSpec {
@@ -80,6 +86,12 @@ pub fn prompt_text_for_profile(profile: &str) -> &'static str {
         "math_logic" | "math" => DEFAULT_MATH_PROMPT_TEXT,
         "rust_syntax" | "rust" => DEFAULT_RUST_SYNTAX_PROMPT_TEXT,
         "english_snn" | "english" | "snn" => DEFAULT_ENGLISH_SNN_PROMPT_TEXT,
+        "english_explanation" | "english_moe" | "moe_explanation" => {
+            DEFAULT_ENGLISH_EXPLANATION_PROMPT_TEXT
+        }
+        "programming_rust" | "rust_parse" | "rust_programming" => {
+            DEFAULT_PROGRAMMING_RUST_PROMPT_TEXT
+        }
         _ => DEFAULT_MATH_PROMPT_TEXT,
     }
 }
