@@ -5,6 +5,9 @@ coverage:
         target: auto
         threshold: 1%
         informational: false
+    patch:
+      default:
+        informational: true
 
 comment:
   layout: "reach,diff,flags,files"

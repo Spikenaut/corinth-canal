@@ -1,11 +1,11 @@
 //! GGUF checkpoint parsing and mapped tensor access for the router bridge.
 
 use super::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q8_0, GGUF_MAGIC,
-    GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL, GGUF_VALUE_TYPE_FLOAT32, GGUF_VALUE_TYPE_FLOAT64,
-    GGUF_VALUE_TYPE_INT8, GGUF_VALUE_TYPE_INT16, GGUF_VALUE_TYPE_INT32, GGUF_VALUE_TYPE_INT64,
-    GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT8, GGUF_VALUE_TYPE_UINT16, GGUF_VALUE_TYPE_UINT32,
-    GGUF_VALUE_TYPE_UINT64, GGUF_VERSION,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
+    GGUF_MAGIC, GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL, GGUF_VALUE_TYPE_FLOAT32,
+    GGUF_VALUE_TYPE_FLOAT64, GGUF_VALUE_TYPE_INT8, GGUF_VALUE_TYPE_INT16, GGUF_VALUE_TYPE_INT32,
+    GGUF_VALUE_TYPE_INT64, GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT8, GGUF_VALUE_TYPE_UINT16,
+    GGUF_VALUE_TYPE_UINT32, GGUF_VALUE_TYPE_UINT64, GGUF_VERSION,
 };
 use crate::error::{HybridError, Result};
 use memmap2::{MmapMut, MmapOptions};
@@ -128,6 +128,9 @@ impl MappedGgufCheckpoint {
             }
             GGML_TYPE_Q5_K => {
                 dequantize_row_q5_k(self.row_bytes(&info, token_id, path, tensor_name)?, d0)
+            }
+            GGML_TYPE_Q6_K => {
+                dequantize_row_q6_k(self.row_bytes(&info, token_id, path, tensor_name)?, d0)
             }
             GGML_TYPE_IQ3_S => Err(HybridError::UnsupportedFormat(format!(
                 "tensor '{tensor_name}' uses IQ3_S token embeddings; checkpoint-backed token embedding extraction is unsupported for this quantization"
@@ -553,6 +556,36 @@ impl MappedGgufCheckpoint {
         }
         Ok(out)
     }
+    #[allow(dead_code)]
+    pub(super) fn dequantize_q6_k_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+        let info = self.tensor_info(name, path)?.clone();
+        if info.ggml_type != GGML_TYPE_Q6_K {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' must be Q6_K, got ggml_type={}",
+                info.ggml_type
+            )));
+        }
+        if info.dims.is_empty() {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' has no dimensions"
+            )));
+        }
+        let width = info.dims[0];
+        let n_rows = info.dims.get(1).copied().unwrap_or(1);
+        let capacity = width
+            .checked_mul(n_rows)
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: path.to_owned(),
+                reason: format!("tensor '{name}' element count overflow ({width}x{n_rows})"),
+            })?;
+        let mut out = Vec::with_capacity(capacity);
+        for row in 0..n_rows {
+            let row_bytes = self.row_bytes(&info, row, path, name)?;
+            let dequantized = dequantize_row_q6_k(row_bytes, width)?;
+            out.extend_from_slice(&dequantized);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(feature = "cuda")]
@@ -667,6 +700,15 @@ fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
             }
             Ok((width / 256) * (2 + 2 + 12 + 32 + 128))
         }
+        GGML_TYPE_Q6_K => {
+            if !width.is_multiple_of(256) {
+                return Err(HybridError::UnsupportedFormat(format!(
+                    "Q6_K tensor width {width} is not divisible by 256"
+                )));
+            }
+            // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
+            Ok((width / 256) * 210)
+        }
         other => Err(HybridError::UnsupportedFormat(format!(
             "row-size lookup is not implemented for ggml_type={other}"
         ))),
@@ -728,6 +770,57 @@ fn dequantize_row_q5_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
             is += 2;
             u1 <<= 2;
             u2 <<= 2;
+        }
+    }
+    Ok(out)
+}
+
+fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
+    if !width.is_multiple_of(256) {
+        return Err(HybridError::ModelLoad {
+            path: "".into(),
+            reason: format!("Q6_K width {width} is not divisible by 256"),
+        });
+    }
+    // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
+    // Matches the ggml block_q6_K layout from llama.cpp.
+    let expected_len = (width / 256) * 210;
+    if row.len() != expected_len {
+        return Err(HybridError::ModelLoad {
+            path: "".into(),
+            reason: format!(
+                "Q6_K row length mismatch: expected {expected_len} bytes for width {width}, got {}",
+                row.len()
+            ),
+        });
+    }
+    let mut out = Vec::with_capacity(width);
+    for block in row.chunks_exact(210) {
+        let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+        let scales = &block[2..18];
+        let ql = &block[18..146];
+        let qh = &block[146..210];
+        // Two passes of 128 values each (ql/qh advance by 64/32 per pass).
+        // Each pass reads 8 of the 16 scale entries: pass 0 uses scales[0..8],
+        // pass 1 uses scales[8..16]. Within each pass, the 4 output values per
+        // iteration read different scale offsets (matching ggml's sc[is + offset]).
+        for pass in 0..2u8 {
+            let base = (pass as usize) * 64;
+            let qh_base = (pass as usize) * 32;
+            let sc_pass_base = (pass as usize) * 8;
+            for l in 0..32 {
+                let is = l / 16;
+                let q1 = ((ql[base + l] & 0x0F) | ((qh[qh_base + l] & 3) << 4)) as i8 - 32;
+                let q2 =
+                    ((ql[base + 32 + l] & 0x0F) | (((qh[qh_base + l] >> 2) & 3) << 4)) as i8 - 32;
+                let q3 = ((ql[base + l] >> 4) | (((qh[qh_base + l] >> 4) & 3) << 4)) as i8 - 32;
+                let q4 =
+                    ((ql[base + 32 + l] >> 4) | (((qh[qh_base + l] >> 6) & 3) << 4)) as i8 - 32;
+                out.push(d * (scales[sc_pass_base + is] as i8) as f32 * q1 as f32);
+                out.push(d * (scales[sc_pass_base + is + 2] as i8) as f32 * q2 as f32);
+                out.push(d * (scales[sc_pass_base + is + 4] as i8) as f32 * q3 as f32);
+                out.push(d * (scales[sc_pass_base + is + 6] as i8) as f32 * q4 as f32);
+            }
         }
     }
     Ok(out)
