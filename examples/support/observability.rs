@@ -12,9 +12,15 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use sentry::ClientInitGuard;
 use serde_json::json;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 static INIT: Once = Once::new();
 const REPO_NAME: &str = "corinth-canal";
+
+/// OpenTelemetry tracer provider guard. Kept alive for the process lifetime
+/// so the global tracer is not dropped prematurely.
+static OTEL_PROVIDER: OnceLock<opentelemetry_sdk::trace::TracerProvider> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SafeDiagnosticData<'a> {
@@ -126,14 +132,82 @@ impl OwnedDiagnosticData {
 pub fn init_tracing() {
     INIT.call_once(|| {
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-        let builder = tracing_subscriber::fmt().with_env_filter(filter);
-
-        if std::env::var("AGENTOS_JSON_TRACING").as_deref() == Ok("1") {
-            builder.json().init();
+        let fmt_layer = if std::env::var("AGENTOS_JSON_TRACING").as_deref() == Ok("1") {
+            tracing_subscriber::fmt::layer().json().boxed()
         } else {
-            builder.init();
+            tracing_subscriber::fmt::layer().boxed()
+        };
+
+        let registry = tracing_subscriber::registry().with(filter).with(fmt_layer);
+
+        match init_opentelemetry_layer() {
+            Some(otel_layer) => {
+                registry.with(otel_layer).init();
+            }
+            None => {
+                registry.init();
+            }
         }
     });
+}
+
+/// Attempt to build an OpenTelemetry `tracing` layer backed by a New Relic OTLP
+/// exporter. Returns `None` when New Relic credentials are absent or invalid so
+/// the caller can fall back to plain tracing.
+fn init_opentelemetry_layer() -> Option<
+    tracing_opentelemetry::OpenTelemetryLayer<
+        tracing_subscriber::Registry,
+        opentelemetry_sdk::trace::TracerProvider,
+    >,
+> {
+    let api_key = std::env::var("NR_INSERT_KEY")
+        .ok()
+        .filter(|v| !v.trim().is_empty())?;
+    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "https://otlp.nr-data.net".to_owned());
+    let service_name = std::env::var("OTEL_SERVICE_NAME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| REPO_NAME.to_owned());
+
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_http()
+        .with_endpoint(endpoint)
+        .with_headers(std::collections::HashMap::from([(
+            "api-key".to_owned(),
+            api_key,
+        )]))
+        .build()
+        .ok()?;
+
+    let resource = opentelemetry_sdk::Resource::builder()
+        .with_attribute(opentelemetry::KeyValue::new("service.name", service_name))
+        .with_attribute(opentelemetry::KeyValue::new(
+            "service.repository",
+            REPO_NAME,
+        ))
+        .build();
+
+    let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        .with_simple_exporter(exporter)
+        .with_resource(resource)
+        .build();
+
+    opentelemetry::global::set_tracer_provider(provider.clone());
+    let _ = OTEL_PROVIDER.set(provider);
+
+    Some(tracing_opentelemetry::layer().with_tracer(OTEL_PROVIDER.get()?.tracer(REPO_NAME)))
+}
+
+/// Flush any pending OpenTelemetry spans and shut down the global tracer
+/// provider. Safe to call when OTel was never initialized — it becomes a no-op.
+pub fn shutdown_opentelemetry() {
+    if let Some(provider) = OTEL_PROVIDER.get() {
+        let _ = provider.shutdown();
+    }
+    opentelemetry::global::shutdown_tracer_provider();
 }
 
 pub fn start_command(command: &'static str) -> CommandObserver {
