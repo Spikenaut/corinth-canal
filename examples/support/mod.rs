@@ -28,8 +28,7 @@ pub const DEFAULT_ENGLISH_SNN_PROMPT_TEXT: &str = "Let's teach this MoE model ab
 pub const DEFAULT_ENGLISH_EXPLANATION_PROMPT_TEXT: &str =
     "Explain to me how Mixture of Experts models work";
 
-pub const DEFAULT_PROGRAMMING_RUST_PROMPT_TEXT: &str =
-    "Write a Rust function that parses a comma-separated list of integers into a Vec, returning a Result with a helpful error on invalid input.";
+pub const DEFAULT_PROGRAMMING_RUST_PROMPT_TEXT: &str = "Write a Rust function that parses a comma-separated list of integers into a Vec, returning a Result with a helpful error on invalid input.";
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]

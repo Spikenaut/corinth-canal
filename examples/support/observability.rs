@@ -485,25 +485,29 @@ pub fn new_relic_env_status() -> Vec<(&'static str, Option<String>)> {
         .collect()
 }
 
-/// Returns `true` if at least one New Relic env var is set, indicating that
-/// the New Relic integration is configured.
+/// Minimal New Relic env vars required for ingest telemetry.
+const NR_REQUIRED: &[&str] = &["NR_INSERT_KEY", "NR_ACCOUNT_ID"];
+
+/// Returns `true` only if the minimal New Relic ingest credentials are
+/// present (both `NR_INSERT_KEY` and `NR_ACCOUNT_ID` are set and non-empty).
+/// This avoids the false-positive "configured" signal when only optional
+/// vars (e.g. `NEW_RELIC_APP_NAME`) are present.
 pub fn new_relic_is_configured() -> bool {
-    NR_ENV_VARS
-        .iter()
-        .any(|&var| {
-            std::env::var(var)
-                .ok()
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-                .is_some()
-        })
+    NR_REQUIRED.iter().all(|&var| {
+        std::env::var(var)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .is_some()
+    })
 }
 
 /// Returns a human-readable summary of New Relic verification status, suitable
 /// for writing into experiment logs and run manifests.
 pub fn new_relic_verification_summary() -> String {
     let status = new_relic_env_status();
-    let configured = new_relic_is_configured();
+    let configured = status
+        .iter()
+        .any(|(var, value)| NR_REQUIRED.contains(var) && value.is_some());
     let mut lines = Vec::new();
     lines.push(format!("new_relic_configured: {configured}"));
     for (var, value) in &status {

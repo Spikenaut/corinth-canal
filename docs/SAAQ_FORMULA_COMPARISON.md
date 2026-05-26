@@ -92,8 +92,8 @@ rounding (`0.0573`, `0.496`).
 
 When using the SAAQ calibration example (`saaq_latent_calibration`), the run
 manifest (`run_manifest.json`) includes the `saaq_rule` field set to either
-`"saaq_v1_0"` or `"saaq_v1_5"`, making it clear which formula produced the
-results.
+`"LegacyV1_0"` or `"SaaqV1_5SqrtRate"` (the enum variant names), making it
+clear which formula produced the results.
 
 The dual calibrator (`SnnDualLatentCalibrator`) always emits **both** rule
 trajectories in the CSV output, regardless of which rule is designated primary:
