@@ -1136,3 +1136,50 @@ fn test_int4_odd_length_handling() {
     assert_eq!(out.len(), 1, "should only produce 1 element for odd-length");
     assert_eq!(out[0], 2.0);
 }
+
+#[test]
+fn test_iq3_m_tensor_error_paths() {
+    // Test error handling for wrong ggml_type
+    let q8_0_payload = build_q8_0_payload(256, 1, 0x3c00, 1);
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                vec![0u8; EMBEDDING_DIM * 64 * 4],
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![256, 1],
+                GGML_TYPE_Q8_0,
+                q8_0_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "iq3_m_err");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+
+    // Should fail because tensor is Q8_0, not IQ3_M
+    let result = mapped.dequantize_iq3_m_tensor("blk.0.attn_q.weight", path.to_str().unwrap());
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_dequantize_row_iq3_m_error_paths() {
+    // Test width not divisible by 256
+    let result = dequantize_row_iq3_m(&[0u8; 111], 255);
+    assert!(result.is_err());
+
+    // Test row length mismatch
+    let result = dequantize_row_iq3_m(&[0u8; 110], 256);
+    assert!(result.is_err());
+}
