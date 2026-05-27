@@ -228,11 +228,11 @@ fn init_opentelemetry_tracer() -> Option<Tracer> {
     Some(OTEL_PROVIDER.get()?.tracer(REPO_NAME))
 }
 
-/// Flush any pending OpenTelemetry spans and shut down the global tracer
-/// provider. Safe to call when OTel was never initialized — it becomes a no-op.
-pub fn shutdown_opentelemetry() {
+/// Flush any pending OpenTelemetry spans without shutting down the global
+/// provider. Safe to call when OTel was never initialized; it becomes a no-op.
+pub fn flush_opentelemetry() {
     if let Some(provider) = OTEL_PROVIDER.get() {
-        let _ = provider.shutdown();
+        let _ = provider.force_flush();
     }
 }
 
@@ -548,7 +548,7 @@ impl CommandObserver {
             );
         }
 
-        shutdown_opentelemetry();
+        flush_opentelemetry();
     }
 }
 
