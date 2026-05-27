@@ -5,7 +5,6 @@ use corinth_canal::{
     FunnelActivity, SaaqUpdateRule, SnnDualLatentCalibrator, SnnLatentCsvExporter,
     gpu::GpuAccelerator, model::Model,
 };
-use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Error, Write};
