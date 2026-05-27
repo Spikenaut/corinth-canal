@@ -23,7 +23,7 @@ hidden spike train + membrane/adaptation state
        ▼  Projector
 embedding [EMBEDDING_DIM = 2048]
        │
-       ▼  OlmoeRouter (stub | dense | spiking sim)
+       ▼  Router (stub | dense | spiking sim)
 expert_weights + selected_experts + routed hidden state
        │
        ▼  SAAQ latent calibration / telemetry export
@@ -42,7 +42,7 @@ The CPU path is assembled from pure Rust components:
 - `SparseGifHiddenLayer` runs a 2048-neuron GIF hidden layer with adaptive
   thresholds.
 - `Projector` converts hidden activity into a 2048-dimensional embedding.
-- `OlmoeRouter` consumes the embedding and produces expert weights / selected
+- `Router` consumes the embedding and produces expert weights / selected
   experts.
 
 ### GPU path
@@ -106,7 +106,7 @@ Instrumented launch sites:
 | `src/model/core.rs` | Runtime orchestration, config validation, forward paths |
 | `src/model/temporal.rs` | GPU temporal loop (`prepare_gpu_temporal`, `tick_gpu_temporal`, `forward_gpu_temporal`) |
 | `src/model/telemetry_io.rs` | Shared CSV writer for GPU routing telemetry |
-| `src/moe/mod.rs` | `OlmoeRouter` host with routing-mode dispatch |
+| `src/moe/mod.rs` | `Router` host with routing-mode dispatch |
 | `src/moe/checkpoint.rs` | GGUF parse, mmap, tensor slicing, dequantization helpers |
 | `src/moe/adapter.rs` | Model-family adapter resolution and tensor selection |
 | `src/moe/routing.rs` | Router math (gate scores, resampling, normalization, top-k) |
@@ -130,7 +130,7 @@ quantization label. Mixed-quant checkpoints are therefore expected. For
 example, a file named `...IQ4_NL.gguf` can still drive the `dequantized-q8_0`
 path when `blk.0.attn_q.weight` is stored as `Q8_0` inside the GGUF.
 
-`OlmoeRouter`:
+`Router`:
 
 - memory-maps GGUF checkpoints in-repo
 - resolves a supported model family from GGUF metadata

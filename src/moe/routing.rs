@@ -1,6 +1,7 @@
-//! Routing math and embedding resampling for the GGUF router bridge.
+//! Routing math and embedding resampling for the GGUF and Safetensors router bridge.
 
 use super::checkpoint::{GgufTensorInfo, MappedGgufCheckpoint};
+use super::safetensors::MappedSafetensorsCheckpoint;
 use crate::error::{HybridError, Result};
 use crate::types::EMBEDDING_DIM;
 use std::cmp::Ordering;
@@ -19,6 +20,53 @@ pub(super) fn checkpoint_gate_scores(
         let mut score = 0.0f32;
         for (dim, &value) in embedding.iter().enumerate() {
             let index = routing_weight_index(info, expert_id, dim, num_experts, embedding.len())?;
+            score += weights[index] * value;
+        }
+        gate_scores.push(score);
+    }
+    Ok(gate_scores)
+}
+
+pub(super) fn safetensors_gate_scores(
+    checkpoint: &MappedSafetensorsCheckpoint,
+    model_path: &str,
+    routing_tensor_name: &str,
+    num_experts: usize,
+    embedding: &[f32],
+) -> Result<Vec<f32>> {
+    let weights = checkpoint.extract_tensor_f32(routing_tensor_name, model_path)?;
+    let info =
+        checkpoint
+            .tensor_info(routing_tensor_name)
+            .ok_or_else(|| HybridError::MissingTensor {
+                name: routing_tensor_name.to_owned(),
+                path: model_path.to_owned(),
+            })?;
+    let shape = info.1;
+    if shape.len() != 2 {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "routing tensor '{routing_tensor_name}' must be rank-2, got {:?}",
+            shape
+        )));
+    }
+    let d0 = shape[0];
+    let d1 = shape[1];
+
+    let mut gate_scores = Vec::with_capacity(num_experts);
+    for expert_id in 0..num_experts {
+        let mut score = 0.0f32;
+        for (dim, &value) in embedding.iter().enumerate() {
+            let index = if d0 == embedding.len() && d1 == num_experts {
+                dim * d1 + expert_id
+            } else if d0 == num_experts && d1 == embedding.len() {
+                expert_id * d1 + dim
+            } else {
+                return Err(HybridError::UnsupportedFormat(format!(
+                    "unsupported safetensors routing tensor orientation {:?} for hidden_size={}",
+                    shape,
+                    embedding.len()
+                )));
+            };
             score += weights[index] * value;
         }
         gate_scores.push(score);

@@ -28,7 +28,7 @@ hidden spike train + membrane state
        v  Projector
 embedding [2048]
        |
-       v  OlmoeRouter
+       v  Router
 expert_weights + selected_experts + routed hidden state
        |
        v  SAAQ latent calibration / telemetry export
@@ -47,7 +47,7 @@ for the full end-to-end loop.
 
 The model-loading interface is custom to this repository.
 
-`OlmoeRouter`:
+`Router`:
 
 - parses GGUF checkpoints in-repo
 - resolves a supported model family from checkpoint metadata
@@ -170,7 +170,7 @@ just saaq
 ### Run the GPU smoke path with a real checkpoint
 
 ```bash
-GGUF_CHECKPOINT_PATH=/path/to/model.gguf just smoke
+CHECKPOINT_PATH=/path/to/model.gguf just smoke
 ```
 
 For the full CUDA validation ladder, including host sanity checks, Compute

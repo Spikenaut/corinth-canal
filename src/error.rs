@@ -33,9 +33,9 @@ pub enum HybridError {
     #[error("input length mismatch: expected {expected}, got {got}")]
     InputLengthMismatch { expected: usize, got: usize },
 
-    /// OlmoeRouter forward pass returned an error.
-    #[error("OlmoeRouter forward pass failed: {0}")]
-    OlmoeForward(String),
+    /// Router forward pass returned an error.
+    #[error("Router forward pass failed: {0}")]
+    RouterForward(String),
 
     // ── I/O errors ────────────────────────────────────────────────────────
     #[error("I/O error: {0}")]

@@ -335,9 +335,8 @@ fn build_q5_k_synapse_checkpoint(gate_payload: Vec<u8>) -> Vec<u8> {
     )
 }
 
-fn stub() -> OlmoeRouter {
-    OlmoeRouter::load_with_mode("", 8, 1, RoutingMode::StubUniform)
-        .expect("stub load should succeed")
+fn stub() -> Router {
+    Router::load_with_mode("", 8, 1, RoutingMode::StubUniform).expect("stub load should succeed")
 }
 
 #[test]
@@ -366,7 +365,7 @@ fn test_dense_sim_uses_real_gate_weights() {
     let path = write_temp_file(&build_real_size_checkpoint(gate_bytes), "dense-real");
 
     let mut model =
-        OlmoeRouter::load_with_mode(path.to_str().unwrap(), 8, 2, RoutingMode::DenseSim).unwrap();
+        Router::load_with_mode(path.to_str().unwrap(), 8, 2, RoutingMode::DenseSim).unwrap();
     let mut embedding = vec![0.0f32; EMBEDDING_DIM];
     embedding[0] = 1.0;
     let out = model.forward(&embedding).unwrap();
@@ -385,7 +384,7 @@ fn test_quantized_synapse_probe_uses_synthetic_fallback() {
         "iq3-s-synapse",
     );
 
-    let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
+    let metadata = Router::probe_model(path.to_str().unwrap(), None).unwrap();
     assert_eq!(
         metadata.preferred_gpu_synapse_tensor_name.as_deref(),
         Some("blk.0.attn_q.weight")
@@ -426,7 +425,7 @@ fn test_quantized_attn_q_does_not_advertise_real_gpu_synapse_tensor() {
     );
 
     let path = write_temp_file(&checkpoint, "quantized-attn-q");
-    let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
+    let metadata = Router::probe_model(path.to_str().unwrap(), None).unwrap();
 
     assert_eq!(
         metadata.preferred_gpu_synapse_tensor_name.as_deref(),
@@ -446,8 +445,8 @@ fn test_preferred_synapse_descriptor_iq3s_has_no_dequant_path() {
         "iq3-s-descriptor",
     );
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
     let descriptor = model
         .preferred_gpu_synapse_tensor_descriptor()
         .expect("preferred descriptor must be exposed for quantized attn_q");
@@ -468,8 +467,8 @@ fn test_preferred_synapse_descriptor_f16_has_dequant_path() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(&build_real_size_checkpoint(gate_payload), "f16-descriptor");
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
     let descriptor = model
         .preferred_gpu_synapse_tensor_descriptor()
         .expect("preferred descriptor must be exposed for F16 attn_q");
@@ -496,8 +495,8 @@ fn test_preferred_synapse_descriptor_q8_0_has_dequant_path() {
         "q8-0-descriptor",
     );
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
     let descriptor = model
         .preferred_gpu_synapse_tensor_descriptor()
         .expect("preferred descriptor must be exposed for Q8_0 attn_q");
@@ -522,7 +521,7 @@ fn test_q8_0_synapse_probe_uses_dequantized_source() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(&build_q8_0_synapse_checkpoint(gate_payload), "q8-0-probe");
 
-    let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
+    let metadata = Router::probe_model(path.to_str().unwrap(), None).unwrap();
     assert_eq!(
         metadata.preferred_gpu_synapse_tensor_name.as_deref(),
         Some("blk.0.attn_q.weight")
@@ -538,8 +537,8 @@ fn test_synapse_tensor_row_major_shape_reports_q8_0_dims() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(&build_q8_0_synapse_checkpoint(gate_payload), "q8-0-shape");
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
 
     let shape = model
         .synapse_tensor_row_major_shape("blk.0.attn_q.weight")
@@ -578,8 +577,8 @@ fn test_synapse_tensor_row_major_shape_uses_one_row_for_rank_one_tensor() {
     );
     let path = write_temp_file(&checkpoint, "rank-1-shape");
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
 
     let shape = model
         .synapse_tensor_row_major_shape("rank1.tensor")
@@ -618,8 +617,8 @@ fn test_synapse_tensor_row_major_shape_rejects_zero_dim_tensor() {
     );
     let path = write_temp_file(&checkpoint, "zero-dim-shape");
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
 
     let err = model
         .synapse_tensor_row_major_shape("zero-dim.tensor")
@@ -637,8 +636,8 @@ fn test_preferred_synapse_descriptor_q5_k_has_dequant_path() {
         "q5-k-descriptor",
     );
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
     let descriptor = model
         .preferred_gpu_synapse_tensor_descriptor()
         .expect("preferred descriptor must be exposed for Q5_K attn_q");
@@ -663,7 +662,7 @@ fn test_q5_k_synapse_probe_uses_dequantized_source() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(&build_q5_k_synapse_checkpoint(gate_payload), "q5-k-probe");
 
-    let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
+    let metadata = Router::probe_model(path.to_str().unwrap(), None).unwrap();
     assert_eq!(
         metadata.preferred_gpu_synapse_tensor_name.as_deref(),
         Some("blk.0.attn_q.weight")
@@ -679,7 +678,7 @@ fn test_q6_k_synapse_probe_uses_dequantized_source() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(&build_q6_k_synapse_checkpoint(gate_payload), "q6-k-probe");
 
-    let metadata = OlmoeRouter::probe_model(path.to_str().unwrap(), None).unwrap();
+    let metadata = Router::probe_model(path.to_str().unwrap(), None).unwrap();
     assert_eq!(
         metadata.preferred_gpu_synapse_tensor_name.as_deref(),
         Some("blk.0.attn_q.weight")
@@ -695,8 +694,8 @@ fn test_q5_k_dequantize_full_tensor_succeeds() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(&build_q5_k_synapse_checkpoint(gate_payload), "q5-k-dequant");
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
 
     let weights = model
         .dequantized_q5_k_synapse_weights("blk.0.attn_q.weight")
@@ -747,8 +746,8 @@ fn test_q6_k_dequantize_full_tensor_succeeds() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(&build_q6_k_synapse_checkpoint(gate_payload), "q6-k-dequant");
 
-    let model = OlmoeRouter::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform)
-        .unwrap();
+    let model =
+        Router::load_with_mode(path.to_str().unwrap(), 0, 0, RoutingMode::StubUniform).unwrap();
 
     let weights = model
         .dequantized_q6_k_synapse_weights("blk.0.attn_q.weight")
@@ -817,7 +816,7 @@ fn test_ggml_type_label_covers_lineup_quants() {
 
 #[test]
 fn test_spiking_sim_state_can_reset() {
-    let mut model = OlmoeRouter::load_with_mode("", 8, 2, RoutingMode::SpikingSim).unwrap();
+    let mut model = Router::load_with_mode("", 8, 2, RoutingMode::SpikingSim).unwrap();
     let _ = model.forward(&vec![1.0; EMBEDDING_DIM]).unwrap();
     assert!(model.has_state_activity());
     model.reset_state();
@@ -826,11 +825,11 @@ fn test_spiking_sim_state_can_reset() {
 
 #[test]
 fn test_real_checkpoint_probe_via_env() {
-    let Some(path) = std::env::var("GGUF_CHECKPOINT_PATH").ok() else {
+    let Some(path) = std::env::var("CHECKPOINT_PATH").ok() else {
         return;
     };
 
-    let metadata = OlmoeRouter::probe_model(&path, None).unwrap();
+    let metadata = Router::probe_model(&path, None).unwrap();
     assert!(!metadata.architecture.is_empty());
     assert!(metadata.hidden_size > 0);
     assert!(metadata.num_experts > 0);
@@ -917,4 +916,43 @@ fn test_synapse_dequant_path_supported_comprehensive() {
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
     assert!(!synapse_dequant_path_supported(2)); // Q4_0
     assert!(!synapse_dequant_path_supported(15)); // Q8_K
+}
+
+#[test]
+fn test_safetensors_olmoe_load_and_route() {
+    let path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/root".into()))
+        .join(".models/safetensors/allenai/OLMoE-1B-7B-0125-Instruct");
+    if !path.is_dir() {
+        return;
+    }
+    let path_str = path.to_str().unwrap();
+
+    let metadata = Router::probe_model(path_str, None).unwrap();
+    assert_eq!(metadata.family, ModelFamily::Olmoe);
+    assert_eq!(metadata.hidden_size, 2048);
+    assert_eq!(metadata.num_experts, 64);
+    assert_eq!(metadata.expert_used_count, 8);
+    assert_eq!(metadata.architecture, "OlmoeForCausalLM");
+    assert_eq!(metadata.quantization, "safetensors");
+
+    let mut model = Router::load_with_mode(path_str, 0, 0, RoutingMode::DenseSim).unwrap();
+    assert!(model.is_loaded());
+    assert_eq!(model.family(), ModelFamily::Olmoe);
+    assert_eq!(model.hidden_size(), 2048);
+    assert_eq!(model.checkpoint_num_experts(), 64);
+    assert_eq!(model.checkpoint_expert_used_count(), 8);
+    assert_eq!(
+        model.routing_tensor_name(),
+        "model.layers.0.mlp.gate.weight"
+    );
+
+    // Forward pass with a dummy embedding
+    let embedding = vec![0.0f32; EMBEDDING_DIM];
+    let out = model.forward(&embedding).unwrap();
+    assert_eq!(out.expert_weights.len(), 64);
+    assert_eq!(out.selected_experts.len(), 8);
+
+    // Token embedding extraction
+    let token_emb = model.extract_token_embedding(0).unwrap();
+    assert_eq!(token_emb.len(), EMBEDDING_DIM);
 }

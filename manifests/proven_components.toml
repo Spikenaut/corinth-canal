@@ -30,7 +30,7 @@ last_proven_run = ""
 path            = "src/moe/mod.rs"
 status          = "stabilizing"
 target_repo     = "rmems-moe"
-owner_notes     = "OlmoeRouter host; pending full five-family matrix."
+owner_notes     = "Router host; pending full five-family matrix."
 last_proven_run = ""
 
 [[component]]

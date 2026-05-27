@@ -61,7 +61,7 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
 
     let run_cfg = RunConfig::from_env();
     let mut safe = SafeDiagnosticData::default().with_telemetry_source("csv");
-    if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.gguf_checkpoint_path) {
+    if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.checkpoint_path) {
         safe = safe.with_model_slug(&model_slug);
         observer.annotate(safe);
     } else {
@@ -69,7 +69,7 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
     }
 
     let csv_path = &args[1];
-    let cfg = default_spiking_model_config(run_cfg.gguf_checkpoint_path.clone(), 20);
+    let cfg = default_spiking_model_config(run_cfg.checkpoint_path.clone(), 20);
 
     let mut model = Model::new_with_projector_neurons(cfg.clone(), FUNNEL_HIDDEN_NEURONS)?;
     let mut funnel = TelemetryFunnel::new(TELEMETRY_THRESHOLDS, cfg.snn_steps);

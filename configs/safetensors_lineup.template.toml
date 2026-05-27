@@ -21,6 +21,13 @@
 #
 # ── Template entries — replace /absolute/path/to with your local paths ────
 
+# ── OLMoE-1B-7B-0125-Instruct (MoE, 64 experts, 3 shards, BF16) ──
+[[model]]
+slug = "olmoe_1b_7b_0125_instruct"
+family = "olmoe"
+path = "/absolute/path/to/.models/safetensors/allenai/OLMoE-1B-7B-0125-Instruct"
+target = "local"
+
 # ── MET-55: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16 (Dense, single shard) ──
 [[model]]
 slug = "nemotron_3_nano_4b"

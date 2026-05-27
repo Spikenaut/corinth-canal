@@ -1,9 +1,9 @@
 //! Spike-to-expert projector — the heart of the neuromorphic-ANN fusion.
 //!
-//! The [`Projector`] sits between the Spikenaut SNN and OlmoeRouter's expert router.
+//! The [`Projector`] sits between the Spikenaut SNN and Router's expert router.
 //! Its job is to compress the high-dimensional spike activity (neuron indices +
 //! firing rates + membrane potentials) into a single dense embedding vector
-//! that OlmoeRouter can use as a context prefix.
+//! that Router can use as a context prefix.
 //!
 //! # Projection modes
 //!
@@ -13,7 +13,7 @@
 //! | [`TemporalHistogram`] | Spikes binned over time → flatten | timing-sensitive HFT |
 //! | [`MembraneSnapshot`] | Post-step membrane potentials → linear | smooth gradient flow |
 //!
-//! # No OlmoeRouter dependency
+//! # No Router dependency
 //!
 //! The projector is intentionally **pure** — it depends only on the spike
 //! activity represented as spike indices, potentials, and adaptive voltages,
@@ -43,7 +43,7 @@ fn feature_dim_for(snn_neurons: usize) -> usize {
 
 // ── Projector ─────────────────────────────────────────────────────────────────
 
-/// Converts Spikenaut SNN output into a dense embedding for OlmoeRouter.
+/// Converts Spikenaut SNN output into a dense embedding for Router.
 ///
 /// Internally this is a **learned linear layer** `W ∈ ℝ^{EMBEDDING_DIM × FEATURE_DIM}`
 /// plus a bias `b ∈ ℝ^{EMBEDDING_DIM}`, initialised with Xavier-uniform weights.

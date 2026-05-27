@@ -1,10 +1,10 @@
-//! Public MoE router API backed by a family-aware GGUF bridge.
+//! Public MoE router API backed by a family-aware GGUF and Safetensors bridge.
 //!
 //! Private helpers live in:
 //! - `moe/checkpoint.rs` for GGUF parsing + mapped tensor access
 //! - `moe/adapter.rs` for model-family detection and tensor selection
 //! - `moe/routing.rs` for routing math and embedding resampling
-//! - `moe/safetensors.rs` for Safetensors header inspection and manifests
+//! - `moe/safetensors.rs` for Safetensors header inspection, manifests, and tensor loading
 
 mod adapter;
 mod checkpoint;
@@ -12,7 +12,7 @@ mod ggml;
 mod routing;
 pub mod safetensors;
 
-use self::adapter::{ModelAdapter, SynapseSource, resolve_adapter};
+use self::adapter::{ModelAdapter, SynapseSource, resolve_adapter, resolve_safetensors_adapter};
 use self::checkpoint::{
     MappedGgufCheckpoint, extract_named_token_embedding_from_checkpoint, probe_and_map_checkpoint,
 };
@@ -26,15 +26,16 @@ use self::ggml::{
 pub use self::ggml::{ggml_type_label, synapse_dequant_path_supported};
 use self::routing::{
     checkpoint_gate_scores, normalize_l2, normalize_to_internal_embedding_dim, resample_embedding,
-    softmax, synthetic_gate_scores, top_k_indices,
+    safetensors_gate_scores, softmax, synthetic_gate_scores, top_k_indices,
 };
+use self::safetensors::MappedSafetensorsCheckpoint;
 use crate::error::{HybridError, Result};
 pub use crate::types::RoutingMode;
 use crate::types::{EMBEDDING_DIM, ModelFamily};
 
 /// Diagnostic snapshot of the GGUF tensor that the adapter wants to use as
 /// the GPU synapse weight source for this router. Returned by
-/// [`OlmoeRouter::preferred_gpu_synapse_tensor_descriptor`]; only consumed
+/// [`Router::preferred_gpu_synapse_tensor_descriptor`]; only consumed
 /// by `examples/synapse_diagnostic.rs` today, but exposed publicly so
 /// future runner / manifest stamping can reuse it without re-mapping the
 /// checkpoint. Carries no live tensor data.
@@ -85,7 +86,12 @@ impl RouterMetadata {
     }
 }
 
-pub struct OlmoeRouter {
+enum CheckpointBackend {
+    Gguf(MappedGgufCheckpoint),
+    Safetensors(MappedSafetensorsCheckpoint),
+}
+
+pub struct Router {
     metadata: RouterMetadata,
     adapter: Option<ModelAdapter>,
     model_path: String,
@@ -97,7 +103,7 @@ pub struct OlmoeRouter {
     hidden_membranes: Vec<f32>,
     threshold: f32,
     decay: f32,
-    checkpoint: Option<MappedGgufCheckpoint>,
+    checkpoint: Option<CheckpointBackend>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -116,13 +122,13 @@ pub struct RouterMetadata {
 }
 
 #[derive(Debug, Clone)]
-pub struct OlmoeOutput {
+pub struct RouterOutput {
     pub expert_weights: Vec<f32>,
     pub selected_experts: Vec<usize>,
     pub hidden: Vec<f32>,
 }
 
-impl OlmoeRouter {
+impl Router {
     pub fn load(model_path: &str, num_experts: usize, top_k: usize) -> Result<Self> {
         Self::load_with_family_and_mode(
             model_path,
@@ -172,7 +178,7 @@ impl OlmoeRouter {
             });
         }
 
-        let (metadata, checkpoint) = Self::probe_and_map(model_path, family_override)?;
+        let (metadata, checkpoint, adapter) = Self::probe_and_map(model_path, family_override)?;
         let effective_num_experts = if num_experts == 0 {
             metadata.num_experts
         } else {
@@ -190,12 +196,6 @@ impl OlmoeRouter {
         } else {
             top_k.max(1).min(effective_num_experts)
         };
-        let adapter = resolve_adapter(
-            checkpoint.metadata(),
-            &checkpoint,
-            family_override,
-            model_path,
-        )?;
 
         Ok(Self {
             model_path: model_path.to_owned(),
@@ -214,11 +214,11 @@ impl OlmoeRouter {
     }
 
     pub fn probe_model(path: &str, family_override: Option<ModelFamily>) -> Result<RouterMetadata> {
-        let (metadata, _checkpoint) = Self::probe_and_map(path, family_override)?;
+        let (metadata, _checkpoint, _adapter) = Self::probe_and_map(path, family_override)?;
         Ok(metadata)
     }
 
-    pub fn forward(&mut self, embedding: &[f32]) -> Result<OlmoeOutput> {
+    pub fn forward(&mut self, embedding: &[f32]) -> Result<RouterOutput> {
         if embedding.len() != EMBEDDING_DIM {
             return Err(HybridError::InputLengthMismatch {
                 expected: EMBEDDING_DIM,
@@ -248,12 +248,19 @@ impl OlmoeRouter {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        let embedding = extract_named_token_embedding_from_checkpoint(
-            checkpoint,
-            &adapter.token_embedding_tensor,
-            &self.model_path,
-            token_id,
-        )?;
+        let embedding = match checkpoint {
+            CheckpointBackend::Gguf(cp) => extract_named_token_embedding_from_checkpoint(
+                cp,
+                &adapter.token_embedding_tensor,
+                &self.model_path,
+                token_id,
+            )?,
+            CheckpointBackend::Safetensors(cp) => cp.extract_token_embedding(
+                &adapter.token_embedding_tensor,
+                &self.model_path,
+                token_id,
+            )?,
+        };
         Ok(normalize_to_internal_embedding_dim(&embedding))
     }
 
@@ -266,7 +273,12 @@ impl OlmoeRouter {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        checkpoint.registered_f16_tensor(tensor_name, &self.model_path)
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => cp.registered_f16_tensor(tensor_name, &self.model_path),
+            CheckpointBackend::Safetensors(_) => Err(HybridError::UnsupportedFormat(
+                "Safetensors checkpoint does not support GPU synapse registration".into(),
+            )),
+        }
     }
 
     /// Returns the tensor name to use for Q8_0 dequantized synapse loading,
@@ -293,7 +305,12 @@ impl OlmoeRouter {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        checkpoint.dequantize_q8_0_tensor(tensor_name, &self.model_path)
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => cp.dequantize_q8_0_tensor(tensor_name, &self.model_path),
+            CheckpointBackend::Safetensors(_) => Err(HybridError::UnsupportedFormat(
+                "Safetensors checkpoint does not support Q8_0 dequantization".into(),
+            )),
+        }
     }
 
     /// Returns the tensor name to use for Q5_K dequantized synapse loading,
@@ -320,7 +337,12 @@ impl OlmoeRouter {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        checkpoint.dequantize_q5_k_tensor(tensor_name, &self.model_path)
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => cp.dequantize_q5_k_tensor(tensor_name, &self.model_path),
+            CheckpointBackend::Safetensors(_) => Err(HybridError::UnsupportedFormat(
+                "Safetensors checkpoint does not support Q5_K dequantization".into(),
+            )),
+        }
     }
 
     #[allow(dead_code)]
@@ -343,7 +365,12 @@ impl OlmoeRouter {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        checkpoint.dequantize_q6_k_tensor(tensor_name, &self.model_path)
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => cp.dequantize_q6_k_tensor(tensor_name, &self.model_path),
+            CheckpointBackend::Safetensors(_) => Err(HybridError::UnsupportedFormat(
+                "Safetensors checkpoint does not support Q6_K dequantization".into(),
+            )),
+        }
     }
 
     /// `(src_rows, src_cols)` matching the row-major layout produced by
@@ -361,28 +388,64 @@ impl OlmoeRouter {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        let info = checkpoint.tensor_info(tensor_name, &self.model_path)?;
-        if info.dims.is_empty() {
+        let dims = match checkpoint {
+            CheckpointBackend::Gguf(cp) => {
+                let info = cp.tensor_info(tensor_name, &self.model_path)?;
+                info.dims.clone()
+            }
+            CheckpointBackend::Safetensors(cp) => {
+                let info =
+                    cp.tensor_info(tensor_name)
+                        .ok_or_else(|| HybridError::MissingTensor {
+                            name: tensor_name.to_owned(),
+                            path: self.model_path.clone(),
+                        })?;
+                info.1.to_vec()
+            }
+        };
+        if dims.is_empty() {
             return Err(HybridError::UnsupportedFormat(format!(
                 "tensor '{tensor_name}' has no dimensions"
             )));
         }
-        let src_cols = info.dims[0];
-        let src_rows = info.dims.get(1).copied().unwrap_or(1);
+        let src_cols = dims[0];
+        let src_rows = dims.get(1).copied().unwrap_or(1);
         Ok((src_rows, src_cols))
     }
 
     fn probe_and_map(
         path: &str,
         family_override: Option<ModelFamily>,
-    ) -> Result<(RouterMetadata, MappedGgufCheckpoint)> {
+    ) -> Result<(RouterMetadata, CheckpointBackend, ModelAdapter)> {
+        let is_safetensors = std::path::Path::new(path).is_dir()
+            || !std::path::Path::new(path)
+                .extension()
+                .map(|ext| ext.eq_ignore_ascii_case("gguf"))
+                .unwrap_or(false);
+
+        if is_safetensors {
+            let checkpoint = MappedSafetensorsCheckpoint::from_directory(path)?;
+            let adapter = resolve_safetensors_adapter(
+                &checkpoint.metadata,
+                &checkpoint,
+                family_override,
+                path,
+            )?;
+            let metadata = RouterMetadata::from_adapter(&adapter);
+            return Ok((
+                metadata,
+                CheckpointBackend::Safetensors(checkpoint),
+                adapter,
+            ));
+        }
+
         let (_raw_metadata, checkpoint) = probe_and_map_checkpoint(path)?;
         let adapter = resolve_adapter(checkpoint.metadata(), &checkpoint, family_override, path)?;
         let metadata = RouterMetadata::from_adapter(&adapter);
-        Ok((metadata, checkpoint))
+        Ok((metadata, CheckpointBackend::Gguf(checkpoint), adapter))
     }
 
-    fn simulate_moe_routing(&self, embedding: &[f32]) -> Result<OlmoeOutput> {
+    fn simulate_moe_routing(&self, embedding: &[f32]) -> Result<RouterOutput> {
         let gate_scores = self.compute_gate_scores(embedding)?;
         let expert_weights = softmax(&gate_scores);
         let selected_experts = top_k_indices(&expert_weights, self.top_k);
@@ -392,14 +455,14 @@ impl OlmoeRouter {
             .sum();
         let hidden: Vec<f32> = embedding.iter().map(|&v| v * selected_mass).collect();
 
-        Ok(OlmoeOutput {
+        Ok(RouterOutput {
             expert_weights,
             selected_experts,
             hidden,
         })
     }
 
-    fn spiking_moe_routing(&mut self, embedding: &[f32]) -> Result<OlmoeOutput> {
+    fn spiking_moe_routing(&mut self, embedding: &[f32]) -> Result<RouterOutput> {
         let gate_scores = self.compute_gate_scores(embedding)?;
         let n = self.num_experts;
         let mut membrane_scores = Vec::with_capacity(n);
@@ -446,7 +509,7 @@ impl OlmoeRouter {
             *value = spike * 0.3;
         }
 
-        Ok(OlmoeOutput {
+        Ok(RouterOutput {
             expert_weights,
             selected_experts,
             hidden,
@@ -457,21 +520,30 @@ impl OlmoeRouter {
         if let (Some(checkpoint), Some(adapter)) = (&self.checkpoint, &self.adapter) {
             let mut routed_embedding = resample_embedding(embedding, adapter.hidden_size);
             normalize_l2(&mut routed_embedding);
-            return checkpoint_gate_scores(
-                checkpoint,
-                &self.model_path,
-                &adapter.routing_tensor,
-                self.num_experts,
-                &routed_embedding,
-            );
+            return match checkpoint {
+                CheckpointBackend::Gguf(cp) => checkpoint_gate_scores(
+                    cp,
+                    &self.model_path,
+                    &adapter.routing_tensor,
+                    self.num_experts,
+                    &routed_embedding,
+                ),
+                CheckpointBackend::Safetensors(cp) => safetensors_gate_scores(
+                    cp,
+                    &self.model_path,
+                    &adapter.routing_tensor,
+                    self.num_experts,
+                    &routed_embedding,
+                ),
+            };
         }
 
         Ok(synthetic_gate_scores(self.num_experts, embedding))
     }
 
-    fn stub_output(&self) -> OlmoeOutput {
+    fn stub_output(&self) -> RouterOutput {
         let n = self.num_experts.max(1);
-        OlmoeOutput {
+        RouterOutput {
             expert_weights: vec![1.0 / n as f32; n],
             selected_experts: (0..self.top_k.min(n)).collect(),
             hidden: vec![0.0; EMBEDDING_DIM],
@@ -547,14 +619,19 @@ impl OlmoeRouter {
     pub fn preferred_gpu_synapse_tensor_descriptor(&self) -> Option<GpuSynapseTensorDescriptor> {
         let name = self.metadata.preferred_gpu_synapse_tensor_name.as_deref()?;
         let checkpoint = self.checkpoint.as_ref()?;
-        let info = checkpoint.tensor_info(name, &self.model_path).ok()?;
-        Some(GpuSynapseTensorDescriptor {
-            name: name.to_owned(),
-            ggml_type_id: info.ggml_type,
-            ggml_type_label: ggml_type_label(info.ggml_type),
-            dims: info.dims.clone(),
-            has_dequant_path: synapse_dequant_path_supported(info.ggml_type),
-        })
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => {
+                let info = cp.tensor_info(name, &self.model_path).ok()?;
+                Some(GpuSynapseTensorDescriptor {
+                    name: name.to_owned(),
+                    ggml_type_id: info.ggml_type,
+                    ggml_type_label: ggml_type_label(info.ggml_type),
+                    dims: info.dims.clone(),
+                    has_dequant_path: synapse_dequant_path_supported(info.ggml_type),
+                })
+            }
+            CheckpointBackend::Safetensors(_) => None,
+        }
     }
 
     pub fn num_experts(&self) -> usize {

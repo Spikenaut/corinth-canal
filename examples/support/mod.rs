@@ -11,7 +11,7 @@ pub use lineup::{
     safetensors_lineup_path_from_env,
 };
 
-use corinth_canal::{ModelFamily, SaaqUpdateRule, moe::OlmoeRouter, moe::RoutingMode};
+use corinth_canal::{ModelFamily, SaaqUpdateRule, moe::Router, moe::RoutingMode};
 #[cfg(feature = "cuda")]
 use corinth_canal::{model::ModelConfig, projector::ProjectionMode};
 use std::io::Error;
@@ -44,15 +44,15 @@ pub struct ValidationModelSpec {
 
 #[allow(dead_code)]
 #[cfg(feature = "cuda")]
-pub fn default_spiking_model_config(gguf_checkpoint_path: String, snn_steps: usize) -> ModelConfig {
-    let probe = if gguf_checkpoint_path.trim().is_empty() {
+pub fn default_spiking_model_config(checkpoint_path: String, snn_steps: usize) -> ModelConfig {
+    let probe = if checkpoint_path.trim().is_empty() {
         None
     } else {
-        OlmoeRouter::probe_model(&gguf_checkpoint_path, None).ok()
+        Router::probe_model(&checkpoint_path, None).ok()
     };
 
     ModelConfig {
-        gguf_checkpoint_path,
+        checkpoint_path,
         model_family: probe.as_ref().map(|metadata| metadata.family),
         gpu_synapse_tensor_name: probe
             .as_ref()
@@ -269,10 +269,10 @@ pub fn pooled_prompt_embedding_from_ollama(
 }
 
 pub fn discover_validation_models() -> Vec<ValidationModelSpec> {
-    if let Ok(path) = std::env::var("GGUF_CHECKPOINT_PATH")
+    if let Ok(path) = std::env::var("CHECKPOINT_PATH")
         && !path.trim().is_empty()
     {
-        let family = OlmoeRouter::probe_model(&path, None)
+        let family = Router::probe_model(&path, None)
             .ok()
             .map(|metadata| metadata.family);
         return vec![ValidationModelSpec {
