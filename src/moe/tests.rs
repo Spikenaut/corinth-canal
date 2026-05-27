@@ -1248,8 +1248,11 @@ fn test_safetensors_int4_tensor_extraction() {
     std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
 
     // Load and extract
-    let checkpoint = MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
-    let extracted = checkpoint.extract_tensor_f32(tensor_name, st_path.to_str().unwrap()).unwrap();
+    let checkpoint =
+        MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
+    let extracted = checkpoint
+        .extract_tensor_f32(tensor_name, st_path.to_str().unwrap())
+        .unwrap();
 
     // INT4 unpacking: 2 elements per byte
     // 0x12 -> low=2, high=1
@@ -1310,8 +1313,11 @@ fn test_safetensors_i4_signed_tensor_extraction() {
     let config_path = tmp_dir.join("config.json");
     std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
 
-    let checkpoint = MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
-    let extracted = checkpoint.extract_tensor_f32(tensor_name, st_path.to_str().unwrap()).unwrap();
+    let checkpoint =
+        MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
+    let extracted = checkpoint
+        .extract_tensor_f32(tensor_name, st_path.to_str().unwrap())
+        .unwrap();
 
     // Signed I4: 0x8F -> low=15 -> sign-extend -> -1, high=8 -> sign-extend -> -8
     assert_eq!(extracted, vec![-1.0, -8.0]);
@@ -1367,18 +1373,25 @@ fn test_safetensors_int4_token_embedding() {
     let config_path = tmp_dir.join("config.json");
     std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
 
-    let checkpoint = MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
+    let checkpoint =
+        MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
 
     // Extract token 0: first 4 elements = 2 bytes = [0x12, 0x34] -> [2, 1, 4, 3]
-    let emb0 = checkpoint.extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 0).unwrap();
+    let emb0 = checkpoint
+        .extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 0)
+        .unwrap();
     assert_eq!(emb0, vec![2.0, 1.0, 4.0, 3.0]);
 
     // Extract token 1: next 4 elements = 2 bytes = [0x56, 0x78] -> [6, 5, 8, 7]
-    let emb1 = checkpoint.extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 1).unwrap();
+    let emb1 = checkpoint
+        .extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 1)
+        .unwrap();
     assert_eq!(emb1, vec![6.0, 5.0, 8.0, 7.0]);
 
     // Extract token 2: last 4 elements = 2 bytes = [0x9A, 0xBC] -> [10, 9, 12, 11]
-    let emb2 = checkpoint.extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 2).unwrap();
+    let emb2 = checkpoint
+        .extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 2)
+        .unwrap();
     assert_eq!(emb2, vec![10.0, 9.0, 12.0, 11.0]);
 
     let _ = std::fs::remove_dir_all(&tmp_dir);
