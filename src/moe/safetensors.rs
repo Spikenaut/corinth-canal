@@ -1211,7 +1211,7 @@ impl MappedSafetensorsCheckpoint {
 
         match loc.dtype.as_str() {
             "F32" => {
-                if bytes.len() % 4 != 0 {
+                if !bytes.len().is_multiple_of(4) {
                     return Err(HybridError::UnsupportedFormat(format!(
                         "tensor '{name}' F32 data is not 4-byte aligned"
                     )));
@@ -1222,7 +1222,7 @@ impl MappedSafetensorsCheckpoint {
                     .collect())
             }
             "F16" => {
-                if bytes.len() % 2 != 0 {
+                if !bytes.len().is_multiple_of(2) {
                     return Err(HybridError::UnsupportedFormat(format!(
                         "tensor '{name}' F16 data is not 2-byte aligned"
                     )));
@@ -1233,7 +1233,7 @@ impl MappedSafetensorsCheckpoint {
                     .collect())
             }
             "BF16" => {
-                if bytes.len() % 2 != 0 {
+                if !bytes.len().is_multiple_of(2) {
                     return Err(HybridError::UnsupportedFormat(format!(
                         "tensor '{name}' BF16 data is not 2-byte aligned"
                     )));
