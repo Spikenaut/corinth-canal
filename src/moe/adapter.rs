@@ -263,7 +263,6 @@ fn infer_family_safetensors(
         "LlamaMoeForCausalLM" => ModelFamily::LlamaMoe,
         "NemotronHForCausalLM" => ModelFamily::Nemotron3Nano4B,
         "Lfm2MoeForCausalLM" => ModelFamily::Lfm2Moe,
-        "PhiMoEForCausalLM" => ModelFamily::SlimMoe,
         other => {
             return Err(HybridError::UnsupportedFormat(format!(
                 "unsupported Safetensors architecture '{other}' in '{path}'"

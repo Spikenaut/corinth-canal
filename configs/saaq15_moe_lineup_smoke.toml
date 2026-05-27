@@ -1,0 +1,4 @@
+[[model]]
+slug = "olmoe_baseline"
+family = "olmoe"
+path = "/absolute/path/to/olmoe-0125-gguf/OLMoE-1B-7B-0125-Instruct-F16.gguf"

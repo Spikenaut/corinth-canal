@@ -20,7 +20,6 @@ pub enum ModelFamily {
     Granite31A800M,
     Nemotron3Nano4B,
     Lfm2Moe,
-    SlimMoe,
     Zaya,
     Glm4,
 }
@@ -37,7 +36,6 @@ impl ModelFamily {
             Self::Granite31A800M => "granite_3_1_a800m",
             Self::Nemotron3Nano4B => "nemotron_3_nano_4b",
             Self::Lfm2Moe => "lfm2_moe",
-            Self::SlimMoe => "slim_moe",
             Self::Zaya => "zaya",
             Self::Glm4 => "glm4",
         }
