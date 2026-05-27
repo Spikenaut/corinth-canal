@@ -323,8 +323,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "produced no usable entries")]
     fn safetensors_validation_rejects_empty_lineup() {
-        let entries: &[SafetensorsModelEntry] = &[];
-        validate_safetensors_lineup_entries(Path::new("configs/template.toml"), entries);
+        let entries: Vec<SafetensorsModelEntry> = Vec::new();
+        validate_safetensors_lineup_entries(Path::new("configs/template.toml"), entries.as_slice());
     }
 
     #[test]
