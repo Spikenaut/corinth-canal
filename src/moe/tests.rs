@@ -1195,3 +1195,191 @@ fn test_dequantize_row_iq3_m_error_paths() {
     let result = dequantize_row_iq3_m(&[0u8; 110], 256);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_safetensors_int4_tensor_extraction() {
+    use super::safetensors::MappedSafetensorsCheckpoint;
+    use std::io::Write;
+
+    // Build a minimal safetensors file with INT4 data
+    // Format: 8-byte header len + JSON header + data
+    let tensor_name = "test.int4";
+    let shape = vec![2usize, 4]; // 2 rows, 4 elements = 8 elements total = 4 bytes
+    let data = vec![0x12u8, 0x34u8, 0x56u8, 0x78u8]; // 4 bytes
+
+    let header = serde_json::json!({
+        tensor_name: {
+            "dtype": "INT4",
+            "shape": shape,
+            "data_offsets": [0, data.len()]
+        },
+        "__metadata__": {}
+    });
+    let header_bytes = serde_json::to_vec(&header).unwrap();
+    let header_len = header_bytes.len() as u64;
+
+    let mut file_bytes = Vec::new();
+    file_bytes.extend_from_slice(&header_len.to_le_bytes());
+    file_bytes.extend_from_slice(&header_bytes);
+    file_bytes.extend_from_slice(&data);
+
+    // Write to temp file
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "corinth_canal_st_test_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let st_path = tmp_dir.join("model.safetensors");
+    let mut file = std::fs::File::create(&st_path).unwrap();
+    file.write_all(&file_bytes).unwrap();
+    drop(file);
+
+    // Write config.json
+    let config = serde_json::json!({
+        "architectures": ["TestModel"],
+        "hidden_size": 128,
+        "num_hidden_layers": 2,
+        "vocab_size": 1000
+    });
+    let config_path = tmp_dir.join("config.json");
+    std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+
+    // Load and extract
+    let checkpoint = MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
+    let extracted = checkpoint.extract_tensor_f32(tensor_name, st_path.to_str().unwrap()).unwrap();
+
+    // INT4 unpacking: 2 elements per byte
+    // 0x12 -> low=2, high=1
+    // 0x34 -> low=4, high=3
+    // 0x56 -> low=6, high=5
+    // 0x78 -> low=8, high=7
+    assert_eq!(extracted, vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0]);
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_safetensors_i4_signed_tensor_extraction() {
+    use super::safetensors::MappedSafetensorsCheckpoint;
+    use std::io::Write;
+
+    // Build a minimal safetensors file with I4 (signed) data
+    let tensor_name = "test.i4";
+    let shape = vec![1usize, 2]; // 2 elements = 1 byte
+    let data = vec![0x8Fu8]; // low=15 (-1), high=8 (-8) in signed I4
+
+    let header = serde_json::json!({
+        tensor_name: {
+            "dtype": "I4",
+            "shape": shape,
+            "data_offsets": [0, data.len()]
+        },
+        "__metadata__": {}
+    });
+    let header_bytes = serde_json::to_vec(&header).unwrap();
+    let header_len = header_bytes.len() as u64;
+
+    let mut file_bytes = Vec::new();
+    file_bytes.extend_from_slice(&header_len.to_le_bytes());
+    file_bytes.extend_from_slice(&header_bytes);
+    file_bytes.extend_from_slice(&data);
+
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "corinth_canal_st_i4_test_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let st_path = tmp_dir.join("model.safetensors");
+    let mut file = std::fs::File::create(&st_path).unwrap();
+    file.write_all(&file_bytes).unwrap();
+    drop(file);
+
+    let config = serde_json::json!({
+        "architectures": ["TestModel"],
+        "hidden_size": 128,
+        "num_hidden_layers": 2,
+        "vocab_size": 1000
+    });
+    let config_path = tmp_dir.join("config.json");
+    std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+
+    let checkpoint = MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
+    let extracted = checkpoint.extract_tensor_f32(tensor_name, st_path.to_str().unwrap()).unwrap();
+
+    // Signed I4: 0x8F -> low=15 -> sign-extend -> -1, high=8 -> sign-extend -> -8
+    assert_eq!(extracted, vec![-1.0, -8.0]);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_safetensors_int4_token_embedding() {
+    use super::safetensors::MappedSafetensorsCheckpoint;
+    use std::io::Write;
+
+    // Build a minimal safetensors file with INT4 token embeddings
+    let tensor_name = "token_embd.weight";
+    let shape = vec![3usize, 4]; // 3 tokens, 4 dims = 12 elements = 6 bytes
+    let data = vec![0x12u8, 0x34u8, 0x56u8, 0x78u8, 0x9Au8, 0xBCu8];
+
+    let header = serde_json::json!({
+        tensor_name: {
+            "dtype": "INT4",
+            "shape": shape,
+            "data_offsets": [0, data.len()]
+        },
+        "__metadata__": {}
+    });
+    let header_bytes = serde_json::to_vec(&header).unwrap();
+    let header_len = header_bytes.len() as u64;
+
+    let mut file_bytes = Vec::new();
+    file_bytes.extend_from_slice(&header_len.to_le_bytes());
+    file_bytes.extend_from_slice(&header_bytes);
+    file_bytes.extend_from_slice(&data);
+
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "corinth_canal_st_emb_test_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let st_path = tmp_dir.join("model.safetensors");
+    let mut file = std::fs::File::create(&st_path).unwrap();
+    file.write_all(&file_bytes).unwrap();
+    drop(file);
+
+    let config = serde_json::json!({
+        "architectures": ["TestModel"],
+        "hidden_size": 128,
+        "num_hidden_layers": 2,
+        "vocab_size": 1000
+    });
+    let config_path = tmp_dir.join("config.json");
+    std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+
+    let checkpoint = MappedSafetensorsCheckpoint::from_directory(tmp_dir.to_str().unwrap()).unwrap();
+
+    // Extract token 0: first 4 elements = 2 bytes = [0x12, 0x34] -> [2, 1, 4, 3]
+    let emb0 = checkpoint.extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 0).unwrap();
+    assert_eq!(emb0, vec![2.0, 1.0, 4.0, 3.0]);
+
+    // Extract token 1: next 4 elements = 2 bytes = [0x56, 0x78] -> [6, 5, 8, 7]
+    let emb1 = checkpoint.extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 1).unwrap();
+    assert_eq!(emb1, vec![6.0, 5.0, 8.0, 7.0]);
+
+    // Extract token 2: last 4 elements = 2 bytes = [0x9A, 0xBC] -> [10, 9, 12, 11]
+    let emb2 = checkpoint.extract_token_embedding(tensor_name, st_path.to_str().unwrap(), 2).unwrap();
+    assert_eq!(emb2, vec![10.0, 9.0, 12.0, 11.0]);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}

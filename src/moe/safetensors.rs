@@ -576,12 +576,6 @@ fn expected_tensor_byte_size(
     path: &Path,
     tensor_name: &str,
 ) -> Result<usize> {
-    let element_size = dtype_size_bytes(dtype).ok_or_else(|| {
-        model_load(
-            path,
-            format!("tensor '{tensor_name}' has unsupported Safetensors dtype '{dtype}'"),
-        )
-    })?;
     let elements = shape.iter().try_fold(1usize, |acc, dim| {
         acc.checked_mul(*dim).ok_or_else(|| {
             model_load(
@@ -589,6 +583,21 @@ fn expected_tensor_byte_size(
                 format!("tensor '{tensor_name}' shape element count overflow"),
             )
         })
+    })?;
+
+    // Int4 is a packed format: 2 elements per byte
+    if dtype == "INT4" || dtype == "I4" || dtype == "U4" {
+        return elements
+            .div_ceil(2)
+            .checked_mul(1)
+            .ok_or_else(|| model_load(path, format!("tensor '{tensor_name}' byte size overflow")));
+    }
+
+    let element_size = dtype_size_bytes(dtype).ok_or_else(|| {
+        model_load(
+            path,
+            format!("tensor '{tensor_name}' has unsupported Safetensors dtype '{dtype}'"),
+        )
     })?;
     elements
         .checked_mul(element_size)
