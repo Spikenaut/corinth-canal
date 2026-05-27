@@ -14,6 +14,7 @@
 #   slug          directory-safe identifier (used in artifact paths)
 #   family        optional model family for tensor classification heuristics
 #                 one of: olmoe | qwen3_moe | gemma4 | deepseek2 | llama_moe | zaya | glm4
+#                         | nemotron_3_nano_4b | lfm2_moe | granite_3_1_a800m | moonlight_16b_a3b
 #                 leave blank when no existing corinth-canal family matches
 #   path          absolute path to a .safetensors file, .safetensors.index.json,
 #                 or directory containing safetensors shards
@@ -28,11 +29,18 @@ family = "olmoe"
 path = "/absolute/path/to/.models/safetensors/allenai/OLMoE-1B-7B-0125-Instruct"
 target = "local"
 
-# ── MET-55: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16 (Dense, single shard) ──
+# ── MET-55: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16 (Hybrid MoE / Mamba-Attention, single shard) ──
 [[model]]
 slug = "nemotron_3_nano_4b"
-family = ""
+family = "nemotron_3_nano_4b"
 path = "/absolute/path/to/.models/safetensors/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/model.safetensors"
+target = "local"
+
+# ── lfm2-8b-a1b (Hybrid MoE / Conv-Attention, 4 shards, BF16) ──
+[[model]]
+slug = "lfm2_8b_a1b"
+family = "lfm2_moe"
+path = "/absolute/path/to/.models/safetensors/lfm2-8b-a1b"
 target = "local"
 
 # ── MET-56: ibm-granite/granite-3.1-3b-a800m-base (MoE, 2 shards) ──

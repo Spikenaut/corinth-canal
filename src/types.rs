@@ -18,6 +18,8 @@ pub enum ModelFamily {
     LlamaMoe,
     Moonlight16BA3B,
     Granite31A800M,
+    Nemotron3Nano4B,
+    Lfm2Moe,
     Zaya,
     Glm4,
 }
@@ -32,6 +34,8 @@ impl ModelFamily {
             Self::LlamaMoe => "llama_moe",
             Self::Moonlight16BA3B => "moonlight_16b_a3b",
             Self::Granite31A800M => "granite_3_1_a800m",
+            Self::Nemotron3Nano4B => "nemotron_3_nano_4b",
+            Self::Lfm2Moe => "lfm2_moe",
             Self::Zaya => "zaya",
             Self::Glm4 => "glm4",
         }

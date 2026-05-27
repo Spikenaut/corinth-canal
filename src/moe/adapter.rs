@@ -261,6 +261,8 @@ fn infer_family_safetensors(
         "Gemma4ForCausalLM" => ModelFamily::Gemma4,
         "DeepseekV2ForCausalLM" => ModelFamily::DeepSeek2,
         "LlamaMoeForCausalLM" => ModelFamily::LlamaMoe,
+        "NemotronHForCausalLM" => ModelFamily::Nemotron3Nano4B,
+        "Lfm2MoeForCausalLM" => ModelFamily::Lfm2Moe,
         other => {
             return Err(HybridError::UnsupportedFormat(format!(
                 "unsupported Safetensors architecture '{other}' in '{path}'"
@@ -293,6 +295,8 @@ fn infer_family(
         "llama" => ModelFamily::LlamaMoe,
         "moonlight" => ModelFamily::Moonlight16BA3B,
         "granite" | "granitemoe" => ModelFamily::Granite31A800M,
+        "nemotron" | "nemotronh" => ModelFamily::Nemotron3Nano4B,
+        "lfm2" | "lfm2moe" => ModelFamily::Lfm2Moe,
         "zaya" => ModelFamily::Zaya,
         "glm4" | "glm4moe" => ModelFamily::Glm4,
         other => {
