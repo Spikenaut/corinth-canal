@@ -1017,11 +1017,9 @@ impl MappedSafetensorsCheckpoint {
         }
 
         let config = Self::read_config(root)?;
-        let index_path = find_index_file(root)?.ok_or_else(|| {
-            HybridError::ModelLoad {
-                path: path.to_owned(),
-                reason: "no model.safetensors.index.json found".into(),
-            }
+        let index_path = find_index_file(root)?.ok_or_else(|| HybridError::ModelLoad {
+            path: path.to_owned(),
+            reason: "no model.safetensors.index.json found".into(),
         })?;
         let raw_index = read_index(&index_path)?;
 
@@ -1035,11 +1033,13 @@ impl MappedSafetensorsCheckpoint {
             std::collections::BTreeMap::new();
         for (tensor_name, relative) in &raw_index.weight_map {
             let shard_path = index_shard_path(root, &index_path, relative)?;
-            let shard_idx = *shard_index_by_path.entry(shard_path.clone()).or_insert_with(|| {
-                let idx = shard_paths.len();
-                shard_paths.push(shard_path);
-                idx
-            });
+            let shard_idx = *shard_index_by_path
+                .entry(shard_path.clone())
+                .or_insert_with(|| {
+                    let idx = shard_paths.len();
+                    shard_paths.push(shard_path);
+                    idx
+                });
             tensor_map.insert(
                 tensor_name.clone(),
                 TensorLocation {
@@ -1054,7 +1054,8 @@ impl MappedSafetensorsCheckpoint {
         // Map each shard and parse its header to resolve tensor dtypes/offsets
         for shard_path in &shard_paths {
             let file = File::open(shard_path).map_err(|e| model_load(shard_path, e.to_string()))?;
-            let mmap = unsafe { Mmap::map(&file) }.map_err(|e| model_load(shard_path, e.to_string()))?;
+            let mmap =
+                unsafe { Mmap::map(&file) }.map_err(|e| model_load(shard_path, e.to_string()))?;
             let file_len = mmap.len() as u64;
             let mut len_bytes = [0u8; 8];
             let mut reader = &mmap[..];
@@ -1068,13 +1069,19 @@ impl MappedSafetensorsCheckpoint {
                     format!("header length {header_len} exceeds limit {MAX_HEADER_BYTES}"),
                 ));
             }
-            if 8u64.checked_add(header_len).is_none_or(|end| end > file_len) {
+            if 8u64
+                .checked_add(header_len)
+                .is_none_or(|end| end > file_len)
+            {
                 return Err(model_load(shard_path, "header extends beyond file".into()));
             }
             let header_bytes = &mmap[8..8 + header_len as usize];
             let header = parse_json_rejecting_duplicate_keys(header_bytes, shard_path, "header")?;
             let object = header.as_object().ok_or_else(|| {
-                model_load(shard_path, "Safetensors header must be a JSON object".into())
+                model_load(
+                    shard_path,
+                    "Safetensors header must be a JSON object".into(),
+                )
             })?;
 
             let data_len = file_len
@@ -1093,22 +1100,31 @@ impl MappedSafetensorsCheckpoint {
                     continue;
                 }
                 let tensor = value.as_object().ok_or_else(|| {
-                    model_load(shard_path, format!("tensor '{name}' metadata must be an object"))
+                    model_load(
+                        shard_path,
+                        format!("tensor '{name}' metadata must be an object"),
+                    )
                 })?;
                 let dtype = tensor
                     .get("dtype")
                     .and_then(Value::as_str)
-                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' missing dtype")))?
+                    .ok_or_else(|| {
+                        model_load(shard_path, format!("tensor '{name}' missing dtype"))
+                    })?
                     .to_string();
                 let shape = tensor
                     .get("shape")
                     .and_then(Value::as_array)
-                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' missing shape")))?
+                    .ok_or_else(|| {
+                        model_load(shard_path, format!("tensor '{name}' missing shape"))
+                    })?
                     .iter()
                     .map(|dim| {
                         dim.as_u64()
                             .and_then(|v| usize::try_from(v).ok())
-                            .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' invalid shape")))
+                            .ok_or_else(|| {
+                                model_load(shard_path, format!("tensor '{name}' invalid shape"))
+                            })
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let offsets = tensor
@@ -1126,11 +1142,15 @@ impl MappedSafetensorsCheckpoint {
                 let start = offsets[0]
                     .as_u64()
                     .and_then(|v| usize::try_from(v).ok())
-                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' invalid start offset")))?;
+                    .ok_or_else(|| {
+                        model_load(shard_path, format!("tensor '{name}' invalid start offset"))
+                    })?;
                 let end = offsets[1]
                     .as_u64()
                     .and_then(|v| usize::try_from(v).ok())
-                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' invalid end offset")))?;
+                    .ok_or_else(|| {
+                        model_load(shard_path, format!("tensor '{name}' invalid end offset"))
+                    })?;
                 if start > end || end as u64 > data_len {
                     return Err(model_load(
                         shard_path,
@@ -1177,10 +1197,13 @@ impl MappedSafetensorsCheckpoint {
 
     /// Extract a full tensor as `Vec<f32>`, converting BF16/F16 as needed.
     pub fn extract_tensor_f32(&self, name: &str, path: &str) -> Result<Vec<f32>> {
-        let loc = self.tensor_map.get(name).ok_or_else(|| HybridError::MissingTensor {
-            name: name.to_owned(),
-            path: path.to_owned(),
-        })?;
+        let loc = self
+            .tensor_map
+            .get(name)
+            .ok_or_else(|| HybridError::MissingTensor {
+                name: name.to_owned(),
+                path: path.to_owned(),
+            })?;
         let shard = &self.shards[loc.shard_idx];
         let data_start = 8 + shard.header_len as usize + loc.data_offsets[0];
         let data_end = 8 + shard.header_len as usize + loc.data_offsets[1];
@@ -1233,10 +1256,13 @@ impl MappedSafetensorsCheckpoint {
         path: &str,
         token_id: usize,
     ) -> Result<Vec<f32>> {
-        let loc = self.tensor_map.get(name).ok_or_else(|| HybridError::MissingTensor {
-            name: name.to_owned(),
-            path: path.to_owned(),
-        })?;
+        let loc = self
+            .tensor_map
+            .get(name)
+            .ok_or_else(|| HybridError::MissingTensor {
+                name: name.to_owned(),
+                path: path.to_owned(),
+            })?;
         if loc.shape.len() != 2 {
             return Err(HybridError::UnsupportedFormat(format!(
                 "token embedding tensor '{name}' must be rank-2, got {:?}",
@@ -1288,7 +1314,8 @@ impl MappedSafetensorsCheckpoint {
     fn read_config(root: &Path) -> Result<HfConfig> {
         let config_path = root.join("config.json");
         let bytes = fs::read(&config_path).map_err(|e| model_load(&config_path, e.to_string()))?;
-        serde_json::from_slice(&bytes).map_err(|e| model_load(&config_path, format!("parse config.json: {e}")))
+        serde_json::from_slice(&bytes)
+            .map_err(|e| model_load(&config_path, format!("parse config.json: {e}")))
     }
 }
 

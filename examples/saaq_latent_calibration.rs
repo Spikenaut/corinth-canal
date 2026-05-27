@@ -1,9 +1,8 @@
 mod support;
 
 use corinth_canal::{
-    ExperimentManifest, ExperimentMetrics, ExperimentSummary,
-    FunnelActivity, SaaqUpdateRule, SnnDualLatentCalibrator, SnnLatentCsvExporter,
-    gpu::GpuAccelerator, model::Model,
+    ExperimentManifest, ExperimentMetrics, ExperimentSummary, FunnelActivity, SaaqUpdateRule,
+    SnnDualLatentCalibrator, SnnLatentCsvExporter, gpu::GpuAccelerator, model::Model,
 };
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};

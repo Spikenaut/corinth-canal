@@ -35,12 +35,13 @@ pub(super) fn safetensors_gate_scores(
     embedding: &[f32],
 ) -> Result<Vec<f32>> {
     let weights = checkpoint.extract_tensor_f32(routing_tensor_name, model_path)?;
-    let info = checkpoint
-        .tensor_info(routing_tensor_name)
-        .ok_or_else(|| HybridError::MissingTensor {
-            name: routing_tensor_name.to_owned(),
-            path: model_path.to_owned(),
-        })?;
+    let info =
+        checkpoint
+            .tensor_info(routing_tensor_name)
+            .ok_or_else(|| HybridError::MissingTensor {
+                name: routing_tensor_name.to_owned(),
+                path: model_path.to_owned(),
+            })?;
     let shape = info.1;
     if shape.len() != 2 {
         return Err(HybridError::UnsupportedFormat(format!(

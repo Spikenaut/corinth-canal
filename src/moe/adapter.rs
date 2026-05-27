@@ -202,12 +202,13 @@ pub(super) fn resolve_safetensors_adapter(
     let routing_tensor = "model.layers.0.mlp.gate.weight".to_owned();
 
     // Validate routing tensor exists and is rank-2
-    let routing_info = checkpoint
-        .tensor_info(&routing_tensor)
-        .ok_or_else(|| HybridError::MissingTensor {
-            name: routing_tensor.clone(),
-            path: path.to_owned(),
-        })?;
+    let routing_info =
+        checkpoint
+            .tensor_info(&routing_tensor)
+            .ok_or_else(|| HybridError::MissingTensor {
+                name: routing_tensor.clone(),
+                path: path.to_owned(),
+            })?;
     if routing_info.1.len() != 2 {
         return Err(HybridError::UnsupportedFormat(format!(
             "routing tensor '{routing_tensor}' must be rank-2 in '{path}', got dims={:?}",

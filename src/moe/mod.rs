@@ -255,9 +255,11 @@ impl Router {
                 &self.model_path,
                 token_id,
             )?,
-            CheckpointBackend::Safetensors(cp) => {
-                cp.extract_token_embedding(&adapter.token_embedding_tensor, &self.model_path, token_id)?
-            }
+            CheckpointBackend::Safetensors(cp) => cp.extract_token_embedding(
+                &adapter.token_embedding_tensor,
+                &self.model_path,
+                token_id,
+            )?,
         };
         Ok(normalize_to_internal_embedding_dim(&embedding))
     }
@@ -392,10 +394,12 @@ impl Router {
                 info.dims.clone()
             }
             CheckpointBackend::Safetensors(cp) => {
-                let info = cp.tensor_info(tensor_name).ok_or_else(|| HybridError::MissingTensor {
-                    name: tensor_name.to_owned(),
-                    path: self.model_path.clone(),
-                })?;
+                let info =
+                    cp.tensor_info(tensor_name)
+                        .ok_or_else(|| HybridError::MissingTensor {
+                            name: tensor_name.to_owned(),
+                            path: self.model_path.clone(),
+                        })?;
                 info.1.to_vec()
             }
         };
@@ -413,8 +417,7 @@ impl Router {
         path: &str,
         family_override: Option<ModelFamily>,
     ) -> Result<(RouterMetadata, CheckpointBackend, ModelAdapter)> {
-        let is_safetensors = std::path::Path::new(path).is_dir()
-            || !path.ends_with(".gguf");
+        let is_safetensors = std::path::Path::new(path).is_dir() || !path.ends_with(".gguf");
 
         if is_safetensors {
             let checkpoint = MappedSafetensorsCheckpoint::from_directory(path)?;
@@ -425,7 +428,11 @@ impl Router {
                 path,
             )?;
             let metadata = RouterMetadata::from_adapter(&adapter);
-            return Ok((metadata, CheckpointBackend::Safetensors(checkpoint), adapter));
+            return Ok((
+                metadata,
+                CheckpointBackend::Safetensors(checkpoint),
+                adapter,
+            ));
         }
 
         let (_raw_metadata, checkpoint) = probe_and_map_checkpoint(path)?;

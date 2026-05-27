@@ -47,9 +47,7 @@ fn run(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     if !model.router_loaded() {
-        return Err(
-            Error::other("Router model did not load from CHECKPOINT_PATH").into(),
-        );
+        return Err(Error::other("Router model did not load from CHECKPOINT_PATH").into());
     }
     if !accelerator.is_ready() {
         return Err(Error::other("GpuAccelerator is not ready").into());

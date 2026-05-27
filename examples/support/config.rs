@@ -169,7 +169,7 @@ fn validate_safetensors_lineup_entries(path: &Path, entries: &[SafetensorsModelE
 /// Resolve the validation-model list with the documented precedence:
 ///
 ///   1. `LINEUP_CONFIG` file (hard error if set but unparseable).
-    ///   2. `CHECKPOINT_PATH` (single-model override via the legacy path).
+///   2. `CHECKPOINT_PATH` (single-model override via the legacy path).
 ///   3. Machine-local autodiscovery under `$HOME/Downloads/SNN_Quantization`.
 fn resolve_validation_models(
     lineup_path: Option<&Path>,

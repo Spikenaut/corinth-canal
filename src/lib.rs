@@ -91,8 +91,7 @@ pub use types::{
 };
 
 pub use experiment::schema::{
-    ExperimentBundle, ExperimentManifest, ExperimentMetrics, ExperimentSummary,
-    ExperimentWarning,
+    ExperimentBundle, ExperimentManifest, ExperimentMetrics, ExperimentSummary, ExperimentWarning,
 };
 
 pub mod tensor;
