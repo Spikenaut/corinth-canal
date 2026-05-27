@@ -46,7 +46,7 @@ target = "local"
 # ── MET-56: ibm-granite/granite-3.1-3b-a800m-base (MoE, 2 shards) ──
 [[model]]
 slug = "granite_3_1_3b_a800m"
-family = "qwen3_moe"
+family = "granite_3_1_a800m"
 path = "/absolute/path/to/.models/safetensors/ibm-granite/granite-3.1-3b-a800m-base"
 target = "local"
 
@@ -60,13 +60,13 @@ target = "local"
 # ── microsoft/Phi-tiny-MoE-instruct (MoE, 2 shards) ──
 [[model]]
 slug = "phi_tiny_moe_instruct"
-family = "qwen3_moe"
+family = "slim_moe"
 path = "/absolute/path/to/.models/safetensors/microsoft/Phi-tiny-MoE-instruct"
 target = "local"
 
 # ── Moonshot AI Moonlight-16B-A3B / DeepSeek-V3-family layout (MoE, 2 shards, bnb 4bit quant) ──
 [[model]]
 slug = "moonlight_16b_a3b_bnb_4bit"
-family = "deepseek2"
+family = "moonlight_16b_a3b"
 path = "/absolute/path/to/.models/safetensors/slowfastai/Moonlight-16B-A3B-bnb-4bit"
 target = "local"
