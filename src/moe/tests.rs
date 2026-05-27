@@ -1138,6 +1138,18 @@ fn test_int4_odd_length_handling() {
 }
 
 #[test]
+fn test_ggml_type_label_iq3_m() {
+    assert_eq!(ggml_type_label(GGML_TYPE_IQ3_M), "IQ3_M");
+}
+
+#[test]
+fn test_synapse_dequant_path_supported_iq3_m() {
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
+    assert!(!synapse_dequant_path_supported(9999));
+}
+
+#[test]
 fn test_iq3_m_tensor_error_paths() {
     // Test error handling for wrong ggml_type
     let q8_0_payload = build_q8_0_payload(256, 1, 0x3c00, 1);
