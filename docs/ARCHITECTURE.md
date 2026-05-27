@@ -50,6 +50,9 @@ The CPU path is assembled from pure Rust components:
 The GPU temporal path is orchestrated by `Model::prepare_gpu_temporal`,
 `Model::tick_gpu_temporal`, and `Model::forward_gpu_temporal`.
 
+The focused CUDA validation ladder for this path is documented in
+`docs/CUDA_VALIDATION.md`.
+
 Key pieces:
 
 - `project_snapshot_current` projects 4-channel telemetry into the GPU temporal
