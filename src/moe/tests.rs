@@ -992,11 +992,11 @@ fn test_iq3_m_dequantization_synthetic() {
 fn test_int4_safetensors_extraction() {
     // Test Int4 unpacking: 2 elements per byte
     let bytes = vec![0x12u8, 0x34u8]; // low=2, high=1, low=4, high=3
-    // We can't directly test extract_tensor_f32 without a full checkpoint,
-    // but we can verify the dtype_size_bytes and the nibble unpacking logic
-    assert_eq!(dtype_size_bytes("INT4"), Some(1));
-    assert_eq!(dtype_size_bytes("I4"), Some(1));
-    assert_eq!(dtype_size_bytes("U4"), Some(1));
+    // dtype_size_bytes returns None for packed Int4 formats
+    // (callers must handle packed semantics explicitly)
+    assert_eq!(dtype_size_bytes("INT4"), None);
+    assert_eq!(dtype_size_bytes("I4"), None);
+    assert_eq!(dtype_size_bytes("U4"), None);
 
     // Verify nibble unpacking
     let mut unpacked = Vec::with_capacity(bytes.len() * 2);

@@ -893,7 +893,7 @@ pub(super) fn dequantize_row_iq3_m(row: &[u8], width: usize) -> Result<Vec<f32>>
         let hmask = &block[2..34]; // 32 bytes
         let qs = &block[34..98]; // 64 bytes
         let scales = &block[98..110]; // 12 bytes
-        let _scales_h = block[110]; // 1 byte
+        let scales_h = block[110]; // 1 byte
 
         // Decode 6-bit scales from 12 bytes (16 scales total, 6 bits each)
         // 12 bytes * 8 bits = 96 bits; 96 / 6 = 16 scales
@@ -915,6 +915,14 @@ pub(super) fn dequantize_row_iq3_m(row: &[u8], width: usize) -> Result<Vec<f32>>
             bit_pos += 6;
         }
 
+        // scales_h provides the high 2 bits for each of the 16 scales
+        // bits 0-1 -> scale[0], bits 2-3 -> scale[1], etc.
+        let scales_h_u32 = scales_h as u32;
+        for (i, sc_val) in sc.iter_mut().enumerate() {
+            let high_bits = ((scales_h_u32 >> (i * 2)) & 0x03) as u8;
+            *sc_val |= high_bits << 6;
+        }
+
         // Unpack 3-bit values from qs (64 bytes -> 256 values, 2 values per byte with hmask)
         for i in 0..256 {
             let qs_byte = qs[i / 4];
@@ -927,8 +935,8 @@ pub(super) fn dequantize_row_iq3_m(row: &[u8], width: usize) -> Result<Vec<f32>>
 
             let q = low_2 | (high_bit << 2); // 3-bit value 0..7
 
-            // Convert to signed: center around 4 (0..7 -> -3..4)
-            let q_signed = q as i8 - 3;
+            // Convert to signed: 0..7 -> -4..3 (centered at 3.5)
+            let q_signed = q as i8 - 4;
 
             let scale_idx = i / 16;
             let scale = sc[scale_idx] as f32;

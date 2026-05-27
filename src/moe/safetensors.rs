@@ -602,7 +602,9 @@ pub(super) fn dtype_size_bytes(dtype: &str) -> Option<usize> {
         "F32" | "TF32" | "I32" | "U32" => Some(4),
         "F16" | "BF16" | "I16" | "U16" => Some(2),
         "F8_E5M2" | "F8_E4M3" | "F8_E8M0" | "I8" | "U8" | "BOOL" => Some(1),
-        "INT4" | "I4" | "U4" => Some(1), // 2 elements per byte, but we report 1 byte for alignment
+        // Int4 is a packed format (2 elements per byte); callers must handle
+        // packed semantics explicitly rather than using element_size * count.
+        "INT4" | "I4" | "U4" => None,
         _ => None,
     }
 }
@@ -1330,13 +1332,26 @@ impl MappedSafetensorsCheckpoint {
                     .collect())
             }
             "INT4" | "I4" | "U4" => {
-                // Int4: 2 elements per byte, unpack nibbles
-                let mut out = Vec::with_capacity(bytes.len() * 2);
+                // Int4: packed format, 2 elements per byte.
+                // Compute exact expected element count from shape.
+                let expected_elements = loc.shape.iter().product::<usize>();
+                let mut out = Vec::with_capacity(expected_elements);
+                let is_signed = loc.dtype == "I4";
                 for &byte in bytes {
                     let low = byte & 0x0F;
                     let high = byte >> 4;
-                    out.push(low as f32);
-                    out.push(high as f32);
+                    if is_signed {
+                        // Sign-extend 4-bit to 8-bit, then convert to f32
+                        out.push(((low as i8) << 4 >> 4) as f32);
+                        if out.len() < expected_elements {
+                            out.push(((high as i8) << 4 >> 4) as f32);
+                        }
+                    } else {
+                        out.push(low as f32);
+                        if out.len() < expected_elements {
+                            out.push(high as f32);
+                        }
+                    }
                 }
                 Ok(out)
             }
@@ -1375,8 +1390,13 @@ impl MappedSafetensorsCheckpoint {
             });
         }
         let row_elements = d1;
-        let element_size = dtype_size_bytes(&loc.dtype).unwrap_or(2);
-        let row_bytes = row_elements * element_size;
+        let row_bytes = if loc.dtype == "INT4" || loc.dtype == "I4" || loc.dtype == "U4" {
+            // Int4: packed format, 2 elements per byte
+            row_elements.div_ceil(2)
+        } else {
+            let element_size = dtype_size_bytes(&loc.dtype).unwrap_or(2);
+            row_elements * element_size
+        };
         let shard = &self.shards[loc.shard_idx];
         let data_start = 8 + shard.header_len as usize + loc.data_offsets[0];
         let row_start = data_start + token_id * row_bytes;
@@ -1397,12 +1417,22 @@ impl MappedSafetensorsCheckpoint {
                 .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
                 .collect()),
             "INT4" | "I4" | "U4" => {
-                let mut out = Vec::with_capacity(bytes.len() * 2);
+                let mut out = Vec::with_capacity(row_elements);
+                let is_signed = loc.dtype == "I4";
                 for &byte in bytes {
                     let low = byte & 0x0F;
                     let high = byte >> 4;
-                    out.push(low as f32);
-                    out.push(high as f32);
+                    if is_signed {
+                        out.push(((low as i8) << 4 >> 4) as f32);
+                        if out.len() < row_elements {
+                            out.push(((high as i8) << 4 >> 4) as f32);
+                        }
+                    } else {
+                        out.push(low as f32);
+                        if out.len() < row_elements {
+                            out.push(high as f32);
+                        }
+                    }
                 }
                 Ok(out)
             }
