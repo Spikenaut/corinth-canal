@@ -298,6 +298,7 @@ fn infer_family(
         "granite" | "granitemoe" => ModelFamily::Granite31A800M,
         "nemotronh" => ModelFamily::Nemotron3Nano4B,
         "lfm2" | "lfm2moe" => ModelFamily::Lfm2Moe,
+        "phimoe" | "slimmoe" => ModelFamily::SlimMoe,
         "zaya" => ModelFamily::Zaya,
         "glm4" | "glm4moe" => ModelFamily::Glm4,
         other => {
