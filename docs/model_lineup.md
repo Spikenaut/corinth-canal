@@ -15,7 +15,7 @@ share a provider family, architecture, or deployment target.
 
 ### Batch A — Local GGUF routing targets (completed)
 
-Models that can be loaded locally via the GGUF-backed `OlmoeRouter` for SAAQ
+Models that can be loaded locally via the GGUF-backed `Router` for SAAQ
 latent calibration runs.
 
 | MET | Slug | Provider/Model | Family | Quant |

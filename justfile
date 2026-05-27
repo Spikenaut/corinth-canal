@@ -20,7 +20,7 @@ test:
     cargo test
 
 # GPU smoke test — 10k direct GPU ticks against a real GGUF checkpoint.
-# Requires GGUF_CHECKPOINT_PATH in .env.local.
+# Requires CHECKPOINT_PATH in .env.local.
 smoke:
     cargo run --release --example gpu_smoke_test
 
@@ -64,7 +64,7 @@ saaq-sweep:
 bridge:
     cargo run --release --example telemetry_bridge
 
-# Probe the configured lineup (LINEUP_CONFIG / GGUF_CHECKPOINT_PATH /
+# Probe the configured lineup (LINEUP_CONFIG / CHECKPOINT_PATH /
 # autodiscovery) and print the preferred GPU synapse tensor + ggml_type per
 # model. Writes <output_root>/synapse_diagnostic.json. No SAAQ ticks and no
 # campaign side-effects (issue #31).

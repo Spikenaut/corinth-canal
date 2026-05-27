@@ -24,7 +24,7 @@
 //!        ▼  Projector
 //! dense embedding [EMBEDDING_DIM = 2048]
 //!        │
-//!        ▼  OlmoeRouter
+//!        ▼  Router
 //! expert_weights + selected_experts + routed hidden state
 //!        │
 //!        ▼  SAAQ latent calibration / telemetry export
@@ -33,7 +33,7 @@
 //! ## Model loading
 //!
 //! The routing bridge is GGUF-backed and custom to this repository.
-//! `OlmoeRouter` parses GGUF checkpoints in-repo, resolves a supported model
+//! `Router` parses GGUF checkpoints in-repo, resolves a supported model
 //! family, extracts routing tensors and token embeddings, and selects a GPU
 //! synapse source from one of:
 //!
@@ -63,6 +63,7 @@
 //! ```
 
 pub mod error;
+pub mod experiment;
 pub mod funnel;
 #[cfg(feature = "cuda")]
 pub mod gpu;
@@ -87,6 +88,11 @@ pub use telemetry::TelemetryEncoder;
 pub use types::{
     CloudModelSpec, EMBEDDING_DIM, ModelArchitectureClass, ModelFamily, ModelTarget,
     TelemetrySnapshot,
+};
+
+pub use experiment::schema::{
+    ExperimentBundle, ExperimentManifest, ExperimentMetrics, ExperimentSummary,
+    ExperimentWarning,
 };
 
 pub mod tensor;

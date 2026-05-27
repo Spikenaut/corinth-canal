@@ -159,8 +159,8 @@ impl Model {
     fn load_dequant_synapse(
         &mut self,
         label: &str,
-        get_name: fn(&crate::moe::OlmoeRouter) -> Option<&str>,
-        get_weights: fn(&crate::moe::OlmoeRouter, &str) -> crate::error::Result<Vec<f32>>,
+        get_name: fn(&crate::moe::Router) -> Option<&str>,
+        get_weights: fn(&crate::moe::Router, &str) -> crate::error::Result<Vec<f32>>,
         accelerator: &mut GpuAccelerator,
         neuron_count: usize,
     ) -> GpuResult<bool> {

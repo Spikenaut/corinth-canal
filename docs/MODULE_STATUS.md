@@ -11,7 +11,7 @@ Status legend: `reference` · `stabilizing` · `proven` · `frozen`
 | `src/model/core.rs` | reference | `rmems-model` | Orchestration layer still couples runtime behavior, artifact wiring, and GGUF-backed routing. Not yet ready to promote as an isolated surface. |
 | `src/model/temporal.rs` | stabilizing | `rmems-model` | GPU temporal loop is tight and proven. Legacy fallback to a CWD-relative routing CSV still exists when `ModelConfig::gpu_routing_telemetry_path` is unset, so callers must keep the sink explicit. |
 | `src/model/telemetry_io.rs` | stabilizing | `rmems-model` | Pure helper. Public behavior is stable; promotion depends mainly on the surrounding runtime/API cleanup. |
-| `src/moe/mod.rs` | stabilizing | `rmems-moe` | Host entry for `OlmoeRouter`; surface is clean. Pending full model-family validation matrix. |
+| `src/moe/mod.rs` | stabilizing | `rmems-moe` | Host entry for `Router`; surface is clean. Pending full model-family validation matrix. |
 | `src/moe/checkpoint.rs` | reference | `rmems-moe` | GGUF parser/mmap/dequant layer works, but still needs a broader parser and format test battery before promotion. |
 | `src/moe/adapter.rs` | stabilizing | `rmems-moe` | Five-family adapter resolution is implemented; needs broader validation coverage. |
 | `src/moe/routing.rs` | stabilizing | `rmems-moe` | Stateless routing math. Low-risk promotion candidate. |

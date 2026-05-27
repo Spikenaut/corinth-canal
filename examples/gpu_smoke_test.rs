@@ -21,16 +21,16 @@ fn run(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>> {
     let run_cfg = RunConfig::from_env();
     let smoke_ticks = gpu_smoke_ticks();
     let mut safe = SafeDiagnosticData::default();
-    if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.gguf_checkpoint_path) {
+    if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.checkpoint_path) {
         safe = safe.with_model_slug(&model_slug);
         observer.annotate(safe);
     } else {
         observer.annotate(safe);
     }
-    if run_cfg.gguf_checkpoint_path.trim().is_empty() {
-        return Err(Error::other("GGUF_CHECKPOINT_PATH must point to a GGUF checkpoint").into());
+    if run_cfg.checkpoint_path.trim().is_empty() {
+        return Err(Error::other("CHECKPOINT_PATH must point to a GGUF checkpoint").into());
     }
-    let model_path = run_cfg.gguf_checkpoint_path.clone();
+    let model_path = run_cfg.checkpoint_path.clone();
     let model_label = observability::checkpoint_slug(&model_path)
         .unwrap_or_else(|| "configured_checkpoint".to_owned());
 
@@ -48,7 +48,7 @@ fn run(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>> {
 
     if !model.router_loaded() {
         return Err(
-            Error::other("OlmoeRouter model did not load from GGUF_CHECKPOINT_PATH").into(),
+            Error::other("Router model did not load from CHECKPOINT_PATH").into(),
         );
     }
     if !accelerator.is_ready() {

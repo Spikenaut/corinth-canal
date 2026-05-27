@@ -13,7 +13,7 @@ TelemetrySnapshot
 -> SignedSplitBankBridge or GPU input_spikes
 -> SparseGifHiddenLayer / GPU GIF temporal loop
 -> Projector
--> OlmoeRouter
+-> Router
 -> routing telemetry / SAAQ latent calibration
 
 This repository is intentionally not split into modular crates yet. Do not

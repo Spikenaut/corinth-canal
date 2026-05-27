@@ -1,6 +1,7 @@
 mod support;
 
 use corinth_canal::{
+    ExperimentManifest, ExperimentMetrics, ExperimentSummary,
     FunnelActivity, SaaqUpdateRule, SnnDualLatentCalibrator, SnnLatentCsvExporter,
     gpu::GpuAccelerator, model::Model,
 };
@@ -16,81 +17,6 @@ use support::{
     observability::{self, CommandObserver, SafeDiagnosticData},
     prompt_embedding_for_validation, telemetry_snapshot_for_tick,
 };
-
-#[derive(Debug, Serialize)]
-struct ValidationManifest {
-    model_slug: String,
-    model_family: String,
-    architecture: String,
-    checkpoint_path: String,
-    routing_tensor_name: String,
-    synapse_source: String,
-    checkpoint_format: &'static str,
-    prompt_embedding_source: String,
-    prompt_profile: String,
-    prompt_text: String,
-    ticks: usize,
-    saaq_rule: &'static str,
-    saaq_primary_rule: &'static str,
-    saaq_dual_emit: bool,
-    validation_status: &'static str,
-    error: Option<String>,
-    telemetry_source: String,
-    telemetry_csv_path: Option<String>,
-    telemetry_row_count: Option<usize>,
-    wraparound_enabled: bool,
-    wraparound_loops: u64,
-    ticks_effective: usize,
-    run_id: String,
-    run_dir: String,
-    output_root: String,
-    repeat_idx: usize,
-    repeat_count: usize,
-    cwd_routing_csv_contaminated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    run_tag: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    routing_mode: Option<&'static str>,
-    generated_files: Vec<String>,
-}
-
-/// Compact, stable per-run summary consumed by downstream aggregators. Lives
-/// alongside `run_manifest.json` inside every run directory.
-#[derive(Debug, Serialize)]
-struct RunSummary {
-    run_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    run_tag: Option<String>,
-    model_slug: String,
-    model_family: String,
-    telemetry_source: String,
-    repeat_idx: usize,
-    repeat_count: usize,
-    saaq_rule: &'static str,
-    validation_status: &'static str,
-    run_dir: String,
-    manifest_path: String,
-    tick_telemetry_path: String,
-    latent_telemetry_path: String,
-    metrics: RunMetrics,
-    /// `None` when strict-repeat is disabled or `repeat_count < 2`; populated
-    /// to `"matched"` / `"mismatch"` by the strict-repeat pass at the end of
-    /// `main()` only when the check actually ran.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    repeat_determinism: Option<&'static str>,
-}
-
-#[derive(Debug, Default, Serialize)]
-struct RunMetrics {
-    ticks_completed: usize,
-    latent_rows: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mean_tick_elapsed_us: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    first_timestamp_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_timestamp_ms: Option<u64>,
-}
 
 /// Row buffered in-memory during a sweep, flushed once at end-of-`main`
 /// into `artifacts/index.csv`. Append-only by construction: every row is
@@ -209,7 +135,7 @@ fn run_main(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>
 
     if cfg.validation_models.is_empty() {
         return Err(Error::other(
-            "No GGUF validation models discovered. Set GGUF_CHECKPOINT_PATH or place models under ~/Downloads/SNN_Quantization.",
+            "No GGUF validation models discovered. Set CHECKPOINT_PATH or place models under ~/Downloads/SNN_Quantization.",
         )
         .into());
     }
@@ -347,7 +273,7 @@ fn run_validation(
 
     // Metrics accumulator. Populated during the tick loop; stamped into
     // summary.json at every terminal status (completed / *_failed).
-    let mut metrics = RunMetrics::default();
+    let mut metrics = ExperimentMetrics::default();
 
     let target_neurons = model.projector_mut().input_neurons();
     let (prompt_embedding, prompt_embedding_source) =
@@ -654,7 +580,7 @@ fn build_manifest(
     validation_status: &'static str,
     error: Option<String>,
     generated_files: Vec<String>,
-) -> ValidationManifest {
+) -> ExperimentManifest {
     let telemetry_row_count = ctx.resolved.row_count();
     let wraparound_enabled = telemetry_row_count
         .map(|rows| rows > 0 && ctx.ticks > rows)
@@ -668,22 +594,27 @@ fn build_manifest(
         .map(|rows| ((ctx.ticks - rows) as u64) / (rows as u64) + 1)
         .unwrap_or(0);
 
-    ValidationManifest {
+    ExperimentManifest {
+        run_id: ctx.run_id.clone(),
+        run_tag: ctx.run_tag.map(|s| s.to_owned()),
+        created_at: format!("{:?}", std::time::SystemTime::now()),
+        repo: "corinth-canal".to_owned(),
+        commit_sha: None,
         model_slug: ctx.spec.slug.clone(),
         model_family: format!("{:?}", model.router_family()),
         architecture: model.router_architecture().to_owned(),
         checkpoint_path: ctx.spec.path.clone(),
+        checkpoint_format: "gguf".to_owned(),
         routing_tensor_name: model.routing_tensor_name().to_owned(),
         synapse_source: model.synapse_source().to_owned(),
-        checkpoint_format: "gguf",
         prompt_embedding_source: prompt_embedding_source.to_owned(),
         prompt_profile: ctx.prompt_profile.to_owned(),
-        prompt_text: ctx.prompt_text.to_owned(),
+        prompt_text: Some(ctx.prompt_text.to_owned()),
         ticks: ctx.ticks,
-        saaq_rule: saaq_rule_label(saaq_rule),
-        saaq_primary_rule: saaq_rule_label(saaq_rule),
+        saaq_rule: saaq_rule_label(saaq_rule).to_owned(),
+        saaq_primary_rule: saaq_rule_label(saaq_rule).to_owned(),
         saaq_dual_emit: true,
-        validation_status,
+        validation_status: validation_status.to_owned(),
         error,
         telemetry_source: ctx.resolved.source_label.clone(),
         telemetry_csv_path: ctx
@@ -695,19 +626,11 @@ fn build_manifest(
         wraparound_enabled,
         wraparound_loops,
         ticks_effective: ctx.ticks,
-        run_id: ctx.run_id.clone(),
         run_dir: run_dir.to_string_lossy().into_owned(),
         output_root: ctx.output_root.to_string_lossy().into_owned(),
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
-        // True iff the routing CSV would land in CWD. Since Stage E this
-        // runner always sets `ModelConfig::gpu_routing_telemetry_path` to
-        // an absolute path inside `run_dir`, so CWD contamination is
-        // impossible regardless of whether `tick_gpu_temporal` or
-        // `forward_gpu_temporal` is used.
-        cwd_routing_csv_contaminated: config.gpu_routing_telemetry_path.is_none(),
-        run_tag: ctx.run_tag.map(|s| s.to_owned()),
-        routing_mode: Some(routing_mode_label(config.routing_mode)),
+        routing_mode: Some(routing_mode_label(config.routing_mode).to_owned()),
         generated_files,
     }
 }
@@ -723,7 +646,7 @@ fn routing_mode_label(mode: corinth_canal::moe::RoutingMode) -> &'static str {
 
 fn write_manifest(
     manifest_path: &PathBuf,
-    manifest: ValidationManifest,
+    manifest: ExperimentManifest,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::write(manifest_path, serde_json::to_string_pretty(&manifest)?)?;
     Ok(())
@@ -731,7 +654,7 @@ fn write_manifest(
 
 fn write_summary(
     summary_path: &std::path::Path,
-    summary: &RunSummary,
+    summary: &ExperimentSummary,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::write(summary_path, serde_json::to_string_pretty(summary)?)?;
     Ok(())
@@ -754,7 +677,7 @@ fn write_manifest_and_summary(
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
     error: Option<String>,
-    metrics: &RunMetrics,
+    metrics: &ExperimentMetrics,
     generated_files: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write_manifest(
@@ -798,9 +721,9 @@ fn build_summary(
     latent_path: &std::path::Path,
     saaq_rule: SaaqUpdateRule,
     validation_status: &'static str,
-    metrics: &RunMetrics,
-) -> RunSummary {
-    RunSummary {
+    metrics: &ExperimentMetrics,
+) -> ExperimentSummary {
+    ExperimentSummary {
         run_id: ctx.run_id.clone(),
         run_tag: ctx.run_tag.map(|s| s.to_owned()),
         model_slug: ctx.spec.slug.clone(),
@@ -808,18 +731,19 @@ fn build_summary(
         telemetry_source: ctx.resolved.source_label.clone(),
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
-        saaq_rule: saaq_rule_label(saaq_rule),
-        validation_status,
+        saaq_rule: saaq_rule_label(saaq_rule).to_owned(),
+        validation_status: validation_status.to_owned(),
         run_dir: run_dir.to_string_lossy().into_owned(),
         manifest_path: manifest_path.to_string_lossy().into_owned(),
         tick_telemetry_path: tick_path.to_string_lossy().into_owned(),
         latent_telemetry_path: latent_path.to_string_lossy().into_owned(),
-        metrics: RunMetrics {
+        metrics: ExperimentMetrics {
             ticks_completed: metrics.ticks_completed,
             latent_rows: metrics.latent_rows,
             mean_tick_elapsed_us: metrics.mean_tick_elapsed_us,
             first_timestamp_ms: metrics.first_timestamp_ms,
             last_timestamp_ms: metrics.last_timestamp_ms,
+            ..Default::default()
         },
         repeat_determinism: None,
     }
@@ -841,7 +765,7 @@ fn pending_row_from_state(
     run_dir: &Path,
     latent_path: &Path,
     summary_path: &Path,
-    metrics: &RunMetrics,
+    metrics: &ExperimentMetrics,
     validation_status: &'static str,
 ) -> PendingIndexRow {
     PendingIndexRow {

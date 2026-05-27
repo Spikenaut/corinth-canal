@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Dimensionality of the dense embedding the projector hands to OlmoeRouter.
+/// Dimensionality of the dense embedding the projector hands to Router.
 pub const EMBEDDING_DIM: usize = 2048;
 
 /// Supported GGUF model families for the router bridge.
@@ -54,10 +54,28 @@ impl TelemetrySnapshot {
     }
 }
 
+/// Supported checkpoint formats for model loading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CheckpointFormat {
+    #[default]
+    Gguf,
+    Safetensors,
+}
+
+impl CheckpointFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gguf => "gguf",
+            Self::Safetensors => "safetensors",
+        }
+    }
+}
+
 /// Top-level configuration for the hybrid quantization pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
-    pub gguf_checkpoint_path: String,
+    pub checkpoint_path: String,
+    pub checkpoint_format: CheckpointFormat,
     pub model_family: Option<ModelFamily>,
     pub gpu_synapse_tensor_name: String,
     pub num_experts: usize,
@@ -77,7 +95,8 @@ pub struct ModelConfig {
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
-            gguf_checkpoint_path: String::new(),
+            checkpoint_path: String::new(),
+            checkpoint_format: CheckpointFormat::Gguf,
             model_family: None,
             gpu_synapse_tensor_name: String::new(),
             num_experts: 8,
@@ -90,7 +109,7 @@ impl Default for ModelConfig {
     }
 }
 
-/// Strategy used to convert spike activity into an OlmoeRouter embedding.
+/// Strategy used to convert spike activity into a Router embedding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ProjectionMode {
     RateSum,
@@ -100,7 +119,7 @@ pub enum ProjectionMode {
     SpikingTernary,
 }
 
-/// Execution mode used by the OlmoeRouter router.
+/// Execution mode used by the Router router.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RoutingMode {
     StubUniform,

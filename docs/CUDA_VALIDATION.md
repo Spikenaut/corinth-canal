@@ -67,10 +67,10 @@ cargo test --workspace
 cargo check --example saaq_latent_calibration
 
 # Full default smoke: 10,000 direct GPU ticks.
-GGUF_CHECKPOINT_PATH=/path/to/model.gguf cargo run --release --example gpu_smoke_test
+CHECKPOINT_PATH=/path/to/model.gguf cargo run --release --example gpu_smoke_test
 
 # Short deterministic smoke for fast validation or sanitizer setup.
-GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=/path/to/model.gguf \
+GPU_SMOKE_TICKS=1 CHECKPOINT_PATH=/path/to/model.gguf \
   cargo run --release --example gpu_smoke_test
 ```
 
@@ -100,17 +100,17 @@ Commands:
 ```bash
 mkdir -p artifacts/cuda-validation
 
-GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=/path/to/model.gguf \
+GPU_SMOKE_TICKS=1 CHECKPOINT_PATH=/path/to/model.gguf \
   compute-sanitizer --tool memcheck \
   --log-file artifacts/cuda-validation/memcheck.log \
   cargo run --release --example gpu_smoke_test
 
-GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=/path/to/model.gguf \
+GPU_SMOKE_TICKS=1 CHECKPOINT_PATH=/path/to/model.gguf \
   compute-sanitizer --tool synccheck \
   --log-file artifacts/cuda-validation/synccheck.log \
   cargo run --release --example gpu_smoke_test
 
-GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=/path/to/model.gguf \
+GPU_SMOKE_TICKS=1 CHECKPOINT_PATH=/path/to/model.gguf \
   compute-sanitizer --tool racecheck \
   --log-file artifacts/cuda-validation/racecheck.log \
   cargo run --release --example gpu_smoke_test
@@ -136,7 +136,7 @@ Command:
 ```bash
 mkdir -p artifacts/cuda-validation
 
-GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=/path/to/model.gguf \
+GPU_SMOKE_TICKS=1 CHECKPOINT_PATH=/path/to/model.gguf \
   nsys profile -o artifacts/cuda-validation/nsys_gpu_smoke \
   cargo run --release --example gpu_smoke_test
 ```
@@ -158,7 +158,7 @@ Command:
 ```bash
 mkdir -p artifacts/cuda-validation
 
-GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=/path/to/model.gguf \
+GPU_SMOKE_TICKS=1 CHECKPOINT_PATH=/path/to/model.gguf \
   ncu --set full -o artifacts/cuda-validation/ncu_gpu_smoke \
   cargo run --release --example gpu_smoke_test
 ```

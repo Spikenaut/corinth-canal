@@ -3,7 +3,7 @@
 use super::telemetry_io::append_gpu_routing_telemetry_row;
 use crate::error::{HybridError, Result};
 use crate::gpu::{GpuAccelerator, GpuBuffer, GpuError, GpuResult};
-use crate::moe::{GpuSynapseTensorDescriptor, OlmoeRouter};
+use crate::moe::{GpuSynapseTensorDescriptor, Router};
 use crate::projector::Projector;
 use crate::types::{
     EMBEDDING_DIM, ModelConfig, ModelFamily, ModelOutput, RoutingMode, TelemetrySnapshot,
@@ -33,7 +33,7 @@ pub(super) fn resolve_gpu_routing_telemetry_path(config: &ModelConfig) -> std::p
 pub struct Model {
     pub(super) config: ModelConfig,
     pub(super) projector: Projector,
-    pub(super) router: OlmoeRouter,
+    pub(super) router: Router,
     pub(super) global_step: i64,
 }
 
@@ -60,8 +60,8 @@ impl Model {
         }
 
         let projector = Projector::with_input_neurons(config.projection_mode, projector_neurons);
-        let router = OlmoeRouter::load_with_family_and_mode(
-            &config.gguf_checkpoint_path,
+        let router = Router::load_with_family_and_mode(
+            &config.checkpoint_path,
             config.num_experts,
             config.top_k_experts,
             config.model_family,

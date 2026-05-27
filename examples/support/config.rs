@@ -52,7 +52,7 @@ pub struct RunConfig {
     pub model_family_override: Option<ModelFamily>,
     pub saaq_rule: SaaqUpdateRule,
     pub validation_models: Vec<ValidationModelSpec>,
-    pub gguf_checkpoint_path: String,
+    pub checkpoint_path: String,
     pub routing_mode_override: Option<RoutingMode>,
     /// Free-form run tag from `RUN_TAG`. Empty / unset maps to `None` so
     /// callers can just do `if let Some(tag) = cfg.run_tag { ... }`.
@@ -71,7 +71,7 @@ impl RunConfig {
     pub fn from_env() -> Self {
         let prompt_profile = prompt_profile_slug();
         let prompt_text = prompt_text_for_profile(&prompt_profile);
-        let gguf_checkpoint_path = std::env::var("GGUF_CHECKPOINT_PATH").unwrap_or_default();
+        let checkpoint_path = std::env::var("CHECKPOINT_PATH").unwrap_or_default();
         validate_optional_lineups_from_env();
         // Local binding only — used to pick the lineup TOML below. The
         // resolved path is intentionally not stamped onto `RunConfig` yet;
@@ -79,7 +79,7 @@ impl RunConfig {
         // re-introduce both fields together in one focused commit.
         let lineup_config_path = lineup_config_path_from_env();
         let validation_models =
-            resolve_validation_models(lineup_config_path.as_deref(), &gguf_checkpoint_path);
+            resolve_validation_models(lineup_config_path.as_deref(), &checkpoint_path);
         Self {
             prompt_profile: prompt_profile.clone(),
             prompt_text,
@@ -90,7 +90,7 @@ impl RunConfig {
             model_family_override: model_family_override_from_env(),
             saaq_rule: saaq_update_rule_from_env(),
             validation_models,
-            gguf_checkpoint_path,
+            checkpoint_path,
             routing_mode_override: routing_mode_override_from_env(),
             run_tag: run_tag_from_env(),
             strict_repeat_check: strict_repeat_check_from_env(),
@@ -169,11 +169,11 @@ fn validate_safetensors_lineup_entries(path: &Path, entries: &[SafetensorsModelE
 /// Resolve the validation-model list with the documented precedence:
 ///
 ///   1. `LINEUP_CONFIG` file (hard error if set but unparseable).
-///   2. `GGUF_CHECKPOINT_PATH` (single-model override via the legacy path).
+    ///   2. `CHECKPOINT_PATH` (single-model override via the legacy path).
 ///   3. Machine-local autodiscovery under `$HOME/Downloads/SNN_Quantization`.
 fn resolve_validation_models(
     lineup_path: Option<&Path>,
-    gguf_checkpoint_path: &str,
+    checkpoint_path: &str,
 ) -> Vec<ValidationModelSpec> {
     if let Some(path) = lineup_path {
         match load_lineup_file(path) {
@@ -194,7 +194,7 @@ fn resolve_validation_models(
 
     // Legacy single-model override or autodiscovery — let the existing
     // helper keep its current contract.
-    let _ = gguf_checkpoint_path; // discover_validation_models reads it directly
+    let _ = checkpoint_path; // discover_validation_models reads it directly
     discover_validation_models()
 }
 

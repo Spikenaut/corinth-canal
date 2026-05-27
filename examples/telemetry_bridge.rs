@@ -21,7 +21,7 @@ fn main() -> corinth_canal::Result<()> {
 fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
     let run_cfg = RunConfig::from_env();
     let mut safe = SafeDiagnosticData::default().with_telemetry_source("synthetic");
-    if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.gguf_checkpoint_path) {
+    if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.checkpoint_path) {
         safe = safe.with_model_slug(&model_slug);
         observer.annotate(safe);
     } else {
@@ -31,7 +31,7 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
         .routing_mode_override
         .unwrap_or(RoutingMode::SpikingSim);
 
-    let mut cfg = default_spiking_model_config(run_cfg.gguf_checkpoint_path.clone(), 20);
+    let mut cfg = default_spiking_model_config(run_cfg.checkpoint_path.clone(), 20);
     cfg.routing_mode = routing_mode;
 
     let mut model = Model::new(cfg)?;

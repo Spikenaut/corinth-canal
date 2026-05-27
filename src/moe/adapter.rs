@@ -1,6 +1,7 @@
-//! Model-family adapter resolution for the GGUF router host.
+//! Model-family adapter resolution for the GGUF and Safetensors router host.
 
 use super::checkpoint::{GgufMetadata, MappedGgufCheckpoint};
+use super::safetensors::{MappedSafetensorsCheckpoint, SafetensorsMetadata};
 use super::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
 use crate::error::{HybridError, Result};
 use crate::types::ModelFamily;
@@ -182,6 +183,100 @@ pub(super) fn resolve_adapter(
         dequant_q6_k_synapse_tensor,
         quantization: metadata.quantization().to_owned(),
     })
+}
+
+pub(super) fn resolve_safetensors_adapter(
+    metadata: &SafetensorsMetadata,
+    checkpoint: &MappedSafetensorsCheckpoint,
+    family_override: Option<ModelFamily>,
+    path: &str,
+) -> Result<ModelAdapter> {
+    let architecture = metadata.architecture.clone();
+    let family = infer_family_safetensors(&architecture, family_override, path)?;
+    let hidden_size = metadata.hidden_size;
+    let num_layers = metadata.num_layers;
+    let num_experts = metadata.num_experts;
+    let expert_used_count = metadata.expert_used_count;
+
+    let token_embedding_tensor = "model.embed_tokens.weight".to_owned();
+    let routing_tensor = "model.layers.0.mlp.gate.weight".to_owned();
+
+    // Validate routing tensor exists and is rank-2
+    let routing_info = checkpoint
+        .tensor_info(&routing_tensor)
+        .ok_or_else(|| HybridError::MissingTensor {
+            name: routing_tensor.clone(),
+            path: path.to_owned(),
+        })?;
+    if routing_info.1.len() != 2 {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "routing tensor '{routing_tensor}' must be rank-2 in '{path}', got dims={:?}",
+            routing_info.1
+        )));
+    }
+    let routing_experts = routing_info.1[0].min(routing_info.1[1]);
+    if routing_experts < num_experts {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "routing tensor '{routing_tensor}' in '{path}' only exposes {routing_experts} experts, expected at least {num_experts}"
+        )));
+    }
+
+    // Safetensors path does not yet expose real GPU synapse tensors;
+    // leave everything as synthetic fallback.
+    let preferred_gpu_synapse_tensor = None;
+    let real_gpu_synapse_tensor = None;
+    let dequant_q8_0_synapse_tensor = None;
+    let dequant_q5_k_synapse_tensor = None;
+    let dequant_q6_k_synapse_tensor = None;
+    let synapse_source = SynapseSource::SyntheticFallback;
+
+    Ok(ModelAdapter {
+        family,
+        architecture,
+        hidden_size,
+        num_layers,
+        num_experts,
+        expert_used_count,
+        token_embedding_tensor,
+        routing_tensor,
+        preferred_gpu_synapse_tensor,
+        synapse_source,
+        real_gpu_synapse_tensor,
+        dequant_q8_0_synapse_tensor,
+        dequant_q5_k_synapse_tensor,
+        dequant_q6_k_synapse_tensor,
+        quantization: "safetensors".into(),
+    })
+}
+
+fn infer_family_safetensors(
+    architecture: &str,
+    family_override: Option<ModelFamily>,
+    path: &str,
+) -> Result<ModelFamily> {
+    let inferred = match architecture {
+        "OlmoeForCausalLM" => ModelFamily::Olmoe,
+        "Qwen3MoeForCausalLM" => ModelFamily::Qwen3Moe,
+        "Gemma4ForCausalLM" => ModelFamily::Gemma4,
+        "DeepseekV2ForCausalLM" => ModelFamily::DeepSeek2,
+        "LlamaMoeForCausalLM" => ModelFamily::LlamaMoe,
+        other => {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "unsupported Safetensors architecture '{other}' in '{path}'"
+            )));
+        }
+    };
+
+    if let Some(expected) = family_override
+        && expected != inferred
+    {
+        return Err(HybridError::InvalidConfig(format!(
+            "model_family override {:?} does not match Safetensors architecture '{architecture}'",
+            expected
+        )));
+    }
+
+    Ok(inferred)
 }
 
 fn infer_family(

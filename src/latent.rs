@@ -86,7 +86,7 @@ impl SnnLatentCalibrator {
         let membrane_dv_dt = (mean_membrane - previous_mean_membrane) / dt_seconds;
 
         let expert_weights = output.expert_weights.as_deref().ok_or_else(|| {
-            HybridError::OlmoeForward("missing expert_weights in ModelOutput".into())
+            HybridError::RouterForward("missing expert_weights in ModelOutput".into())
         })?;
         let routing_entropy = normalized_entropy(expert_weights);
 

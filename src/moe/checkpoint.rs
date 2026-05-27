@@ -913,7 +913,7 @@ fn cuda_host_register(ptr: *mut c_void, len: usize, path: &str, tensor_name: &st
     })
 }
 
-fn f16_to_f32(bits: u16) -> f32 {
+pub(super) fn f16_to_f32(bits: u16) -> f32 {
     let sign = ((bits as u32) & 0x8000) << 16;
     let exp = ((bits as u32) & 0x7C00) >> 10;
     let mant = ((bits as u32) & 0x03FF) << 13;

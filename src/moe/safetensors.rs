@@ -1,9 +1,11 @@
-//! Safetensors checkpoint inspection and deterministic manifest generation.
+//! Safetensors checkpoint inspection, deterministic manifest generation, and
+//! tensor loading for the router bridge.
 //!
-//! This module reads only Safetensors headers and optional Hugging Face shard
-//! index metadata. It does not read tensor payload bytes into memory and does
-//! not perform activation tracing or router math.
+//! The `inspect_*` functions read only Safetensors headers and optional
+//! Hugging Face shard index metadata.  The `MappedSafetensorsCheckpoint`
+//! type memory-maps shards and extracts tensor payload bytes on demand.
 
+use super::checkpoint::f16_to_f32;
 use crate::error::{HybridError, Result};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -16,6 +18,8 @@ use std::os::unix::fs::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
+
+use memmap2::Mmap;
 
 const SAFETENSORS_EXTENSION: &str = "safetensors";
 const MAX_HEADER_BYTES: usize = 64 * 1024 * 1024;
@@ -948,6 +952,349 @@ fn model_load(path: &Path, reason: String) -> HybridError {
         path: path.display().to_string(),
         reason,
     }
+}
+
+// ── Tensor loading backend ──────────────────────────────────────────────
+
+/// Metadata extracted from a Hugging Face `config.json` for adapter
+/// resolution.
+#[derive(Debug, Clone)]
+pub struct SafetensorsMetadata {
+    pub architecture: String,
+    pub hidden_size: usize,
+    pub num_layers: usize,
+    pub num_experts: usize,
+    pub expert_used_count: usize,
+    pub vocab_size: usize,
+}
+
+/// Memory-mapped Safetensors checkpoint with indexed tensor access.
+#[derive(Debug)]
+pub struct MappedSafetensorsCheckpoint {
+    shards: Vec<MappedShard>,
+    tensor_map: std::collections::BTreeMap<String, TensorLocation>,
+    pub metadata: SafetensorsMetadata,
+}
+
+#[derive(Debug, Clone)]
+struct TensorLocation {
+    shard_idx: usize,
+    dtype: String,
+    shape: Vec<usize>,
+    data_offsets: [usize; 2],
+}
+
+#[derive(Debug)]
+struct MappedShard {
+    #[allow(dead_code)]
+    path: PathBuf,
+    mmap: Mmap,
+    header_len: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HfConfig {
+    architectures: Vec<String>,
+    hidden_size: usize,
+    num_hidden_layers: usize,
+    #[serde(default)]
+    num_experts: Option<usize>,
+    #[serde(default)]
+    num_experts_per_tok: Option<usize>,
+    vocab_size: usize,
+}
+
+impl MappedSafetensorsCheckpoint {
+    /// Map a Safetensors directory containing `config.json` and
+    /// `model.safetensors.index.json`.
+    pub fn from_directory(path: &str) -> Result<Self> {
+        let root = Path::new(path);
+        if !root.is_dir() {
+            return Err(HybridError::ModelLoad {
+                path: path.to_owned(),
+                reason: "path is not a directory".into(),
+            });
+        }
+
+        let config = Self::read_config(root)?;
+        let index_path = find_index_file(root)?.ok_or_else(|| {
+            HybridError::ModelLoad {
+                path: path.to_owned(),
+                reason: "no model.safetensors.index.json found".into(),
+            }
+        })?;
+        let raw_index = read_index(&index_path)?;
+
+        let mut shards: Vec<MappedShard> = Vec::new();
+        let mut shard_paths: Vec<PathBuf> = Vec::new();
+        let mut tensor_map: std::collections::BTreeMap<String, TensorLocation> =
+            std::collections::BTreeMap::new();
+
+        // Collect unique shard paths from the weight map
+        let mut shard_index_by_path: std::collections::BTreeMap<PathBuf, usize> =
+            std::collections::BTreeMap::new();
+        for (tensor_name, relative) in &raw_index.weight_map {
+            let shard_path = index_shard_path(root, &index_path, relative)?;
+            let shard_idx = *shard_index_by_path.entry(shard_path.clone()).or_insert_with(|| {
+                let idx = shard_paths.len();
+                shard_paths.push(shard_path);
+                idx
+            });
+            tensor_map.insert(
+                tensor_name.clone(),
+                TensorLocation {
+                    shard_idx,
+                    dtype: String::new(),
+                    shape: Vec::new(),
+                    data_offsets: [0, 0],
+                },
+            );
+        }
+
+        // Map each shard and parse its header to resolve tensor dtypes/offsets
+        for shard_path in &shard_paths {
+            let file = File::open(shard_path).map_err(|e| model_load(shard_path, e.to_string()))?;
+            let mmap = unsafe { Mmap::map(&file) }.map_err(|e| model_load(shard_path, e.to_string()))?;
+            let file_len = mmap.len() as u64;
+            let mut len_bytes = [0u8; 8];
+            let mut reader = &mmap[..];
+            reader
+                .read_exact(&mut len_bytes)
+                .map_err(|e| model_load(shard_path, format!("read header length: {e}")))?;
+            let header_len = u64::from_le_bytes(len_bytes);
+            if header_len > MAX_HEADER_BYTES as u64 {
+                return Err(model_load(
+                    shard_path,
+                    format!("header length {header_len} exceeds limit {MAX_HEADER_BYTES}"),
+                ));
+            }
+            if 8u64.checked_add(header_len).is_none_or(|end| end > file_len) {
+                return Err(model_load(shard_path, "header extends beyond file".into()));
+            }
+            let header_bytes = &mmap[8..8 + header_len as usize];
+            let header = parse_json_rejecting_duplicate_keys(header_bytes, shard_path, "header")?;
+            let object = header.as_object().ok_or_else(|| {
+                model_load(shard_path, "Safetensors header must be a JSON object".into())
+            })?;
+
+            let data_len = file_len
+                .checked_sub(8)
+                .and_then(|len| len.checked_sub(header_len))
+                .ok_or_else(|| model_load(shard_path, "data range underflow".into()))?;
+
+            for (name, value) in object {
+                if name == "__metadata__" {
+                    continue;
+                }
+                let Some(loc) = tensor_map.get_mut(name) else {
+                    continue;
+                };
+                if loc.shard_idx != shards.len() {
+                    continue;
+                }
+                let tensor = value.as_object().ok_or_else(|| {
+                    model_load(shard_path, format!("tensor '{name}' metadata must be an object"))
+                })?;
+                let dtype = tensor
+                    .get("dtype")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' missing dtype")))?
+                    .to_string();
+                let shape = tensor
+                    .get("shape")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' missing shape")))?
+                    .iter()
+                    .map(|dim| {
+                        dim.as_u64()
+                            .and_then(|v| usize::try_from(v).ok())
+                            .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' invalid shape")))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let offsets = tensor
+                    .get("data_offsets")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        model_load(shard_path, format!("tensor '{name}' missing data_offsets"))
+                    })?;
+                if offsets.len() != 2 {
+                    return Err(model_load(
+                        shard_path,
+                        format!("tensor '{name}' data_offsets must have length 2"),
+                    ));
+                }
+                let start = offsets[0]
+                    .as_u64()
+                    .and_then(|v| usize::try_from(v).ok())
+                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' invalid start offset")))?;
+                let end = offsets[1]
+                    .as_u64()
+                    .and_then(|v| usize::try_from(v).ok())
+                    .ok_or_else(|| model_load(shard_path, format!("tensor '{name}' invalid end offset")))?;
+                if start > end || end as u64 > data_len {
+                    return Err(model_load(
+                        shard_path,
+                        format!("tensor '{name}' data range invalid"),
+                    ));
+                }
+                let expected = expected_tensor_byte_size(&dtype, &shape, shard_path, name)?;
+                if expected != end - start {
+                    return Err(model_load(
+                        shard_path,
+                        format!(
+                            "tensor '{name}' byte size mismatch: expected {expected}, got {}",
+                            end - start
+                        ),
+                    ));
+                }
+                loc.dtype = dtype;
+                loc.shape = shape;
+                loc.data_offsets = [start, end];
+            }
+
+            shards.push(MappedShard {
+                path: shard_path.clone(),
+                mmap,
+                header_len,
+            });
+        }
+
+        let metadata = SafetensorsMetadata {
+            architecture: config.architectures.first().cloned().unwrap_or_default(),
+            hidden_size: config.hidden_size,
+            num_layers: config.num_hidden_layers,
+            num_experts: config.num_experts.unwrap_or(1),
+            expert_used_count: config.num_experts_per_tok.unwrap_or(1),
+            vocab_size: config.vocab_size,
+        };
+
+        Ok(Self {
+            shards,
+            tensor_map,
+            metadata,
+        })
+    }
+
+    /// Extract a full tensor as `Vec<f32>`, converting BF16/F16 as needed.
+    pub fn extract_tensor_f32(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+        let loc = self.tensor_map.get(name).ok_or_else(|| HybridError::MissingTensor {
+            name: name.to_owned(),
+            path: path.to_owned(),
+        })?;
+        let shard = &self.shards[loc.shard_idx];
+        let data_start = 8 + shard.header_len as usize + loc.data_offsets[0];
+        let data_end = 8 + shard.header_len as usize + loc.data_offsets[1];
+        let bytes = &shard.mmap[data_start..data_end];
+
+        match loc.dtype.as_str() {
+            "F32" => {
+                if bytes.len() % 4 != 0 {
+                    return Err(HybridError::UnsupportedFormat(format!(
+                        "tensor '{name}' F32 data is not 4-byte aligned"
+                    )));
+                }
+                Ok(bytes
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    .collect())
+            }
+            "F16" => {
+                if bytes.len() % 2 != 0 {
+                    return Err(HybridError::UnsupportedFormat(format!(
+                        "tensor '{name}' F16 data is not 2-byte aligned"
+                    )));
+                }
+                Ok(bytes
+                    .chunks_exact(2)
+                    .map(|b| f16_to_f32(u16::from_le_bytes([b[0], b[1]])))
+                    .collect())
+            }
+            "BF16" => {
+                if bytes.len() % 2 != 0 {
+                    return Err(HybridError::UnsupportedFormat(format!(
+                        "tensor '{name}' BF16 data is not 2-byte aligned"
+                    )));
+                }
+                Ok(bytes
+                    .chunks_exact(2)
+                    .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
+                    .collect())
+            }
+            other => Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' has unsupported Safetensors dtype '{other}'"
+            ))),
+        }
+    }
+
+    /// Extract a single row (token embedding) as `Vec<f32>`.
+    pub fn extract_token_embedding(
+        &self,
+        name: &str,
+        path: &str,
+        token_id: usize,
+    ) -> Result<Vec<f32>> {
+        let loc = self.tensor_map.get(name).ok_or_else(|| HybridError::MissingTensor {
+            name: name.to_owned(),
+            path: path.to_owned(),
+        })?;
+        if loc.shape.len() != 2 {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "token embedding tensor '{name}' must be rank-2, got {:?}",
+                loc.shape
+            )));
+        }
+        let d0 = loc.shape[0];
+        let d1 = loc.shape[1];
+        if token_id >= d0 {
+            return Err(HybridError::InputLengthMismatch {
+                expected: d0,
+                got: token_id,
+            });
+        }
+        let row_elements = d1;
+        let element_size = dtype_size_bytes(&loc.dtype).unwrap_or(2);
+        let row_bytes = row_elements * element_size;
+        let shard = &self.shards[loc.shard_idx];
+        let data_start = 8 + shard.header_len as usize + loc.data_offsets[0];
+        let row_start = data_start + token_id * row_bytes;
+        let row_end = row_start + row_bytes;
+        let bytes = &shard.mmap[row_start..row_end];
+
+        match loc.dtype.as_str() {
+            "F32" => Ok(bytes
+                .chunks_exact(4)
+                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                .collect()),
+            "F16" => Ok(bytes
+                .chunks_exact(2)
+                .map(|b| f16_to_f32(u16::from_le_bytes([b[0], b[1]])))
+                .collect()),
+            "BF16" => Ok(bytes
+                .chunks_exact(2)
+                .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
+                .collect()),
+            other => Err(HybridError::UnsupportedFormat(format!(
+                "token embedding tensor '{name}' has unsupported dtype '{other}'"
+            ))),
+        }
+    }
+
+    pub fn tensor_info(&self, name: &str) -> Option<(&str, &[usize])> {
+        self.tensor_map
+            .get(name)
+            .map(|loc| (loc.dtype.as_str(), loc.shape.as_slice()))
+    }
+
+    fn read_config(root: &Path) -> Result<HfConfig> {
+        let config_path = root.join("config.json");
+        let bytes = fs::read(&config_path).map_err(|e| model_load(&config_path, e.to_string()))?;
+        serde_json::from_slice(&bytes).map_err(|e| model_load(&config_path, format!("parse config.json: {e}")))
+    }
+}
+
+/// Convert a BF16 bit pattern to `f32`.
+pub fn bf16_to_f32(bits: u16) -> f32 {
+    f32::from_bits((bits as u32) << 16)
 }
 
 #[cfg(test)]

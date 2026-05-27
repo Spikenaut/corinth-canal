@@ -1,7 +1,7 @@
 //! Diagnostic pass for issue #31.
 //!
 //! Loads each validation model in the configured lineup (LINEUP_CONFIG, then
-//! GGUF_CHECKPOINT_PATH, then autodiscovery — same precedence as the SAAQ
+//! CHECKPOINT_PATH, then autodiscovery — same precedence as the SAAQ
 //! runner) and prints, per model, the GGUF facts that drive the
 //! synthetic-vs-real synapse decision in
 //! `src/moe/adapter.rs::resolve_adapter`. Writes a JSON report to
@@ -17,7 +17,7 @@ use std::io::{BufWriter, Write};
 use serde::Serialize;
 
 use corinth_canal::ModelFamily;
-use corinth_canal::moe::{GpuSynapseTensorDescriptor, OlmoeRouter, RoutingMode};
+use corinth_canal::moe::{GpuSynapseTensorDescriptor, Router, RoutingMode};
 use support::config::RunConfig;
 use support::{
     ValidationModelSpec,
@@ -66,13 +66,13 @@ fn probe_one(
 
     // StubUniform routing keeps the load cheap: no gate-score precompute, no
     // membrane state, no GPU bring-up. We only need the metadata + checkpoint
-    // map that `OlmoeRouter::load_with_family_and_mode` already builds. Apply
+    // map that `Router::load_with_family_and_mode` already builds. Apply
     // the same `model_family_override.or(spec.family)` precedence as the SAAQ
     // runner (`run_validation` in `examples/saaq_latent_calibration.rs`) so
     // the diagnostic agrees with production routing on lineups that rely on
     // a global `MODEL_FAMILY` override.
     let effective_family = model_family_override.or(spec.family);
-    match OlmoeRouter::load_with_family_and_mode(
+    match Router::load_with_family_and_mode(
         &spec.path,
         0,
         0,
@@ -167,7 +167,7 @@ fn run(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>> {
     if cfg.validation_models.is_empty() {
         eprintln!(
             "synapse_diagnostic: no validation models resolved (LINEUP_CONFIG / \
-             GGUF_CHECKPOINT_PATH / autodiscovery all returned empty)"
+             CHECKPOINT_PATH / autodiscovery all returned empty)"
         );
     }
 

@@ -42,7 +42,7 @@ The current top-level flow to document is:
 `-> SignedSplitBankBridge or GPU input_spikes`
 `-> SparseGifHiddenLayer or GPU GIF temporal loop`
 `-> Projector`
-`-> OlmoeRouter`
+`-> Router`
 `-> SAAQ latent calibration / telemetry outputs`
 
 ### Model loading / routing

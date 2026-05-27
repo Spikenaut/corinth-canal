@@ -64,8 +64,8 @@ The latent telemetry CSV includes both SAAQ trajectories via
 
 | Profile | Command |
 |---------|---------|
-| 10k GPU ticks, real checkpoint | `GGUF_CHECKPOINT_PATH=... just smoke` |
-| Short deterministic GPU smoke | `GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=... cargo run --release --example gpu_smoke_test` |
+| 10k GPU ticks, real checkpoint | `CHECKPOINT_PATH=... just smoke` |
+| Short deterministic GPU smoke | `GPU_SMOKE_TICKS=1 CHECKPOINT_PATH=... cargo run --release --example gpu_smoke_test` |
 
 This example is the direct GPU-temporal smoke path. It is the correct entrypoint
 for validating resident synapse upload, GIF weighted temporal stepping, and the
@@ -152,7 +152,7 @@ Hugging Face `.safetensors.index.json` metadata; it does not create a project,
 run activation tracing, or load tensor payload bytes.
 
 Use GGUF when the goal is current `corinth-canal` runtime routing. The
-`OlmoeRouter` path remains GGUF-backed for token embedding extraction, routing
+`Router` path remains GGUF-backed for token embedding extraction, routing
 tensor access, and GPU synapse-source selection. Safetensors support is a setup
 and inspection adapter for experiment preparation, not a replacement for the
 runtime GGUF bridge.
@@ -179,7 +179,7 @@ timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w
 
 ## Model discovery
 
-If `GGUF_CHECKPOINT_PATH` is unset, `saaq_latent_calibration` auto-discovers
+If `CHECKPOINT_PATH` is unset, `saaq_latent_calibration` auto-discovers
 up to five MoE families under `$HOME/Downloads/SNN_Quantization/`:
 
 - `olmoe-0125-gguf/OLMoE-1B-7B-0125-Instruct-F16.gguf`
@@ -189,7 +189,7 @@ up to five MoE families under `$HOME/Downloads/SNN_Quantization/`:
 - `models/Llama-3.2-8X3B-MOE-Dark-Champion-GGUF/L3.2-8X3B-MOE-Dark-Champion-Inst-18.4B-uncen-ablit_D_AU-q5_k_m.gguf`
 
 This discovery root is a machine-local convention on the author's Fedora
-box. CI and contributor machines should set `GGUF_CHECKPOINT_PATH`
+box. CI and contributor machines should set `CHECKPOINT_PATH`
 explicitly.
 
 Do not assume the filename suffix tells you which GPU synapse path will be
