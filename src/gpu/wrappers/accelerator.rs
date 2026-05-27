@@ -54,11 +54,12 @@ struct TemporalState {
 
 /// Facade that owns a CUDA context and the compiled PTX modules.
 pub struct GpuAccelerator {
-    /// `None` when running in CPU-only / stub mode.
-    _ctx: Option<GpuContext>,
+    temporal_state: Option<TemporalState>,
     /// `None` when PTX modules failed to load.
     modules: Option<KernelModule>,
-    temporal_state: Option<TemporalState>,
+    /// `None` when running in CPU-only / stub mode. Keep this field last so
+    /// device buffers and modules are dropped before the CUDA context.
+    _ctx: Option<GpuContext>,
 }
 
 impl GpuAccelerator {
@@ -88,25 +89,25 @@ impl GpuAccelerator {
         match GpuContext::init() {
             Ok(ctx) => match KernelModule::load() {
                 Ok(modules) => Self {
-                    _ctx: Some(ctx),
-                    modules: Some(modules),
                     temporal_state: None,
+                    modules: Some(modules),
+                    _ctx: Some(ctx),
                 },
                 Err(e) => {
                     eprintln!("[GPU] PTX load failed (CPU fallback): {}", e);
                     Self {
-                        _ctx: Some(ctx),
-                        modules: None,
                         temporal_state: None,
+                        modules: None,
+                        _ctx: Some(ctx),
                     }
                 }
             },
             Err(e) => {
                 eprintln!("[GPU] No CUDA device (CPU fallback): {}", e);
                 Self {
-                    _ctx: None,
-                    modules: None,
                     temporal_state: None,
+                    modules: None,
+                    _ctx: None,
                 }
             }
         }

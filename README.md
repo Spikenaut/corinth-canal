@@ -111,6 +111,7 @@ compatibility columns.
 
 - `docs/ARCHITECTURE.md` — runtime architecture, module map, hidden control flow
 - `docs/RUN_PROFILES.md` — validated commands and per-run outputs
+- `docs/CUDA_VALIDATION.md` — tiered CUDA smoke, sanitizer, profiler, and hardware validation ladder
 - `docs/CLOUD_MODELS.md` — cloud model delegation model and provider reference
 - `docs/model_lineup.md` — rollout batch structure and required onboarding metadata
 - `docs/MODEL_SOURCE_VERIFICATION_CHECKLIST.md` — pre-onboarding source verification gate
@@ -171,6 +172,10 @@ just saaq
 ```bash
 GGUF_CHECKPOINT_PATH=/path/to/model.gguf just smoke
 ```
+
+For the full CUDA validation ladder, including host sanity checks, Compute
+Sanitizer, Nsight Systems, Nsight Compute, and DCGM diagnostics, see
+`docs/CUDA_VALIDATION.md`.
 
 ## Notes
 

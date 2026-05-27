@@ -65,10 +65,14 @@ The latent telemetry CSV includes both SAAQ trajectories via
 | Profile | Command |
 |---------|---------|
 | 10k GPU ticks, real checkpoint | `GGUF_CHECKPOINT_PATH=... just smoke` |
+| Short deterministic GPU smoke | `GPU_SMOKE_TICKS=1 GGUF_CHECKPOINT_PATH=... cargo run --release --example gpu_smoke_test` |
 
 This example is the direct GPU-temporal smoke path. It is the correct entrypoint
 for validating resident synapse upload, GIF weighted temporal stepping, and the
 on-device best-walker reduction.
+
+The full Tier 0-5 CUDA validation ladder, including Compute Sanitizer, Nsight
+Systems, Nsight Compute, and DCGM commands, lives in `docs/CUDA_VALIDATION.md`.
 
 ## Synapse diagnostic
 

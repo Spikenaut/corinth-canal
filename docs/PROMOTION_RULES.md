@@ -28,9 +28,10 @@ A module moves from **stabilizing** to **proven** only after all of:
 2. **Dual-SAAQ parity.** The run emits both `saaq_delta_q_*_v1_0` and
    `saaq_delta_q_*_v1_5` columns, and the two rules diverge in the
    expected regime (1.5 < 1.0 on large deltas by the sqrt-rate rule).
-3. **GPU determinism check.** A `REPEAT_COUNT=2` run produces bit-matching
-   `tick_telemetry.txt` between repeat 0 and repeat 1. Non-determinism is
-   a blocker.
+3. **GPU validation and determinism check.** The relevant CUDA path has Tier 1
+   repo-native evidence from `docs/CUDA_VALIDATION.md`, and a `REPEAT_COUNT=2`
+   run produces bit-matching `tick_telemetry.txt` between repeat 0 and repeat 1.
+   Non-determinism is a blocker.
 4. **CSV schema frozen.** No structural change to
    `latent_telemetry.csv` or the telemetry CSV input header
    (`timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w`)
