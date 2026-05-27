@@ -1,8 +1,7 @@
 # Local-only SAAQ 1.5 lineup with machine-specific paths.
-# This file is gitignored.
+# This file is gitignored — do not commit absolute paths to the repo.
 #
-# Copy this template to `configs/local_gguf_lineup.toml` and update paths
-# to match your local GGUF model locations.
+# Update paths to match your local GGUF model locations.
 
 # ── Models under ~/.models/gguf/ ──
 

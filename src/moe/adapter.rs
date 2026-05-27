@@ -296,7 +296,7 @@ fn infer_family(
         "llama" => ModelFamily::LlamaMoe,
         "moonlight" => ModelFamily::Moonlight16BA3B,
         "granite" | "granitemoe" => ModelFamily::Granite31A800M,
-        "nemotron" | "nemotronh" => ModelFamily::Nemotron3Nano4B,
+        "nemotronh" => ModelFamily::Nemotron3Nano4B,
         "lfm2" | "lfm2moe" => ModelFamily::Lfm2Moe,
         "zaya" => ModelFamily::Zaya,
         "glm4" | "glm4moe" => ModelFamily::Glm4,

@@ -216,6 +216,9 @@ mod tests {
         assert_eq!(ModelFamily::Glm4.slug(), "glm4");
         assert_eq!(ModelFamily::Moonlight16BA3B.slug(), "moonlight_16b_a3b");
         assert_eq!(ModelFamily::Granite31A800M.slug(), "granite_3_1_a800m");
+        assert_eq!(ModelFamily::Nemotron3Nano4B.slug(), "nemotron_3_nano_4b");
+        assert_eq!(ModelFamily::Lfm2Moe.slug(), "lfm2_moe");
+        assert_eq!(ModelFamily::SlimMoe.slug(), "slim_moe");
     }
 
     #[test]
