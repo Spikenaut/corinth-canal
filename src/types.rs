@@ -18,6 +18,9 @@ pub enum ModelFamily {
     LlamaMoe,
     Moonlight16BA3B,
     Granite31A800M,
+    Nemotron3Nano4B,
+    Lfm2Moe,
+    SlimMoe,
     Zaya,
     Glm4,
 }
@@ -32,6 +35,9 @@ impl ModelFamily {
             Self::LlamaMoe => "llama_moe",
             Self::Moonlight16BA3B => "moonlight_16b_a3b",
             Self::Granite31A800M => "granite_3_1_a800m",
+            Self::Nemotron3Nano4B => "nemotron_3_nano_4b",
+            Self::Lfm2Moe => "lfm2_moe",
+            Self::SlimMoe => "slim_moe",
             Self::Zaya => "zaya",
             Self::Glm4 => "glm4",
         }
@@ -210,6 +216,9 @@ mod tests {
         assert_eq!(ModelFamily::Glm4.slug(), "glm4");
         assert_eq!(ModelFamily::Moonlight16BA3B.slug(), "moonlight_16b_a3b");
         assert_eq!(ModelFamily::Granite31A800M.slug(), "granite_3_1_a800m");
+        assert_eq!(ModelFamily::Nemotron3Nano4B.slug(), "nemotron_3_nano_4b");
+        assert_eq!(ModelFamily::Lfm2Moe.slug(), "lfm2_moe");
+        assert_eq!(ModelFamily::SlimMoe.slug(), "slim_moe");
     }
 
     #[test]
