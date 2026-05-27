@@ -78,8 +78,12 @@ impl RunConfig {
         // when campaign provenance is added back to `ValidationManifest`,
         // re-introduce both fields together in one focused commit.
         let lineup_config_path = lineup_config_path_from_env();
-        let validation_models =
-            resolve_validation_models(lineup_config_path.as_deref(), &checkpoint_path);
+        let safetensors_lineup_path = safetensors_lineup_path_from_env();
+        let validation_models = resolve_validation_models(
+            lineup_config_path.as_deref(),
+            safetensors_lineup_path.as_deref(),
+            &checkpoint_path,
+        );
         Self {
             prompt_profile: prompt_profile.clone(),
             prompt_text,
@@ -173,6 +177,7 @@ fn validate_safetensors_lineup_entries(path: &Path, entries: &[SafetensorsModelE
 ///   3. Machine-local autodiscovery under `$HOME/Downloads/SNN_Quantization`.
 fn resolve_validation_models(
     lineup_path: Option<&Path>,
+    safetensors_lineup_path: Option<&Path>,
     checkpoint_path: &str,
 ) -> Vec<ValidationModelSpec> {
     if let Some(path) = lineup_path {
@@ -185,16 +190,33 @@ fn resolve_validation_models(
                 } else {
                     ""
                 };
-                // Hard-fail with a loud message so a typo / missing path is
-                // never silently papered over by autodiscovery.
                 panic!("LINEUP_CONFIG={path_str} could not be loaded: {err}{hint}");
             }
         }
     }
 
-    // Legacy single-model override or autodiscovery — let the existing
-    // helper keep its current contract.
-    let _ = checkpoint_path; // discover_validation_models reads it directly
+    if let Some(path) = safetensors_lineup_path {
+        match load_safetensors_lineup(path) {
+            Ok(entries) => {
+                return entries
+                    .into_iter()
+                    .map(|entry| ValidationModelSpec {
+                        slug: entry.slug,
+                        family: entry.family,
+                        path: entry.path.display().to_string(),
+                        routing_mode: None,
+                    })
+                    .collect();
+            }
+            Err(err) => {
+                let path_str = path.display().to_string();
+                panic!("SAFETENSORS_LINEUP_CONFIG={path_str} could not be loaded: {err}");
+            }
+        }
+    }
+
+    // Legacy single-model override or autodiscovery
+    let _ = checkpoint_path;
     discover_validation_models()
 }
 

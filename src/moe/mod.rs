@@ -417,7 +417,11 @@ impl Router {
         path: &str,
         family_override: Option<ModelFamily>,
     ) -> Result<(RouterMetadata, CheckpointBackend, ModelAdapter)> {
-        let is_safetensors = std::path::Path::new(path).is_dir() || !path.ends_with(".gguf");
+        let is_safetensors = std::path::Path::new(path).is_dir()
+            || !std::path::Path::new(path)
+                .extension()
+                .map(|ext| ext.eq_ignore_ascii_case("gguf"))
+                .unwrap_or(false);
 
         if is_safetensors {
             let checkpoint = MappedSafetensorsCheckpoint::from_directory(path)?;

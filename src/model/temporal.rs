@@ -169,15 +169,15 @@ impl Model {
             None => return Ok(false),
         };
         let fallback_signature = format!("synthetic-f32::{neuron_count}");
-        if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
-            return Ok(false);
-        }
         let signature = format!(
             "dequantized-{label}::{}::{tensor_name}",
             self.router.model_path()
         );
         if accelerator.synapse_signature() == Some(signature.as_str()) {
             return Ok(true);
+        }
+        if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {
+            return Ok(false);
         }
         let weights = get_weights(&self.router, &tensor_name)
             .map_err(|e| GpuError::MemoryError(format!("{label} dequantization failed: {e}")))?;

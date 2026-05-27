@@ -602,7 +602,7 @@ fn build_manifest(
         model_family: format!("{:?}", model.router_family()),
         architecture: model.router_architecture().to_owned(),
         checkpoint_path: ctx.spec.path.clone(),
-        checkpoint_format: "gguf".to_owned(),
+        checkpoint_format: config.checkpoint_format.as_str().to_owned(),
         routing_tensor_name: model.routing_tensor_name().to_owned(),
         synapse_source: model.synapse_source().to_owned(),
         prompt_embedding_source: prompt_embedding_source.to_owned(),

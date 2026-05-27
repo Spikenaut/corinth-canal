@@ -56,9 +56,9 @@ pub(super) fn safetensors_gate_scores(
     for expert_id in 0..num_experts {
         let mut score = 0.0f32;
         for (dim, &value) in embedding.iter().enumerate() {
-            let index = if d0 == embedding.len() && d1 >= num_experts {
+            let index = if d0 == embedding.len() && d1 == num_experts {
                 dim * d1 + expert_id
-            } else if d0 >= num_experts && d1 == embedding.len() {
+            } else if d0 == num_experts && d1 == embedding.len() {
                 expert_id * d1 + dim
             } else {
                 return Err(HybridError::UnsupportedFormat(format!(
