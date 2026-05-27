@@ -1087,7 +1087,7 @@ fn test_iq3_m_full_tensor_dequantization() {
     );
 
     let path = write_temp_file(&checkpoint, "iq3_m_full");
-    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
 
     // Test dequantize_iq3_m_tensor
     let result = mapped.dequantize_iq3_m_tensor("blk.0.attn_q.weight", path.to_str().unwrap());
