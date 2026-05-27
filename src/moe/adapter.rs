@@ -172,8 +172,7 @@ pub(super) fn resolve_adapter(
             // (individual tensor ggml_type may vary in mixed-quant models)
             let is_iq3_m = metadata.quantization().contains("IQ3_M")
                 || metadata.quantization().contains("iq3_m");
-            (is_iq3_m && info.dims.len() == 2 && info.dims[0] % 256 == 0)
-                .then(|| name.clone())
+            (is_iq3_m && info.dims.len() == 2 && info.dims[0] % 256 == 0).then(|| name.clone())
         })
     } else {
         None
