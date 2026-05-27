@@ -9,12 +9,21 @@ use std::process::Command;
 use std::sync::{Once, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
+use opentelemetry_sdk::trace::{SdkTracerProvider, Tracer};
 use sentry::ClientInitGuard;
 use serde_json::json;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 static INIT: Once = Once::new();
 const REPO_NAME: &str = "corinth-canal";
+
+/// OpenTelemetry tracer provider guard. Kept alive for the process lifetime
+/// so the global tracer is not dropped prematurely.
+static OTEL_PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SafeDiagnosticData<'a> {
@@ -64,6 +73,7 @@ pub struct CommandObserver {
     git_sha: String,
     started: Instant,
     safe_data: RefCell<OwnedDiagnosticData>,
+    span: RefCell<Option<tracing::Span>>,
 }
 
 pub trait ErrorReport {
@@ -126,24 +136,127 @@ impl OwnedDiagnosticData {
 pub fn init_tracing() {
     INIT.call_once(|| {
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-        let builder = tracing_subscriber::fmt().with_env_filter(filter);
+        let json_tracing = std::env::var("AGENTOS_JSON_TRACING").as_deref() == Ok("1");
 
-        if std::env::var("AGENTOS_JSON_TRACING").as_deref() == Ok("1") {
-            builder.json().init();
-        } else {
-            builder.init();
+        match (json_tracing, init_opentelemetry_tracer()) {
+            (true, Some(tracer)) => {
+                tracing_subscriber::registry()
+                    .with(filter)
+                    .with(tracing_subscriber::fmt::layer().json())
+                    .with(tracing_opentelemetry::layer().with_tracer(tracer))
+                    .init();
+            }
+            (true, None) => {
+                tracing_subscriber::registry()
+                    .with(filter)
+                    .with(tracing_subscriber::fmt::layer().json())
+                    .init();
+            }
+            (false, Some(tracer)) => {
+                tracing_subscriber::registry()
+                    .with(filter)
+                    .with(tracing_subscriber::fmt::layer())
+                    .with(tracing_opentelemetry::layer().with_tracer(tracer))
+                    .init();
+            }
+            (false, None) => {
+                tracing_subscriber::registry()
+                    .with(filter)
+                    .with(tracing_subscriber::fmt::layer())
+                    .init();
+            }
         }
     });
 }
 
+/// Attempt to build an OpenTelemetry `tracing` layer backed by a New Relic OTLP
+/// exporter. Returns `None` when New Relic credentials are absent or invalid so
+/// the caller can fall back to plain tracing.
+fn init_opentelemetry_tracer() -> Option<Tracer> {
+    let api_key = std::env::var("NR_INSERT_KEY")
+        .ok()
+        .filter(|v| !v.trim().is_empty())?;
+    let service_name = std::env::var("OTEL_SERVICE_NAME")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| REPO_NAME.to_owned());
+
+    let has_generic_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .is_some();
+    let has_traces_endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .is_some();
+
+    let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
+        .with_http()
+        .with_headers(std::collections::HashMap::from([(
+            "api-key".to_owned(),
+            api_key,
+        )]));
+
+    if !has_generic_endpoint && !has_traces_endpoint {
+        exporter_builder = exporter_builder.with_endpoint("https://otlp.nr-data.net/v1/traces");
+    }
+
+    let exporter = match exporter_builder.build() {
+        Ok(exporter) => exporter,
+        Err(error) => {
+            eprintln!("OpenTelemetry disabled: failed to build New Relic OTLP exporter ({error})");
+            return None;
+        }
+    };
+
+    let resource = opentelemetry_sdk::Resource::builder()
+        .with_attribute(opentelemetry::KeyValue::new("service.name", service_name))
+        .with_attribute(opentelemetry::KeyValue::new(
+            "service.repository",
+            REPO_NAME,
+        ))
+        .build();
+
+    let provider = SdkTracerProvider::builder()
+        .with_simple_exporter(exporter)
+        .with_resource(resource)
+        .build();
+
+    opentelemetry::global::set_tracer_provider(provider.clone());
+    let _ = OTEL_PROVIDER.set(provider);
+
+    Some(OTEL_PROVIDER.get()?.tracer(REPO_NAME))
+}
+
+/// Flush any pending OpenTelemetry spans without shutting down the global
+/// provider. Safe to call when OTel was never initialized; it becomes a no-op.
+pub fn flush_opentelemetry() {
+    if let Some(provider) = OTEL_PROVIDER.get() {
+        let _ = provider.force_flush();
+    }
+}
+
 pub fn start_command(command: &'static str) -> CommandObserver {
     init_tracing();
+    let run_id = run_id();
+    let git_sha = git_sha();
+    let span = tracing::info_span!(
+        "command_execution",
+        repo = REPO_NAME,
+        command,
+        run_id = %run_id,
+        git_sha = %git_sha,
+        success = tracing::field::Empty,
+        error_category = tracing::field::Empty,
+        validation_status = tracing::field::Empty,
+    );
     let observer = CommandObserver {
         command,
-        run_id: run_id(),
-        git_sha: git_sha(),
+        run_id,
+        git_sha,
         started: Instant::now(),
         safe_data: RefCell::new(OwnedDiagnosticData::default()),
+        span: RefCell::new(Some(span)),
     };
     annotate_scope(
         observer.command,
@@ -151,14 +264,27 @@ pub fn start_command(command: &'static str) -> CommandObserver {
         &observer.git_sha,
         SafeDiagnosticData::default(),
     );
-    tracing::info!(
-        event = "command_start",
-        repo = REPO_NAME,
-        command = observer.command,
-        run_id = %observer.run_id,
-        git_sha = %observer.git_sha,
-        "command_start"
-    );
+    if let Some(span) = observer.span.borrow().as_ref() {
+        span.in_scope(|| {
+            tracing::info!(
+                event = "command_start",
+                repo = REPO_NAME,
+                command = observer.command,
+                run_id = %observer.run_id,
+                git_sha = %observer.git_sha,
+                "command_start"
+            );
+        });
+    } else {
+        tracing::info!(
+            event = "command_start",
+            repo = REPO_NAME,
+            command = observer.command,
+            run_id = %observer.run_id,
+            git_sha = %observer.git_sha,
+            "command_start"
+        );
+    }
     observer
 }
 
@@ -378,18 +504,40 @@ impl CommandObserver {
             &self.git_sha,
             enriched.as_safe(),
         );
-        tracing::info!(
-            event = "command_finish",
-            repo = REPO_NAME,
-            command = self.command,
-            run_id = %self.run_id,
-            git_sha = %self.git_sha,
-            latency_ms = self.started.elapsed().as_millis() as u64,
-            success = result.is_ok(),
-            error_category = resolved_category,
-            validation_status = resolved_status,
-            "command_finish"
-        );
+        let span = self.span.borrow_mut().take();
+        if let Some(span) = span {
+            span.record("success", result.is_ok());
+            span.record("error_category", resolved_category);
+            span.record("validation_status", resolved_status);
+            span.in_scope(|| {
+                tracing::info!(
+                    event = "command_finish",
+                    repo = REPO_NAME,
+                    command = self.command,
+                    run_id = %self.run_id,
+                    git_sha = %self.git_sha,
+                    latency_ms = self.started.elapsed().as_millis() as u64,
+                    success = result.is_ok(),
+                    error_category = resolved_category,
+                    validation_status = resolved_status,
+                    "command_finish"
+                );
+            });
+            drop(span);
+        } else {
+            tracing::info!(
+                event = "command_finish",
+                repo = REPO_NAME,
+                command = self.command,
+                run_id = %self.run_id,
+                git_sha = %self.git_sha,
+                latency_ms = self.started.elapsed().as_millis() as u64,
+                success = result.is_ok(),
+                error_category = resolved_category,
+                validation_status = resolved_status,
+                "command_finish"
+            );
+        }
 
         if let Err(error) = result.as_ref() {
             capture_scoped_error(
@@ -399,6 +547,8 @@ impl CommandObserver {
                 error.as_dyn_error(),
             );
         }
+
+        flush_opentelemetry();
     }
 }
 
