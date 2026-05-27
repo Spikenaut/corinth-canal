@@ -1,4 +1,4 @@
-use super::checkpoint::dequantize_row_iq3_m;
+use super::checkpoint::{dequantize_row_iq3_m, tensor_row_size};
 use super::safetensors::dtype_size_bytes;
 use super::*;
 use std::io::Write;
@@ -1007,4 +1007,44 @@ fn test_int4_safetensors_extraction() {
         unpacked.push(high as f32);
     }
     assert_eq!(unpacked, vec![2.0, 1.0, 4.0, 3.0]);
+}
+
+#[test]
+fn test_tensor_row_size_iq3_m() {
+    // IQ3_M block size: 111 bytes per 256 elements
+    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M, 256).unwrap(), 111);
+    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M, 512).unwrap(), 222);
+    // Width must be divisible by 256
+    assert!(tensor_row_size(GGML_TYPE_IQ3_M, 255).is_err());
+}
+
+#[test]
+fn test_synapse_source_label_new_variants() {
+    // Test the new synapse source labels
+    use super::adapter::SynapseSource;
+    let adapter = super::adapter::ModelAdapter {
+        family: ModelFamily::Qwen3Moe,
+        architecture: "test".into(),
+        hidden_size: 128,
+        num_layers: 1,
+        num_experts: 8,
+        expert_used_count: 2,
+        token_embedding_tensor: "test".into(),
+        routing_tensor: "test".into(),
+        preferred_gpu_synapse_tensor: None,
+        real_gpu_synapse_tensor: None,
+        dequant_q8_0_synapse_tensor: None,
+        dequant_q5_k_synapse_tensor: None,
+        dequant_q6_k_synapse_tensor: None,
+        dequant_iq3_m_synapse_tensor: None,
+        dequant_int4_synapse_tensor: None,
+        synapse_source: SynapseSource::DequantizedIQ3M,
+        quantization: "IQ3_M".into(),
+    };
+    assert_eq!(adapter.synapse_source_label(), "dequantized-iq3_m");
+
+    let mut adapter2 = adapter.clone();
+    adapter2.synapse_source = SynapseSource::DequantizedInt4;
+    adapter2.quantization = "INT4".into();
+    assert_eq!(adapter2.synapse_source_label(), "dequantized-int4");
 }

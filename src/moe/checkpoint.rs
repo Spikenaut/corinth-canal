@@ -718,7 +718,7 @@ impl Drop for RegisteredCudaRegion {
     }
 }
 
-fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
+pub(super) fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
     match ggml_type {
         GGML_TYPE_Q8_0 => {
             if !width.is_multiple_of(32) {
