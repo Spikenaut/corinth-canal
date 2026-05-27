@@ -8,6 +8,7 @@ pub(super) const GGML_TYPE_Q8_0: u32 = 8;
 pub(super) const GGML_TYPE_Q5_K: u32 = 13;
 pub(super) const GGML_TYPE_Q6_K: u32 = 14;
 pub(super) const GGML_TYPE_IQ3_S: u32 = 21;
+pub(super) const GGML_TYPE_IQ3_M: u32 = 31;
 pub(super) const GGUF_VALUE_TYPE_UINT8: u32 = 0;
 pub(super) const GGUF_VALUE_TYPE_INT8: u32 = 1;
 pub(super) const GGUF_VALUE_TYPE_UINT16: u32 = 2;
@@ -54,6 +55,7 @@ pub fn ggml_type_label(ggml_type: u32) -> &'static str {
         28 => "F64",
         29 => "IQ1_M",
         30 => "BF16",
+        GGML_TYPE_IQ3_M => "IQ3_M",
         _ => "unknown",
     }
 }
@@ -65,4 +67,5 @@ pub fn synapse_dequant_path_supported(ggml_type: u32) -> bool {
         || ggml_type == GGML_TYPE_Q8_0
         || ggml_type == GGML_TYPE_Q5_K
         || ggml_type == GGML_TYPE_Q6_K
+        || ggml_type == GGML_TYPE_IQ3_M
 }

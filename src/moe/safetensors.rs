@@ -576,12 +576,6 @@ fn expected_tensor_byte_size(
     path: &Path,
     tensor_name: &str,
 ) -> Result<usize> {
-    let element_size = dtype_size_bytes(dtype).ok_or_else(|| {
-        model_load(
-            path,
-            format!("tensor '{tensor_name}' has unsupported Safetensors dtype '{dtype}'"),
-        )
-    })?;
     let elements = shape.iter().try_fold(1usize, |acc, dim| {
         acc.checked_mul(*dim).ok_or_else(|| {
             model_load(
@@ -590,18 +584,36 @@ fn expected_tensor_byte_size(
             )
         })
     })?;
+
+    // Int4 is a packed format: 2 elements per byte
+    if dtype == "INT4" || dtype == "I4" || dtype == "U4" {
+        return elements
+            .div_ceil(2)
+            .checked_mul(1)
+            .ok_or_else(|| model_load(path, format!("tensor '{tensor_name}' byte size overflow")));
+    }
+
+    let element_size = dtype_size_bytes(dtype).ok_or_else(|| {
+        model_load(
+            path,
+            format!("tensor '{tensor_name}' has unsupported Safetensors dtype '{dtype}'"),
+        )
+    })?;
     elements
         .checked_mul(element_size)
         .ok_or_else(|| model_load(path, format!("tensor '{tensor_name}' byte size overflow")))
 }
 
-fn dtype_size_bytes(dtype: &str) -> Option<usize> {
+pub(super) fn dtype_size_bytes(dtype: &str) -> Option<usize> {
     match dtype {
         "C128" => Some(16),
         "F64" | "I64" | "U64" | "C64" => Some(8),
         "F32" | "TF32" | "I32" | "U32" => Some(4),
         "F16" | "BF16" | "I16" | "U16" => Some(2),
         "F8_E5M2" | "F8_E4M3" | "F8_E8M0" | "I8" | "U8" | "BOOL" => Some(1),
+        // Int4 is a packed format (2 elements per byte); callers must handle
+        // packed semantics explicitly rather than using element_size * count.
+        "INT4" | "I4" | "U4" => None,
         _ => None,
     }
 }
@@ -1328,6 +1340,30 @@ impl MappedSafetensorsCheckpoint {
                     .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
                     .collect())
             }
+            "INT4" | "I4" | "U4" => {
+                // Int4: packed format, 2 elements per byte.
+                // Compute exact expected element count from shape.
+                let expected_elements = loc.shape.iter().product::<usize>();
+                let mut out = Vec::with_capacity(expected_elements);
+                let is_signed = loc.dtype == "I4";
+                for &byte in bytes {
+                    let low = byte & 0x0F;
+                    let high = byte >> 4;
+                    if is_signed {
+                        // Sign-extend 4-bit to 8-bit, then convert to f32
+                        out.push(((low as i8) << 4 >> 4) as f32);
+                        if out.len() < expected_elements {
+                            out.push(((high as i8) << 4 >> 4) as f32);
+                        }
+                    } else {
+                        out.push(low as f32);
+                        if out.len() < expected_elements {
+                            out.push(high as f32);
+                        }
+                    }
+                }
+                Ok(out)
+            }
             other => Err(HybridError::UnsupportedFormat(format!(
                 "tensor '{name}' has unsupported Safetensors dtype '{other}'"
             ))),
@@ -1363,8 +1399,13 @@ impl MappedSafetensorsCheckpoint {
             });
         }
         let row_elements = d1;
-        let element_size = dtype_size_bytes(&loc.dtype).unwrap_or(2);
-        let row_bytes = row_elements * element_size;
+        let row_bytes = if loc.dtype == "INT4" || loc.dtype == "I4" || loc.dtype == "U4" {
+            // Int4: packed format, 2 elements per byte
+            row_elements.div_ceil(2)
+        } else {
+            let element_size = dtype_size_bytes(&loc.dtype).unwrap_or(2);
+            row_elements * element_size
+        };
         let shard = &self.shards[loc.shard_idx];
         let data_start = 8 + shard.header_len as usize + loc.data_offsets[0];
         let row_start = data_start + token_id * row_bytes;
@@ -1384,6 +1425,26 @@ impl MappedSafetensorsCheckpoint {
                 .chunks_exact(2)
                 .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
                 .collect()),
+            "INT4" | "I4" | "U4" => {
+                let mut out = Vec::with_capacity(row_elements);
+                let is_signed = loc.dtype == "I4";
+                for &byte in bytes {
+                    let low = byte & 0x0F;
+                    let high = byte >> 4;
+                    if is_signed {
+                        out.push(((low as i8) << 4 >> 4) as f32);
+                        if out.len() < row_elements {
+                            out.push(((high as i8) << 4 >> 4) as f32);
+                        }
+                    } else {
+                        out.push(low as f32);
+                        if out.len() < row_elements {
+                            out.push(high as f32);
+                        }
+                    }
+                }
+                Ok(out)
+            }
             other => Err(HybridError::UnsupportedFormat(format!(
                 "token embedding tensor '{name}' has unsupported dtype '{other}'"
             ))),
