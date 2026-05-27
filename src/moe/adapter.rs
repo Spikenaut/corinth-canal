@@ -2,7 +2,7 @@
 
 use super::checkpoint::{GgufMetadata, MappedGgufCheckpoint};
 use super::safetensors::{MappedSafetensorsCheckpoint, SafetensorsMetadata};
-use super::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
+use super::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
 use crate::error::{HybridError, Result};
 use crate::types::ModelFamily;
 
@@ -12,10 +12,13 @@ pub(super) enum SynapseSource {
     DequantizedQ8_0,
     DequantizedQ5K,
     DequantizedQ6K,
+    DequantizedIQ3M,
+    DequantizedInt4,
     SyntheticFallback,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(super) struct ModelAdapter {
     pub(super) family: ModelFamily,
     pub(super) architecture: String,
@@ -30,6 +33,8 @@ pub(super) struct ModelAdapter {
     pub(super) dequant_q8_0_synapse_tensor: Option<String>,
     pub(super) dequant_q5_k_synapse_tensor: Option<String>,
     pub(super) dequant_q6_k_synapse_tensor: Option<String>,
+    pub(super) dequant_iq3_m_synapse_tensor: Option<String>,
+    pub(super) dequant_int4_synapse_tensor: Option<String>,
     pub(super) synapse_source: SynapseSource,
     pub(super) quantization: String,
 }
@@ -41,6 +46,8 @@ impl ModelAdapter {
             SynapseSource::DequantizedQ8_0 => "dequantized-q8_0",
             SynapseSource::DequantizedQ5K => "dequantized-q5_k",
             SynapseSource::DequantizedQ6K => "dequantized-q6_k",
+            SynapseSource::DequantizedIQ3M => "dequantized-iq3_m",
+            SynapseSource::DequantizedInt4 => "dequantized-int4",
             SynapseSource::SyntheticFallback => "synthetic-fallback",
         }
     }
@@ -154,6 +161,20 @@ pub(super) fn resolve_adapter(
         None
     };
 
+    let dequant_iq3_m_synapse_tensor = if real_gpu_synapse_tensor.is_none()
+        && dequant_q8_0_synapse_tensor.is_none()
+        && dequant_q5_k_synapse_tensor.is_none()
+        && dequant_q6_k_synapse_tensor.is_none()
+    {
+        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
+            let info = checkpoint.tensor_info(name, path).ok()?;
+            (info.ggml_type == GGML_TYPE_IQ3_M && info.dims.len() == 2 && info.dims[0] % 256 == 0)
+                .then(|| name.clone())
+        })
+    } else {
+        None
+    };
+
     let synapse_source = if real_gpu_synapse_tensor.is_some() {
         SynapseSource::Real
     } else if dequant_q8_0_synapse_tensor.is_some() {
@@ -162,6 +183,8 @@ pub(super) fn resolve_adapter(
         SynapseSource::DequantizedQ5K
     } else if dequant_q6_k_synapse_tensor.is_some() {
         SynapseSource::DequantizedQ6K
+    } else if dequant_iq3_m_synapse_tensor.is_some() {
+        SynapseSource::DequantizedIQ3M
     } else {
         SynapseSource::SyntheticFallback
     };
@@ -181,6 +204,8 @@ pub(super) fn resolve_adapter(
         dequant_q8_0_synapse_tensor,
         dequant_q5_k_synapse_tensor,
         dequant_q6_k_synapse_tensor,
+        dequant_iq3_m_synapse_tensor,
+        dequant_int4_synapse_tensor: None,
         quantization: metadata.quantization().to_owned(),
     })
 }
@@ -222,14 +247,30 @@ pub(super) fn resolve_safetensors_adapter(
         )));
     }
 
-    // Safetensors path does not yet expose real GPU synapse tensors;
-    // leave everything as synthetic fallback.
-    let preferred_gpu_synapse_tensor = None;
-    let real_gpu_synapse_tensor = None;
-    let dequant_q8_0_synapse_tensor = None;
-    let dequant_q5_k_synapse_tensor = None;
-    let dequant_q6_k_synapse_tensor = None;
-    let synapse_source = SynapseSource::SyntheticFallback;
+    // Safetensors path: look for gate weight as synapse tensor;
+    // detect Int4 quantized weights.
+    let preferred_gpu_synapse_tensor = checkpoint
+        .tensor_info("model.layers.0.mlp.gate.weight")
+        .map(|_| "model.layers.0.mlp.gate.weight".to_owned());
+    let real_gpu_synapse_tensor = preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
+        let info = checkpoint.tensor_info(name)?;
+        (info.0 == "F16" || info.0 == "BF16" || info.0 == "F32").then(|| name.clone())
+    });
+    let dequant_int4_synapse_tensor = if real_gpu_synapse_tensor.is_none() {
+        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
+            let info = checkpoint.tensor_info(name)?;
+            (info.0 == "INT4" || info.0 == "I4" || info.0 == "U4").then(|| name.clone())
+        })
+    } else {
+        None
+    };
+    let synapse_source = if real_gpu_synapse_tensor.is_some() {
+        SynapseSource::Real
+    } else if dequant_int4_synapse_tensor.is_some() {
+        SynapseSource::DequantizedInt4
+    } else {
+        SynapseSource::SyntheticFallback
+    };
 
     Ok(ModelAdapter {
         family,
@@ -243,9 +284,11 @@ pub(super) fn resolve_safetensors_adapter(
         preferred_gpu_synapse_tensor,
         synapse_source,
         real_gpu_synapse_tensor,
-        dequant_q8_0_synapse_tensor,
-        dequant_q5_k_synapse_tensor,
-        dequant_q6_k_synapse_tensor,
+        dequant_q8_0_synapse_tensor: None,
+        dequant_q5_k_synapse_tensor: None,
+        dequant_q6_k_synapse_tensor: None,
+        dequant_iq3_m_synapse_tensor: None,
+        dequant_int4_synapse_tensor,
         quantization: "safetensors".into(),
     })
 }

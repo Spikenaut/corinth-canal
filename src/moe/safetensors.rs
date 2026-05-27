@@ -595,13 +595,14 @@ fn expected_tensor_byte_size(
         .ok_or_else(|| model_load(path, format!("tensor '{tensor_name}' byte size overflow")))
 }
 
-fn dtype_size_bytes(dtype: &str) -> Option<usize> {
+pub(super) fn dtype_size_bytes(dtype: &str) -> Option<usize> {
     match dtype {
         "C128" => Some(16),
         "F64" | "I64" | "U64" | "C64" => Some(8),
         "F32" | "TF32" | "I32" | "U32" => Some(4),
         "F16" | "BF16" | "I16" | "U16" => Some(2),
         "F8_E5M2" | "F8_E4M3" | "F8_E8M0" | "I8" | "U8" | "BOOL" => Some(1),
+        "INT4" | "I4" | "U4" => Some(1), // 2 elements per byte, but we report 1 byte for alignment
         _ => None,
     }
 }
@@ -1328,6 +1329,17 @@ impl MappedSafetensorsCheckpoint {
                     .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
                     .collect())
             }
+            "INT4" | "I4" | "U4" => {
+                // Int4: 2 elements per byte, unpack nibbles
+                let mut out = Vec::with_capacity(bytes.len() * 2);
+                for &byte in bytes {
+                    let low = byte & 0x0F;
+                    let high = byte >> 4;
+                    out.push(low as f32);
+                    out.push(high as f32);
+                }
+                Ok(out)
+            }
             other => Err(HybridError::UnsupportedFormat(format!(
                 "tensor '{name}' has unsupported Safetensors dtype '{other}'"
             ))),
@@ -1384,6 +1396,16 @@ impl MappedSafetensorsCheckpoint {
                 .chunks_exact(2)
                 .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
                 .collect()),
+            "INT4" | "I4" | "U4" => {
+                let mut out = Vec::with_capacity(bytes.len() * 2);
+                for &byte in bytes {
+                    let low = byte & 0x0F;
+                    let high = byte >> 4;
+                    out.push(low as f32);
+                    out.push(high as f32);
+                }
+                Ok(out)
+            }
             other => Err(HybridError::UnsupportedFormat(format!(
                 "token embedding tensor '{name}' has unsupported dtype '{other}'"
             ))),

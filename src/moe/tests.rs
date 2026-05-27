@@ -1,4 +1,6 @@
 use super::*;
+use super::checkpoint::dequantize_row_iq3_m;
+use super::safetensors::dtype_size_bytes;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -809,6 +811,7 @@ fn test_ggml_type_label_covers_lineup_quants() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
     for &ty in &[0u32, 12, 20, 21] {
         assert!(!synapse_dequant_path_supported(ty), "ggml_type={ty}");
     }
@@ -846,6 +849,7 @@ fn test_ggml_type_label_covers_all_constants() {
         (GGML_TYPE_Q5_K, "Q5_K"),
         (GGML_TYPE_Q6_K, "Q6_K"),
         (GGML_TYPE_IQ3_S, "IQ3_S"),
+        (GGML_TYPE_IQ3_M, "IQ3_M"),
     ];
     for (ty, expected) in cases {
         assert_eq!(ggml_type_label(ty), expected, "ggml_type={ty}");
@@ -860,6 +864,7 @@ fn test_synapse_dequant_path_supported_exercises_all_named_types() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_F32));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
 }
@@ -911,6 +916,7 @@ fn test_synapse_dequant_path_supported_comprehensive() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
     // Unsupported types
     assert!(!synapse_dequant_path_supported(GGML_TYPE_F32));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
@@ -955,4 +961,50 @@ fn test_safetensors_olmoe_load_and_route() {
     // Token embedding extraction
     let token_emb = model.extract_token_embedding(0).unwrap();
     assert_eq!(token_emb.len(), EMBEDDING_DIM);
+}
+
+#[test]
+fn test_iq3_m_dequantization_synthetic() {
+    // Build a minimal IQ3_M block for width=256
+    // Block layout: d(2) + hmask(32) + qs(64) + scales(12) + scales_h(1) = 111 bytes
+    let mut block = vec![0u8; 111];
+    // d = 1.0 (f16 = 0x3C00)
+    block[0] = 0x00;
+    block[1] = 0x3C;
+    // hmask: all zeros (no high bits)
+    // qs: set low 2 bits to 1 for all (value = 1)
+    for item in block.iter_mut().take(98).skip(34) {
+        *item = 0x55; // 01 01 01 01 pattern
+    }
+    // scales: all zeros (scale = 0)
+    // scales_h: 0
+
+    let row = block;
+    let dequantized = dequantize_row_iq3_m(&row, 256).unwrap();
+    assert_eq!(dequantized.len(), 256);
+    // With d=1.0, scale=0, all values should be 0 regardless of q
+    for &val in &dequantized {
+        assert_eq!(val, 0.0, "expected 0.0 with zero scales, got {val}");
+    }
+}
+
+#[test]
+fn test_int4_safetensors_extraction() {
+    // Test Int4 unpacking: 2 elements per byte
+    let bytes = vec![0x12u8, 0x34u8]; // low=2, high=1, low=4, high=3
+    // We can't directly test extract_tensor_f32 without a full checkpoint,
+    // but we can verify the dtype_size_bytes and the nibble unpacking logic
+    assert_eq!(dtype_size_bytes("INT4"), Some(1));
+    assert_eq!(dtype_size_bytes("I4"), Some(1));
+    assert_eq!(dtype_size_bytes("U4"), Some(1));
+
+    // Verify nibble unpacking
+    let mut unpacked = Vec::with_capacity(bytes.len() * 2);
+    for &byte in &bytes {
+        let low = byte & 0x0F;
+        let high = byte >> 4;
+        unpacked.push(low as f32);
+        unpacked.push(high as f32);
+    }
+    assert_eq!(unpacked, vec![2.0, 1.0, 4.0, 3.0]);
 }

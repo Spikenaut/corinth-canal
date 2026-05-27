@@ -1,7 +1,7 @@
 //! GGUF checkpoint parsing and mapped tensor access for the router bridge.
 
 use super::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
     GGUF_MAGIC, GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL, GGUF_VALUE_TYPE_FLOAT32,
     GGUF_VALUE_TYPE_FLOAT64, GGUF_VALUE_TYPE_INT8, GGUF_VALUE_TYPE_INT16, GGUF_VALUE_TYPE_INT32,
     GGUF_VALUE_TYPE_INT64, GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT8, GGUF_VALUE_TYPE_UINT16,
@@ -586,6 +586,42 @@ impl MappedGgufCheckpoint {
         }
         Ok(out)
     }
+
+    /// Dequantize a full IQ3_M tensor to a flat `Vec<f32>`.
+    ///
+    /// Iterates over every row of the tensor and applies the IQ3_M
+    /// block-scale dequantization, producing `dims[0] * dims[1]` output
+    /// elements laid out row-major. `dims[0]` must be divisible by 256.
+    #[allow(dead_code)]
+    pub(super) fn dequantize_iq3_m_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+        let info = self.tensor_info(name, path)?.clone();
+        if info.ggml_type != GGML_TYPE_IQ3_M {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' must be IQ3_M, got ggml_type={}",
+                info.ggml_type
+            )));
+        }
+        if info.dims.is_empty() {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{name}' has no dimensions"
+            )));
+        }
+        let width = info.dims[0];
+        let n_rows = info.dims.get(1).copied().unwrap_or(1);
+        let capacity = width
+            .checked_mul(n_rows)
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: path.to_owned(),
+                reason: format!("tensor '{name}' element count overflow ({width}x{n_rows})"),
+            })?;
+        let mut out = Vec::with_capacity(capacity);
+        for row in 0..n_rows {
+            let row_bytes = self.row_bytes(&info, row, path, name)?;
+            let dequantized = dequantize_row_iq3_m(row_bytes, width)?;
+            out.extend_from_slice(&dequantized);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(feature = "cuda")]
@@ -709,13 +745,22 @@ fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
             // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
             Ok((width / 256) * 210)
         }
+        GGML_TYPE_IQ3_M => {
+            if !width.is_multiple_of(256) {
+                return Err(HybridError::UnsupportedFormat(format!(
+                    "IQ3_M tensor width {width} is not divisible by 256"
+                )));
+            }
+            // IQ3_M block: d(2) + hmask(32) + qs(64) + scales(12) + scales_h(1) = 111 bytes
+            Ok((width / 256) * 111)
+        }
         other => Err(HybridError::UnsupportedFormat(format!(
             "row-size lookup is not implemented for ggml_type={other}"
         ))),
     }
 }
 
-fn dequantize_row_q8_0(row: &[u8], width: usize) -> Result<Vec<f32>> {
+pub(super) fn dequantize_row_q8_0(row: &[u8], width: usize) -> Result<Vec<f32>> {
     if !width.is_multiple_of(32) {
         return Err(HybridError::UnsupportedFormat(format!(
             "Q8_0 width {width} is not divisible by 32"
@@ -732,7 +777,7 @@ fn dequantize_row_q8_0(row: &[u8], width: usize) -> Result<Vec<f32>> {
     Ok(out)
 }
 
-fn dequantize_row_q5_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
+pub(super) fn dequantize_row_q5_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
     if !width.is_multiple_of(256) {
         return Err(HybridError::UnsupportedFormat(format!(
             "Q5_K width {width} is not divisible by 256"
@@ -775,7 +820,7 @@ fn dequantize_row_q5_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
     Ok(out)
 }
 
-fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
+pub(super) fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
     if !width.is_multiple_of(256) {
         return Err(HybridError::ModelLoad {
             path: "".into(),
@@ -821,6 +866,73 @@ fn dequantize_row_q6_k(row: &[u8], width: usize) -> Result<Vec<f32>> {
                 out.push(d * (scales[sc_pass_base + is + 4] as i8) as f32 * q3 as f32);
                 out.push(d * (scales[sc_pass_base + is + 6] as i8) as f32 * q4 as f32);
             }
+        }
+    }
+    Ok(out)
+}
+
+pub(super) fn dequantize_row_iq3_m(row: &[u8], width: usize) -> Result<Vec<f32>> {
+    if !width.is_multiple_of(256) {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "IQ3_M width {width} is not divisible by 256"
+        )));
+    }
+    let expected_len = (width / 256) * 111;
+    if row.len() != expected_len {
+        return Err(HybridError::ModelLoad {
+            path: "".into(),
+            reason: format!(
+                "IQ3_M row length mismatch: expected {expected_len} bytes for width {width}, got {}",
+                row.len()
+            ),
+        });
+    }
+    let mut out = Vec::with_capacity(width);
+    for block in row.chunks_exact(111) {
+        let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+        let hmask = &block[2..34]; // 32 bytes
+        let qs = &block[34..98]; // 64 bytes
+        let scales = &block[98..110]; // 12 bytes
+        let _scales_h = block[110]; // 1 byte
+
+        // Decode 6-bit scales from 12 bytes (16 scales total, 6 bits each)
+        // 12 bytes * 8 bits = 96 bits; 96 / 6 = 16 scales
+        let mut sc = [0u8; 16];
+        let mut bit_pos = 0usize;
+        for sc_val in sc.iter_mut() {
+            let byte_idx = bit_pos / 8;
+            let bit_shift = bit_pos % 8;
+            let mut val = if byte_idx < 12 {
+                (scales[byte_idx] >> bit_shift) & 0x3F
+            } else {
+                0
+            };
+            if bit_shift > 2 && byte_idx + 1 < 12 {
+                let rem = 6 - (8 - bit_shift);
+                val |= (scales[byte_idx + 1] & ((1 << rem) - 1)) << (8 - bit_shift);
+            }
+            *sc_val = val;
+            bit_pos += 6;
+        }
+
+        // Unpack 3-bit values from qs (64 bytes -> 256 values, 2 values per byte with hmask)
+        for i in 0..256 {
+            let qs_byte = qs[i / 4];
+            let qs_shift = (i % 4) * 2;
+            let low_2 = (qs_byte >> qs_shift) & 0x03;
+
+            let hmask_byte = hmask[i / 8];
+            let hmask_shift = i % 8;
+            let high_bit = (hmask_byte >> hmask_shift) & 0x01;
+
+            let q = low_2 | (high_bit << 2); // 3-bit value 0..7
+
+            // Convert to signed: center around 4 (0..7 -> -3..4)
+            let q_signed = q as i8 - 3;
+
+            let scale_idx = i / 16;
+            let scale = sc[scale_idx] as f32;
+            out.push(d * scale * q_signed as f32);
         }
     }
     Ok(out)
