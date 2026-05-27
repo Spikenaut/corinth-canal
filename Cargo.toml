@@ -26,7 +26,6 @@ opentelemetry = "0.32.0"
 opentelemetry_sdk = "0.32.0"
 opentelemetry-otlp = { version = "0.32.0", features = ["http-proto", "reqwest-blocking-client", "reqwest-rustls"] }
 toml    = "0.8"
-tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 
 [build-dependencies]
