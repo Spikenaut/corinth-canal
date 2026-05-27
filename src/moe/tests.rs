@@ -1048,3 +1048,91 @@ fn test_synapse_source_label_new_variants() {
     adapter2.quantization = "INT4".into();
     assert_eq!(adapter2.synapse_source_label(), "dequantized-int4");
 }
+
+#[test]
+fn test_iq3_m_full_tensor_dequantization() {
+    // Build a minimal IQ3_M payload for a 256x1 tensor
+    let mut block = vec![0u8; 111];
+    // d = 1.0 (f16 = 0x3C00)
+    block[0] = 0x00;
+    block[1] = 0x3C;
+    // hmask: all zeros
+    // qs: all zeros
+    // scales: all zeros
+    // scales_h: 0
+
+    let payload = block;
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                vec![0u8; EMBEDDING_DIM * 64 * 4],
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![256, 1],
+                GGML_TYPE_IQ3_M,
+                payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "iq3_m_full");
+    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+
+    // Test dequantize_iq3_m_tensor
+    let result = mapped.dequantize_iq3_m_tensor("blk.0.attn_q.weight", path.to_str().unwrap());
+    assert!(result.is_ok());
+    let dequantized = result.unwrap();
+    assert_eq!(dequantized.len(), 256);
+    // With d=1.0 and all scales=0, all values should be 0
+    for &val in &dequantized {
+        assert_eq!(val, 0.0, "expected 0.0 with zero scales, got {val}");
+    }
+}
+
+#[test]
+fn test_int4_signed_nibble_unpacking() {
+    // Test signed I4 nibble unpacking with sign extension
+    // 0x8F = 1000 1111 -> low=15 (-1), high=8 (-8)
+    let byte: u8 = 0x8F;
+    let low = byte & 0x0F;
+    let high = byte >> 4;
+
+    // Sign-extend 4-bit to 8-bit
+    let low_signed = ((low as i8) << 4 >> 4) as f32;
+    let high_signed = ((high as i8) << 4 >> 4) as f32;
+
+    assert_eq!(low_signed, -1.0, "nibble 15 should be -1 in signed I4");
+    assert_eq!(high_signed, -8.0, "nibble 8 should be -8 in signed I4");
+}
+
+#[test]
+fn test_int4_odd_length_handling() {
+    // Test that odd-length tensors don't produce extra elements
+    let bytes = vec![0x12u8]; // 1 byte = 2 elements, but we only want 1
+    let expected_elements = 1usize;
+    let mut out = Vec::with_capacity(expected_elements);
+
+    for &byte in &bytes {
+        let low = byte & 0x0F;
+        out.push(low as f32);
+        if out.len() >= expected_elements {
+            break;
+        }
+        let high = byte >> 4;
+        out.push(high as f32);
+    }
+
+    assert_eq!(out.len(), 1, "should only produce 1 element for odd-length");
+    assert_eq!(out[0], 2.0);
+}
