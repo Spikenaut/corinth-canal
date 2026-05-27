@@ -1007,7 +1007,10 @@ struct HfConfig {
 fn build_indexed_shard_map(
     root: &Path,
     index_path: &Path,
-) -> Result<(Vec<PathBuf>, std::collections::BTreeMap<String, TensorLocation>)> {
+) -> Result<(
+    Vec<PathBuf>,
+    std::collections::BTreeMap<String, TensorLocation>,
+)> {
     let raw_index = read_index(index_path)?;
     let mut shard_paths: Vec<PathBuf> = Vec::new();
     let mut tensor_map: std::collections::BTreeMap<String, TensorLocation> =
@@ -1038,7 +1041,10 @@ fn build_indexed_shard_map(
 
 fn build_unsharded_shard_map(
     shards: &[PathBuf],
-) -> Result<(Vec<PathBuf>, std::collections::BTreeMap<String, TensorLocation>)> {
+) -> Result<(
+    Vec<PathBuf>,
+    std::collections::BTreeMap<String, TensorLocation>,
+)> {
     let mut tensor_map: std::collections::BTreeMap<String, TensorLocation> =
         std::collections::BTreeMap::new();
     for (shard_idx, shard_path) in shards.iter().enumerate() {
@@ -1253,9 +1259,7 @@ impl MappedSafetensorsCheckpoint {
             if loc.dtype.is_empty() {
                 return Err(model_load(
                     &shard_paths[loc.shard_idx],
-                    format!(
-                        "tensor '{name}' listed in weight_map but missing from shard header"
-                    ),
+                    format!("tensor '{name}' listed in weight_map but missing from shard header"),
                 ));
             }
         }
