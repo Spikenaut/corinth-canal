@@ -13,11 +13,19 @@ fn parse_family_slug(value: &str) -> Option<ModelFamily> {
         "granite" | "granite_3_1" | "granite_3_1_a800m" | "granite31a800m" => {
             Some(ModelFamily::Granite31A800M)
         }
-        "nemotron" | "nemotron_3_nano_4b" | "nemotron3nano4b" => Some(ModelFamily::Nemotron3Nano4B),
+        "nemotron" | "nemotron_3_nano_4b" | "nemotron3nano4b" => Some(ModelFamily::Nemotron),
         "lfm2" | "lfm2_moe" | "lfm2moe" => Some(ModelFamily::Lfm2Moe),
         "slim_moe" | "slimmoe" | "phi_moe" | "phimoe" => Some(ModelFamily::SlimMoe),
         "zaya" | "zaya1" | "zaya1_8b" => Some(ModelFamily::Zaya),
         "glm4" | "glm_4" | "glm4moe" | "glm" => Some(ModelFamily::Glm4),
+        "gpt_oss" | "gptoss" => Some(ModelFamily::GptOss),
+        "step" | "step3" | "step_3_5" => Some(ModelFamily::Step),
+        "minimax" | "minimax_m2" => Some(ModelFamily::MiniMax),
+        "cohere" | "command_a" => Some(ModelFamily::Cohere),
+        "grin" | "grin_moe" => Some(ModelFamily::Grin),
+        "skyworks" | "skywork" => Some(ModelFamily::Skyworks),
+        "trinity" | "trinity_nano" => Some(ModelFamily::Trinity),
+        "grok" | "grok_1" | "grok_2" => Some(ModelFamily::Grok),
         _ => None,
     }
 }

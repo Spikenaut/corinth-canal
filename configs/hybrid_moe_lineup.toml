@@ -1,0 +1,15 @@
+## Hybrid MoE lineup with machine-specific paths.
+
+# ── MET-55: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16 (Hybrid MoE / Mamba-Attention, single shard) ──
+[[model]]
+slug = "nemotron_3_nano_4b"
+family = "nemotron"
+path = "/absolute/path/to/.models/safetensors/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/model.safetensors"
+target = "local"
+
+# ── lfm2-8b-a1b (Hybrid MoE / Conv-Attention, 4 shards, BF16) ──
+[[model]]
+slug = "lfm2_8b_a1b"
+family = "lfm2_moe"
+path = "/absolute/path/to/.models/safetensors/lfm2-8b-a1b"
+target = "local"

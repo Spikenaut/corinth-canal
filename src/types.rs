@@ -18,11 +18,19 @@ pub enum ModelFamily {
     LlamaMoe,
     Moonlight16BA3B,
     Granite31A800M,
-    Nemotron3Nano4B,
+    Nemotron,
     Lfm2Moe,
     SlimMoe,
     Zaya,
     Glm4,
+    GptOss,
+    Step,
+    MiniMax,
+    Cohere,
+    Grin,
+    Skyworks,
+    Trinity,
+    Grok,
 }
 
 impl ModelFamily {
@@ -35,11 +43,19 @@ impl ModelFamily {
             Self::LlamaMoe => "llama_moe",
             Self::Moonlight16BA3B => "moonlight_16b_a3b",
             Self::Granite31A800M => "granite_3_1_a800m",
-            Self::Nemotron3Nano4B => "nemotron_3_nano_4b",
+            Self::Nemotron => "nemotron",
             Self::Lfm2Moe => "lfm2_moe",
             Self::SlimMoe => "slim_moe",
             Self::Zaya => "zaya",
             Self::Glm4 => "glm4",
+            Self::GptOss => "gpt_oss",
+            Self::Step => "step",
+            Self::MiniMax => "minimax",
+            Self::Cohere => "cohere",
+            Self::Grin => "grin",
+            Self::Skyworks => "skyworks",
+            Self::Trinity => "trinity",
+            Self::Grok => "grok",
         }
     }
 }
@@ -216,9 +232,17 @@ mod tests {
         assert_eq!(ModelFamily::Glm4.slug(), "glm4");
         assert_eq!(ModelFamily::Moonlight16BA3B.slug(), "moonlight_16b_a3b");
         assert_eq!(ModelFamily::Granite31A800M.slug(), "granite_3_1_a800m");
-        assert_eq!(ModelFamily::Nemotron3Nano4B.slug(), "nemotron_3_nano_4b");
+        assert_eq!(ModelFamily::Nemotron.slug(), "nemotron");
         assert_eq!(ModelFamily::Lfm2Moe.slug(), "lfm2_moe");
         assert_eq!(ModelFamily::SlimMoe.slug(), "slim_moe");
+        assert_eq!(ModelFamily::GptOss.slug(), "gpt_oss");
+        assert_eq!(ModelFamily::Step.slug(), "step");
+        assert_eq!(ModelFamily::MiniMax.slug(), "minimax");
+        assert_eq!(ModelFamily::Cohere.slug(), "cohere");
+        assert_eq!(ModelFamily::Grin.slug(), "grin");
+        assert_eq!(ModelFamily::Skyworks.slug(), "skyworks");
+        assert_eq!(ModelFamily::Trinity.slug(), "trinity");
+        assert_eq!(ModelFamily::Grok.slug(), "grok");
     }
 
     #[test]
@@ -252,6 +276,20 @@ mod tests {
             required_env_vars: vec!["PATH".into()],
         };
         assert!(local_dense.cloud_provider_available());
+
+        let nemotron = CloudModelSpec {
+            slug: "nemotron-test".into(),
+            family: Some(ModelFamily::Nemotron),
+            cloud_model_id: "nvidia/nemotron-test".into(),
+            source_url: "https://example.invalid/nemotron".into(),
+            target: ModelTarget::Cloud,
+            architecture: ModelArchitectureClass::Moe,
+            active_params: "4B".into(),
+            total_params: "4B".into(),
+            provider_format: "nvcf-nim".into(),
+            required_env_vars: vec!["PATH".into()],
+        };
+        assert!(nemotron.cloud_provider_available());
     }
 
     #[test]

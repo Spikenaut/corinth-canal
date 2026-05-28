@@ -300,9 +300,17 @@ fn infer_family_safetensors(
         "Gemma4ForCausalLM" => ModelFamily::Gemma4,
         "DeepseekV2ForCausalLM" => ModelFamily::DeepSeek2,
         "LlamaMoeForCausalLM" => ModelFamily::LlamaMoe,
-        "NemotronHForCausalLM" => ModelFamily::Nemotron3Nano4B,
+        "NemotronHForCausalLM" => ModelFamily::Nemotron,
         "Lfm2MoeForCausalLM" => ModelFamily::Lfm2Moe,
         "PhiMoEForCausalLM" => ModelFamily::SlimMoe,
+        "GptOssForCausalLM" => ModelFamily::GptOss,
+        "Step3ForCausalLM" => ModelFamily::Step,
+        "MiniMaxForCausalLM" => ModelFamily::MiniMax,
+        "CohereForCausalLM" => ModelFamily::Cohere,
+        "GrinMoeForCausalLM" => ModelFamily::Grin,
+        "SkyworkMoeForCausalLM" => ModelFamily::Skyworks,
+        "TrinityForCausalLM" => ModelFamily::Trinity,
+        "GrokForCausalLM" => ModelFamily::Grok,
         other => {
             return Err(HybridError::UnsupportedFormat(format!(
                 "unsupported Safetensors architecture '{other}' in '{path}'"
@@ -335,11 +343,19 @@ fn infer_family(
         "llama" => ModelFamily::LlamaMoe,
         "moonlight" => ModelFamily::Moonlight16BA3B,
         "granite" | "granitemoe" => ModelFamily::Granite31A800M,
-        "nemotronh" => ModelFamily::Nemotron3Nano4B,
+        "nemotronh" => ModelFamily::Nemotron,
         "lfm2" | "lfm2moe" => ModelFamily::Lfm2Moe,
         "phimoe" | "slimmoe" => ModelFamily::SlimMoe,
         "zaya" => ModelFamily::Zaya,
         "glm4" | "glm4moe" => ModelFamily::Glm4,
+        "gptoss" => ModelFamily::GptOss,
+        "step" | "step3" => ModelFamily::Step,
+        "minimax" => ModelFamily::MiniMax,
+        "cohere" => ModelFamily::Cohere,
+        "grin" | "grinmoe" => ModelFamily::Grin,
+        "skyworks" | "skyworkmoe" => ModelFamily::Skyworks,
+        "trinity" => ModelFamily::Trinity,
+        "grok" => ModelFamily::Grok,
         other => {
             return Err(HybridError::UnsupportedFormat(format!(
                 "unsupported GGUF architecture '{other}' in '{path}'"
@@ -401,6 +417,42 @@ mod tests {
         assert_eq!(
             infer_family("granitemoe", None, "test.gguf").unwrap(),
             ModelFamily::Granite31A800M
+        );
+    }
+
+    #[test]
+    fn infer_family_supports_nemotron_architecture() {
+        assert_eq!(
+            infer_family("nemotronh", None, "test.gguf").unwrap(),
+            ModelFamily::Nemotron
+        );
+    }
+
+    #[test]
+    fn infer_family_supports_new_cloud_architectures() {
+        assert_eq!(
+            infer_family("gptoss", None, "test.gguf").unwrap(),
+            ModelFamily::GptOss
+        );
+        assert_eq!(
+            infer_family("step3", None, "test.gguf").unwrap(),
+            ModelFamily::Step
+        );
+        assert_eq!(
+            infer_family("grinmoe", None, "test.gguf").unwrap(),
+            ModelFamily::Grin
+        );
+        assert_eq!(
+            infer_family("skyworks", None, "test.gguf").unwrap(),
+            ModelFamily::Skyworks
+        );
+        assert_eq!(
+            infer_family("trinity", None, "test.gguf").unwrap(),
+            ModelFamily::Trinity
+        );
+        assert_eq!(
+            infer_family("grok", None, "test.gguf").unwrap(),
+            ModelFamily::Grok
         );
     }
 }

@@ -4,6 +4,7 @@
 //! `saaq_latent_calibration` and consumed by downstream tools such as
 //! `Surrogate_Viz.jl`.
 
+use crate::error::{HybridError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -148,4 +149,147 @@ pub struct ExperimentBundle {
     pub warnings: Vec<ExperimentWarning>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub metadata: BTreeMap<String, String>,
+}
+
+// ── Model adapter configuration ───────────────────────────────────────────
+
+/// Static per-model-family configuration used by the run matrix.
+///
+/// Emitted as `model_adapter_configs.toml` and consumed by the run matrix
+/// validator and `Surrogate_Viz.jl`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAdapterConfig {
+    pub model_family: String,
+    pub model_id_or_local_path: String,
+    pub format: String,
+    pub loader_hint: String,
+    pub router_policy: String,
+    pub norm_policy: String,
+    pub expert_policy: String,
+    pub supports_heartbeat: bool,
+    pub supports_route_metrics: bool,
+    pub supports_block_metrics: bool,
+    #[serde(default)]
+    pub preferred_quant_modes: Vec<String>,
+    #[serde(default)]
+    pub minimum_expected_artifacts: Vec<String>,
+    #[serde(default)]
+    pub known_risks: Vec<String>,
+}
+
+/// Dynamic per-run entry in the SAAQ run matrix.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunEntry {
+    pub run_id: String,
+    pub model_family: String,
+    pub model_id_or_path: String,
+    pub source_format: String,
+    pub quant_mode: String,
+    pub saaq_formula_version: String,
+    pub router_policy: String,
+    pub norm_policy: String,
+    pub telemetry_source: String,
+    pub output_root: String,
+    pub max_runtime_minutes: u64,
+    pub max_disk_gib: u64,
+    #[serde(default)]
+    pub expected_artifacts: Vec<String>,
+    #[serde(default)]
+    pub success_metrics: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
+}
+
+/// Full run matrix with validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunMatrix {
+    pub runs: Vec<RunEntry>,
+}
+
+impl RunMatrix {
+    /// Validate the run matrix.
+    ///
+    /// Checks:
+    /// - Every enabled run has explicit runtime and disk caps.
+    /// - Every enabled run has explicit router and norm policy.
+    /// - Grok-1 cannot be selected unless `GROK1_ARTIFACT_READY=1`.
+    /// - Unknown model families are rejected.
+    pub fn validate(&self) -> Result<()> {
+        let grok_ready = std::env::var("GROK1_ARTIFACT_READY").is_ok_and(|v| v == "1");
+
+        for run in &self.runs {
+            // Skip validation for explicitly skipped runs.
+            if run.skip_reason.is_some() {
+                continue;
+            }
+
+            // Runtime and disk caps must be present (non-zero).
+            if run.max_runtime_minutes == 0 {
+                return Err(HybridError::InvalidConfig(format!(
+                    "run '{}' missing max_runtime_minutes",
+                    run.run_id
+                )));
+            }
+            if run.max_disk_gib == 0 {
+                return Err(HybridError::InvalidConfig(format!(
+                    "run '{}' missing max_disk_gib",
+                    run.run_id
+                )));
+            }
+
+            // Router and norm policies must be explicit.
+            if run.router_policy.is_empty() {
+                return Err(HybridError::InvalidConfig(format!(
+                    "run '{}' missing router_policy",
+                    run.run_id
+                )));
+            }
+            if run.norm_policy.is_empty() {
+                return Err(HybridError::InvalidConfig(format!(
+                    "run '{}' missing norm_policy",
+                    run.run_id
+                )));
+            }
+
+            // Grok gate.
+            if run.model_family == "grok" && !grok_ready {
+                return Err(HybridError::InvalidConfig(format!(
+                    "run '{}' selects family 'grok' but GROK1_ARTIFACT_READY is not set to 1",
+                    run.run_id
+                )));
+            }
+
+            // Unknown family check (best-effort via slug matching).
+            let known_families: Vec<&str> = vec![
+                "olmoe",
+                "qwen3_moe",
+                "gemma4",
+                "deepseek2",
+                "llama_moe",
+                "moonlight_16b_a3b",
+                "granite_3_1_a800m",
+                "nemotron",
+                "lfm2_moe",
+                "slim_moe",
+                "zaya",
+                "glm4",
+                "gpt_oss",
+                "step",
+                "minimax",
+                "cohere",
+                "grin",
+                "skyworks",
+                "trinity",
+                "grok",
+            ];
+            if !known_families.contains(&run.model_family.as_str()) {
+                return Err(HybridError::InvalidConfig(format!(
+                    "run '{}' uses unknown model_family '{}'",
+                    run.run_id, run.model_family
+                )));
+            }
+        }
+
+        Ok(())
+    }
 }
