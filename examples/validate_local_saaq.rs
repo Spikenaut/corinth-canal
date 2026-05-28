@@ -17,13 +17,13 @@ use std::path::Path;
 use std::process;
 
 fn resolve_env_path(raw: &str) -> (String, bool) {
-    if let Some(env_val) = raw.strip_prefix("$") {
-        if let Some(var_name) = env_val.split('/').next() {
-            if let Ok(val) = std::env::var(var_name) {
-                return (raw.replacen(&format!("${}", var_name), &val, 1), true);
-            }
-            return (raw.to_string(), false);
+    if let Some(env_val) = raw.strip_prefix("$")
+        && let Some(var_name) = env_val.split('/').next()
+    {
+        if let Ok(val) = std::env::var(var_name) {
+            return (raw.replacen(&format!("${}", var_name), &val, 1), true);
         }
+        return (raw.to_string(), false);
     }
     (raw.to_string(), true)
 }
