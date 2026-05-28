@@ -13,11 +13,19 @@ fn parse_family_slug(value: &str) -> Option<ModelFamily> {
         "granite" | "granite_3_1" | "granite_3_1_a800m" | "granite31a800m" => {
             Some(ModelFamily::Granite31A800M)
         }
-        "nemotron" | "nemotron_3_nano_4b" | "nemotron3nano4b" => Some(ModelFamily::Nemotron3Nano4B),
+        "nemotron" | "nemotron_3_nano_4b" | "nemotron3nano4b" => Some(ModelFamily::Nemotron),
         "lfm2" | "lfm2_moe" | "lfm2moe" => Some(ModelFamily::Lfm2Moe),
         "slim_moe" | "slimmoe" | "phi_moe" | "phimoe" => Some(ModelFamily::SlimMoe),
         "zaya" | "zaya1" | "zaya1_8b" => Some(ModelFamily::Zaya),
         "glm4" | "glm_4" | "glm4moe" | "glm" => Some(ModelFamily::Glm4),
+        "gpt_oss" | "gptoss" => Some(ModelFamily::GptOss),
+        "step" | "step3" | "step_3_5" => Some(ModelFamily::Step),
+        "minimax" | "minimax_m2" => Some(ModelFamily::MiniMax),
+        "cohere" | "command_a" => Some(ModelFamily::Cohere),
+        "grin" | "grin_moe" => Some(ModelFamily::Grin),
+        "skyworks" | "skywork" => Some(ModelFamily::Skyworks),
+        "trinity" | "trinity_nano" => Some(ModelFamily::Trinity),
+        "grok" | "grok_1" | "grok_2" => Some(ModelFamily::Grok),
         _ => None,
     }
 }
@@ -47,6 +55,7 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
         active_params: String,
         total_params: String,
         provider_format: String,
+        #[serde(default)]
         required_env_vars: Vec<String>,
     }
 
@@ -83,11 +92,10 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
             );
         }
         if entry.required_env_vars.is_empty() {
-            return Err(format!(
-                "cloud_lineup: required_env_vars must be non-empty for slug={}",
+            eprintln!(
+                "cloud_lineup: no required_env_vars for slug={}; cloud models are download-on-GPU, skipping guard",
                 entry.slug
-            )
-            .into());
+            );
         }
         let spec = CloudModelSpec {
             slug: entry.slug.clone(),
@@ -108,16 +116,18 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
                 .iter()
                 .filter(|var| !std::env::var(var).is_ok_and(|v| !v.is_empty()))
                 .collect();
-            eprintln!(
-                "cloud_lineup: provider unavailable for slug={} ({}): missing env vars: {}",
-                entry.slug,
-                entry.cloud_model_id,
-                unset
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+            if !unset.is_empty() {
+                eprintln!(
+                    "cloud_lineup: provider unavailable for slug={} ({}): missing env vars: {}",
+                    entry.slug,
+                    entry.cloud_model_id,
+                    unset
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
         }
 
         out.push(spec);
@@ -131,11 +141,7 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
 /// describing any that are missing.
 pub fn cloud_execution_guard(entry: &CloudModelSpec) -> Result<(), String> {
     if entry.required_env_vars.is_empty() {
-        return Err(format!(
-            "cloud model '{}' ({}) cannot execute: required_env_vars is empty. \
-             Cloud lineup entries must declare credential env var names.",
-            entry.slug, entry.cloud_model_id
-        ));
+        return Ok(());
     }
     let unset: Vec<_> = entry
         .required_env_vars

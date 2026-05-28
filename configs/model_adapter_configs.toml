@@ -1,0 +1,340 @@
+# corinth-canal model adapter configurations.
+#
+# Static per-family metadata consumed by the run matrix validator and
+# `Surrogate_Viz.jl`. Each [[adapter]] entry describes the policies and
+# capabilities for one model family.
+#
+# Fields:
+#   model_family              family slug (must match ModelFamily::slug())
+#   model_id_or_local_path    canonical HF model ID or local path pattern
+#   format                    checkpoint format: "gguf" | "safetensors" | "custom_artifact"
+#   loader_hint               loader backend hint: "gguf" | "safetensors" | "vllm" | "sglang"
+#   router_policy             how to handle router tensors: "protect" | "quantize" | "drop"
+#   norm_policy               how to handle norm tensors: "protect" | "quantize" | "drop"
+#   expert_policy             how to handle expert tensors: "protect" | "quantize" | "drop"
+#   supports_heartbeat        whether the family supports heartbeat telemetry
+#   supports_route_metrics    whether the family supports per-route metrics
+#   supports_block_metrics    whether the family supports per-block metrics
+#   preferred_quant_modes     list of preferred quantization modes
+#   minimum_expected_artifacts  list of artifacts every run must produce
+#   known_risks               list of known risks or caveats
+
+# ── OLMoE family ──
+[[adapter]]
+model_family = "olmoe"
+model_id_or_local_path = "allenai/OLMoE-1B-7B-0125-Instruct"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["q8_0", "q6_k", "q5_k"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Small model: may show high variance across runs"]
+
+# ── Qwen3 MoE family ──
+[[adapter]]
+model_family = "qwen3_moe"
+model_id_or_local_path = "Qwen/Qwen3-MoE"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["iq3_m", "q8_0", "q6_k"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["IQ3_M dequant path is new and lightly tested"]
+
+# ── Gemma4 family ──
+[[adapter]]
+model_family = "gemma4"
+model_id_or_local_path = "google/gemma-4-26B-A4B"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["iq4_nl", "q8_0"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Multimodal model: vision encoder not exercised by SAAQ"]
+
+# ── DeepSeek2 family ──
+[[adapter]]
+model_family = "deepseek2"
+model_id_or_local_path = "deepseek-ai/DeepSeek-V2-Lite"
+format = "gguf"
+loader_hint = "gguf"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["q6_k", "q8_0", "q5_k"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Q6_K dequant path validated; Q5_K path available"]
+
+# ── Llama MoE family ──
+[[adapter]]
+model_family = "llama_moe"
+model_id_or_local_path = "meta-llama/Llama-4-Scout-17B-16E"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["q8_0", "q5_k"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Large model: high VRAM requirements"]
+
+# ── Moonlight family ──
+[[adapter]]
+model_family = "moonlight_16b_a3b"
+model_id_or_local_path = "moonshotai/Moonlight-16B-A3B"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bnb_4bit", "q8_0"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["BNB 4-bit path uses synthetic fallback"]
+
+# ── Granite family ──
+[[adapter]]
+model_family = "granite_3_1_a800m"
+model_id_or_local_path = "ibm-granite/granite-3.1-3b-a800m-base"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["q8_0", "q5_k"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = []
+
+# ── Nemotron family ──
+[[adapter]]
+model_family = "nemotron"
+model_id_or_local_path = "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bf16", "q8_0"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Hybrid MoE / Mamba-Attention: router topology differs from standard MoE"]
+
+# ── LFM2 family ──
+[[adapter]]
+model_family = "lfm2_moe"
+model_id_or_local_path = "lfm2-8b-a1b"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bf16", "q8_0"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Conv-Attention hybrid: temporal routing may differ"]
+
+# ── Slim MoE family ──
+[[adapter]]
+model_family = "slim_moe"
+model_id_or_local_path = "microsoft/Phi-tiny-MoE-instruct"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["q8_0", "q5_k"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Small model: high variance across runs"]
+
+# ── Zaya family ──
+[[adapter]]
+model_family = "zaya"
+model_id_or_local_path = "Zyphra/ZAYA1-8B"
+format = "gguf"
+loader_hint = "gguf"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["q8_0"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Small model: high variance across runs"]
+
+# ── GLM4 family ──
+[[adapter]]
+model_family = "glm4"
+model_id_or_local_path = "zai-org/GLM-4.6V-Flash"
+format = "gguf"
+loader_hint = "gguf"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["q8_0", "q6_k"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["VLM: vision encoder not exercised by SAAQ"]
+
+# ── GPT-OSS family ──
+[[adapter]]
+model_family = "gpt_oss"
+model_id_or_local_path = "openai/gpt-oss-120b"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["mxfp4", "bf16"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["120B model: requires single H100 or larger; MXFP4 quantization validated"]
+
+# ── Step family ──
+[[adapter]]
+model_family = "step"
+model_id_or_local_path = "stepfun-ai/Step-3.5-Flash"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bf16", "fp8"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["196B model: requires 8x GPU for full throughput"]
+
+# ── MiniMax family ──
+[[adapter]]
+model_family = "minimax"
+model_id_or_local_path = "MiniMaxAI/MiniMax-M2.7"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bf16", "fp8"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["229B model: very large; FP8 recommended"]
+
+# ── Cohere family ──
+[[adapter]]
+model_family = "cohere"
+model_id_or_local_path = "CohereLabs/command-a-plus-05-2026-bf16"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bf16", "fp8", "w4a4"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["218B model: large; W4A4 quantization recommended for efficiency"]
+
+# ── Grin family ──
+[[adapter]]
+model_family = "grin"
+model_id_or_local_path = "microsoft/GRIN-MoE"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bf16", "q8_0"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Gradient-informed routing: may show different load-balancing behavior"]
+
+# ── Skyworks family ──
+[[adapter]]
+model_family = "skyworks"
+model_id_or_local_path = "Skywork/Skywork-MoE-Base-FP8"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["fp8", "bf16"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["146B model: FP8 weights available; custom vLLM branch may be needed"]
+
+# ── Trinity family ──
+[[adapter]]
+model_family = "trinity"
+model_id_or_local_path = "arcee-ai/Trinity-Nano-Base"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["bf16", "q8_0"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Local model: paths must be configured per-machine"]
+
+# ── Grok family ──
+[[adapter]]
+model_family = "grok"
+model_id_or_local_path = "xai-org/grok-1"
+format = "safetensors"
+loader_hint = "safetensors"
+router_policy = "protect"
+norm_policy = "protect"
+expert_policy = "quantize"
+supports_heartbeat = true
+supports_route_metrics = true
+supports_block_metrics = true
+preferred_quant_modes = ["int8", "bf16"]
+minimum_expected_artifacts = ["manifest.json", "summary.json", "metrics.json"]
+known_risks = ["Gated: requires GROK1_ARTIFACT_READY=1", "314B model: requires multi-GPU"]

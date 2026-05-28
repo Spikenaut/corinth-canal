@@ -5,3 +5,8 @@
 //! not tied to a specific example binary.
 
 pub mod schema;
+
+pub use schema::{
+    ExperimentBundle, ExperimentManifest, ExperimentMetrics, ExperimentSummary, ExperimentWarning,
+    ModelAdapterConfig, RunEntry, RunMatrix,
+};

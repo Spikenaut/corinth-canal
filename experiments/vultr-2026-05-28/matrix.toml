@@ -1,0 +1,365 @@
+# corinth-canal SAAQ run matrix for Vultr sprint 2026-05-28.
+#
+# This file defines the bounded multi-model experiment matrix.
+# Each [[run]] entry references a model family defined in
+# `configs/model_adapter_configs.toml`.
+#
+# Validation:
+#   cargo run --example validate_matrix -- experiments/vultr-2026-05-28/matrix.toml
+#
+# Fields:
+#   run_id              unique run identifier
+#   model_family        family slug (must match ModelFamily::slug())
+#   model_id_or_path    HF model ID or local path
+#   source_format       "gguf" | "safetensors" | "custom_artifact"
+#   quant_mode          quantization mode string
+#   saaq_formula_version  e.g. "saaq_v1_5"
+#   router_policy       "protect" | "quantize" | "drop"
+#   norm_policy         "protect" | "quantize" | "drop"
+#   telemetry_source    "synthetic" | "csv"
+#   output_root         artifact output directory
+#   max_runtime_minutes hard runtime cap (0 = disabled, but validation rejects 0)
+#   max_disk_gib        hard disk cap
+#   expected_artifacts  list of expected output files
+#   success_metrics     list of success criteria
+#   skip_reason         if set, run is skipped
+
+# ── Local baseline runs ──
+
+[[run]]
+run_id = "olmoe_baseline_q8_0"
+model_family = "olmoe"
+model_id_or_path = "allenai/OLMoE-1B-7B-0125-Instruct"
+source_format = "safetensors"
+quant_mode = "q8_0"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/olmoe_baseline_q8_0"
+max_runtime_minutes = 30
+max_disk_gib = 10
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "qwen3_moe_iq3_m"
+model_family = "qwen3_moe"
+model_id_or_path = "Qwen/Qwen3-MoE"
+source_format = "gguf"
+quant_mode = "iq3_m"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/qwen3_moe_iq3_m"
+max_runtime_minutes = 60
+max_disk_gib = 20
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "gemma4_26b_a4b_iq4_nl"
+model_family = "gemma4"
+model_id_or_path = "google/gemma-4-26B-A4B"
+source_format = "gguf"
+quant_mode = "iq4_nl"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/gemma4_26b_a4b_iq4_nl"
+max_runtime_minutes = 60
+max_disk_gib = 20
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "deepseek_v2_lite_q6_k"
+model_family = "deepseek2"
+model_id_or_path = "deepseek-ai/DeepSeek-V2-Lite"
+source_format = "gguf"
+quant_mode = "q6_k"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/deepseek_v2_lite_q6_k"
+max_runtime_minutes = 60
+max_disk_gib = 20
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "zaya1_8b_q8_0"
+model_family = "zaya"
+model_id_or_path = "Zyphra/ZAYA1-8B"
+source_format = "gguf"
+quant_mode = "q8_0"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/zaya1_8b_q8_0"
+max_runtime_minutes = 30
+max_disk_gib = 10
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "glm4_6v_flash_q8_0"
+model_family = "glm4"
+model_id_or_path = "zai-org/GLM-4.6V-Flash"
+source_format = "gguf"
+quant_mode = "q8_0"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/glm4_6v_flash_q8_0"
+max_runtime_minutes = 60
+max_disk_gib = 20
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+# ── Cloud runs (download-on-GPU) ──
+
+[[run]]
+run_id = "glm47_flash_cloud"
+model_family = "glm4"
+model_id_or_path = "zai-org/GLM-4.7-Flash"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/glm47_flash_cloud"
+max_runtime_minutes = 120
+max_disk_gib = 50
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "deepseek_v4_flash_cloud"
+model_family = "deepseek2"
+model_id_or_path = "deepseek-ai/DeepSeek-V4-Flash"
+source_format = "safetensors"
+quant_mode = "fp8"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/deepseek_v4_flash_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "gpt_oss_120b_cloud"
+model_family = "gpt_oss"
+model_id_or_path = "openai/gpt-oss-120b"
+source_format = "safetensors"
+quant_mode = "mxfp4"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/gpt_oss_120b_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "step_3_5_flash_cloud"
+model_family = "step"
+model_id_or_path = "stepfun-ai/Step-3.5-Flash"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/step_3_5_flash_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "minimax_m2_7_cloud"
+model_family = "minimax"
+model_id_or_path = "MiniMaxAI/MiniMax-M2.7"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/minimax_m2_7_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "cohere_command_a_plus_cloud"
+model_family = "cohere"
+model_id_or_path = "CohereLabs/command-a-plus-05-2026-bf16"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/cohere_command_a_plus_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "qwen3_6_35b_a3b_cloud"
+model_family = "qwen3_moe"
+model_id_or_path = "Qwen/Qwen3.6-35B-A3B"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/qwen3_6_35b_a3b_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "zaya1_8b_cloud"
+model_family = "zaya"
+model_id_or_path = "Zyphra/ZAYA1-8B"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/zaya1_8b_cloud"
+max_runtime_minutes = 120
+max_disk_gib = 50
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "emo_1b14b_cloud"
+model_family = "olmoe"
+model_id_or_path = "allenai/Emo_1b14b_1T"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/emo_1b14b_cloud"
+max_runtime_minutes = 120
+max_disk_gib = 50
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "gemma4_26b_a4b_cloud"
+model_family = "gemma4"
+model_id_or_path = "google/gemma-4-26B-A4B"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/gemma4_26b_a4b_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "llama4_scout_cloud"
+model_family = "llama_moe"
+model_id_or_path = "meta-llama/Llama-4-Scout-17B-16E-Original"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/llama4_scout_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "grin_moe_cloud"
+model_family = "grin"
+model_id_or_path = "microsoft/GRIN-MoE"
+source_format = "safetensors"
+quant_mode = "bf16"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/grin_moe_cloud"
+max_runtime_minutes = 120
+max_disk_gib = 50
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "skywork_moe_base_fp8_cloud"
+model_family = "skyworks"
+model_id_or_path = "Skywork/Skywork-MoE-Base-FP8"
+source_format = "safetensors"
+quant_mode = "fp8"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/skywork_moe_base_fp8_cloud"
+max_runtime_minutes = 180
+max_disk_gib = 100
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "grok_1_cloud"
+model_family = "grok"
+model_id_or_path = "xai-org/grok-1"
+source_format = "safetensors"
+quant_mode = "int8"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/grok_1_cloud"
+max_runtime_minutes = 240
+max_disk_gib = 150
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]
+
+[[run]]
+run_id = "grok_2_fp8_cloud"
+model_family = "grok"
+model_id_or_path = "TevunahAi/grok-2-FP8"
+source_format = "safetensors"
+quant_mode = "fp8"
+saaq_formula_version = "saaq_v1_5"
+router_policy = "protect"
+norm_policy = "protect"
+telemetry_source = "synthetic"
+output_root = "runs/grok_2_fp8_cloud"
+max_runtime_minutes = 240
+max_disk_gib = 150
+expected_artifacts = ["run_manifest.json", "summary.json", "tick_telemetry.txt", "latent_telemetry.csv"]
+success_metrics = ["ticks_completed > 0", "latent_rows > 0"]

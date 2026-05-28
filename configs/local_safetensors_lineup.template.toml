@@ -14,7 +14,8 @@
 #   slug          directory-safe identifier (used in artifact paths)
 #   family        optional model family for tensor classification heuristics
 #                 one of: olmoe | qwen3_moe | gemma4 | deepseek2 | llama_moe | zaya | glm4
-#                         | nemotron_3_nano_4b | lfm2_moe | granite_3_1_a800m | moonlight_16b_a3b
+#                         | nemotron | lfm2_moe | granite_3_1_a800m | moonlight_16b_a3b
+#                         | slim_moe | trinity
 #                 leave blank when no existing corinth-canal family matches
 #   path          absolute path to a .safetensors file, .safetensors.index.json,
 #                 or directory containing safetensors shards
@@ -32,7 +33,7 @@ target = "local"
 # ── MET-55: nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16 (Hybrid MoE / Mamba-Attention, single shard) ──
 [[model]]
 slug = "nemotron_3_nano_4b"
-family = "nemotron_3_nano_4b"
+family = "nemotron"
 path = "/absolute/path/to/.models/safetensors/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16/model.safetensors"
 target = "local"
 
@@ -53,7 +54,7 @@ target = "local"
 # ── MET-58: arcee-ai/Trinity-Nano-Base (MoE, 7 shards) ──
 [[model]]
 slug = "trinity_nano_base"
-family = "qwen3_moe"
+family = "trinity"
 path = "/absolute/path/to/.models/safetensors/arcee-ai/Trinity-Nano-Base"
 target = "local"
 
