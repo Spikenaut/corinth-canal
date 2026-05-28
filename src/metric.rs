@@ -1,4 +1,4 @@
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 pub(crate) fn mean_squared_error(output: &[f32], target: &[f32]) -> f32 {
     let len = output.len().min(target.len());
 

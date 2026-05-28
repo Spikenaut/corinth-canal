@@ -490,7 +490,7 @@ impl MappedGgufCheckpoint {
     /// Iterates over every row of the tensor and applies the Q8_0
     /// block-scale dequantization, producing `dims[0] * dims[1]` output
     /// elements laid out row-major. `dims[0]` must be divisible by 32.
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(super) fn dequantize_q8_0_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_Q8_0 {
@@ -526,7 +526,7 @@ impl MappedGgufCheckpoint {
     /// Iterates over every row of the tensor and applies the Q5_K
     /// block-scale dequantization, producing `dims[0] * dims[1]` output
     /// elements laid out row-major. `dims[0]` must be divisible by 256.
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(super) fn dequantize_q5_k_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_Q5_K {
@@ -556,7 +556,7 @@ impl MappedGgufCheckpoint {
         }
         Ok(out)
     }
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(super) fn dequantize_q6_k_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_Q6_K {
@@ -592,7 +592,7 @@ impl MappedGgufCheckpoint {
     /// Iterates over every row of the tensor and applies the IQ3_M
     /// block-scale dequantization, producing `dims[0] * dims[1]` output
     /// elements laid out row-major. `dims[0]` must be divisible by 256.
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(super) fn dequantize_iq3_m_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_IQ3_M {
@@ -975,7 +975,7 @@ fn quantization_label(file_type: Option<u32>) -> String {
     }
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 fn page_size_bytes(path: &str) -> Result<usize> {
     // SAFETY: `sysconf` is a pure query with no preconditions; valid to call at any time.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };

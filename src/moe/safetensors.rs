@@ -998,7 +998,8 @@ struct TensorLocation {
 
 #[derive(Debug)]
 struct MappedShard {
-    #[allow(dead_code)]
+    // Retained for debug introspection; read only under cfg(feature = "cuda").
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     path: PathBuf,
     mmap: Mmap,
     header_len: u64,

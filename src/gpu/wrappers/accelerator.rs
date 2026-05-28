@@ -196,43 +196,6 @@ impl GpuAccelerator {
             .map_err(|e| GpuError::LaunchFailed(format!("project_snapshot_current sync: {e:?}")))
     }
 
-    pub fn lif_step_tick(&mut self, neuron_count: usize) -> GpuResult<()> {
-        self.ensure_temporal_state(neuron_count)?;
-
-        let modules = self.modules.as_ref().ok_or(GpuError::NoGpu)?;
-        let lif_step = modules.get_function("lif_step")?;
-        let state = self
-            .temporal_state
-            .as_mut()
-            .ok_or_else(|| GpuError::MemoryError("temporal state not initialised".into()))?;
-        let stream = Self::new_stream()?;
-        let grid = Self::ceil_div_u32(neuron_count as u32, TEMPORAL_BLOCK_SIZE);
-
-        unsafe {
-            launch!(lif_step<<<grid, TEMPORAL_BLOCK_SIZE, TEMPORAL_SHARED_MEM_BYTES, stream>>>(
-                state.membrane.as_device_ptr(),
-                state.input_current.as_device_ptr(),
-                state.refractory.as_device_ptr(),
-                state.spikes_out.as_device_ptr(),
-                neuron_count as i32
-            ))
-            .map_err(|e| {
-                Self::ptx_launch_error(
-                    "lif_step",
-                    grid,
-                    TEMPORAL_BLOCK_SIZE,
-                    TEMPORAL_SHARED_MEM_BYTES,
-                    Some(neuron_count),
-                    e,
-                )
-            })?;
-        }
-
-        stream
-            .synchronize()
-            .map_err(|e| GpuError::LaunchFailed(format!("lif_step sync: {e:?}")))
-    }
-
     pub fn temporal_spikes_to_vec(&self, neuron_count: usize) -> GpuResult<Vec<u32>> {
         if !self.has_context() {
             return Err(GpuError::NoGpu);
@@ -255,19 +218,6 @@ impl GpuAccelerator {
             .ok_or_else(|| GpuError::MemoryError("temporal state not initialised".into()))?;
         Self::expect_len("temporal membrane", state.membrane.len(), neuron_count)?;
         state.membrane.to_vec()
-    }
-
-    /// Download current adaptation values (GIF state) from device.
-    pub fn temporal_adaptation_to_vec(&self, neuron_count: usize) -> GpuResult<Vec<f32>> {
-        if !self.has_context() {
-            return Err(GpuError::NoGpu);
-        }
-        let state = self
-            .temporal_state
-            .as_ref()
-            .ok_or_else(|| GpuError::MemoryError("temporal state not initialised".into()))?;
-        Self::expect_len("temporal adaptation", state.adaptation.len(), neuron_count)?;
-        state.adaptation.to_vec()
     }
 
     /// Upload a per-neuron temporal input vector into the resident `input_spikes` buffer.
