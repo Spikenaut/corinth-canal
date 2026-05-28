@@ -206,7 +206,7 @@ impl GpuAccelerator {
         let state = self
             .temporal_state
             .as_mut()
-            .ok_or_else(|| GpuError::MemoryError("temporal state not initialised'.into()))?;
+            .ok_or_else(|| GpuError::MemoryError("temporal state not initialised".into()))?;
         let stream = Self::new_stream()?;
         let grid = Self::ceil_div_u32(neuron_count as u32, TEMPORAL_BLOCK_SIZE);
 
@@ -266,7 +266,7 @@ impl GpuAccelerator {
         let state = self
             .temporal_state
             .as_ref()
-            .ok_or_else(|| GpuError::MemoryError("temporal state not initialised'.into()))?;
+            .ok_or_else(|| GpuError::MemoryError("temporal state not initialised".into()))?;
         Self::expect_len("temporal adaptation", state.adaptation.len(), neuron_count)?;
         state.adaptation.to_vec()
     }
