@@ -253,9 +253,7 @@ impl RunMatrix {
             }
 
             // Grok-1 gate: only block runs that specifically reference grok-1.
-            if run.model_family == "grok"
-                && run.model_id_or_path.contains("grok-1")
-                && !grok_ready
+            if run.model_family == "grok" && run.model_id_or_path.contains("grok-1") && !grok_ready
             {
                 return Err(HybridError::InvalidConfig(format!(
                     "run '{}' selects grok-1 but GROK1_ARTIFACT_READY is not set to 1",
