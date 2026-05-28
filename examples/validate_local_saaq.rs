@@ -92,16 +92,15 @@ fn main() {
                 path_errors += 1;
             }
 
-            if let Some(env_val) = run.model_id_or_path.strip_prefix("$") {
-                if let Some(var_name) = env_val.split('/').next() {
-                    if std::env::var(var_name).is_err() {
-                        warnings.push(format!(
-                            "run '{}': env var '{}' not set (from model_id_or_path '{}')",
-                            run.run_id, var_name, run.model_id_or_path
-                        ));
-                        path_errors += 1;
-                    }
-                }
+            if let Some(env_val) = run.model_id_or_path.strip_prefix("$")
+                && let Some(var_name) = env_val.split('/').next()
+                && std::env::var(var_name).is_err()
+            {
+                warnings.push(format!(
+                    "run '{}': env var '{}' not set (from model_id_or_path '{}')",
+                    run.run_id, var_name, run.model_id_or_path
+                ));
+                path_errors += 1;
             }
 
             let output_root = Path::new(&run.output_root);
