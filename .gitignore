@@ -44,3 +44,4 @@ configs/local_lineup.toml
 configs/local_gguf_lineup.toml
 configs/local_safetensors_lineup.toml
 configs/safetensors_lineup.toml
+.beads/
