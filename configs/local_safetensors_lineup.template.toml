@@ -71,3 +71,10 @@ slug = "moonlight_16b_a3b_bnb_4bit"
 family = "moonlight_16b_a3b"
 path = "/absolute/path/to/.models/safetensors/slowfastai/Moonlight-16B-A3B-bnb-4bit"
 target = "local"
+
+# ── Qwen-MoE-2.7B-Int4 (MoE, 3 shards, Int4 quantized safetensors) ──
+[[model]]
+slug = "qwen_moe_2_7b_int4"
+family = "qwen3_moe"
+path = "/absolute/path/to/Downloads/SNN_Quantization/Qwen-MoE-2.7B-Int4"
+target = "local"

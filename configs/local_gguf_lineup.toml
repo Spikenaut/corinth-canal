@@ -10,10 +10,11 @@ slug = "zaya1_8b_q8_0"
 family = "zaya"
 path = "/home/raulmc/.models/gguf/Abiray/ZAYA1-8B-GGUF/ZAYA1-8B-Q8_0.gguf"
 
-[[model]]
-slug = "glm_4_6v_flash_q8_0"
-family = "glm4"
-path = "/home/raulmc/.models/gguf/unsloth/GLM-4.6V-Flash-GGUF_Q8_0/GLM-4.6V-Flash-Q8_0.gguf"
+# GLM-4.6V-Flash is NOT MoE (dense model, no expert_count) — excluded from SAAQ campaign.
+# [[model]]
+# slug = "glm_4_6v_flash_q8_0"
+# family = "glm4"
+# path = "/home/raulmc/.models/gguf/unsloth/GLM-4.6V-Flash-GGUF_Q8_0/GLM-4.6V-Flash-Q8_0.gguf"
 
 [[model]]
 slug = "kimi_vl_a3b_q6_k"

@@ -371,10 +371,16 @@ fn infer_family(
     if let Some(expected) = family_override
         && expected != inferred
     {
-        return Err(HybridError::InvalidConfig(format!(
-            "model_family override {:?} does not match GGUF architecture '{architecture}'",
-            expected
-        )));
+        let compatible = matches!(
+            (expected, inferred),
+            (ModelFamily::Moonlight16BA3B, ModelFamily::DeepSeek2)
+        );
+        if !compatible {
+            return Err(HybridError::InvalidConfig(format!(
+                "model_family override {:?} does not match GGUF architecture '{architecture}'",
+                expected
+            )));
+        }
     }
 
     Ok(inferred)
