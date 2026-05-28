@@ -26,21 +26,13 @@ fn main() {
         }
     };
 
-    #[derive(serde::Deserialize)]
-    struct MatrixFile {
-        #[serde(rename = "run")]
-        runs: Vec<corinth_canal::RunEntry>,
-    }
-
-    let file: MatrixFile = match toml::from_str(&contents) {
+    let matrix: RunMatrix = match toml::from_str(&contents) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("Error parsing '{}': {}", path, e);
             process::exit(1);
         }
     };
-
-    let matrix = RunMatrix { runs: file.runs };
 
     println!("Loaded {} run(s) from '{}'", matrix.runs.len(), path);
 

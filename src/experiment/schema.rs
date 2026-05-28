@@ -203,6 +203,7 @@ pub struct RunEntry {
 /// Full run matrix with validation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunMatrix {
+    #[serde(rename = "run")]
     pub runs: Vec<RunEntry>,
 }
 
@@ -238,29 +239,31 @@ impl RunMatrix {
             }
 
             // Router and norm policies must be explicit.
-            if run.router_policy.is_empty() {
+            if run.router_policy.trim().is_empty() {
                 return Err(HybridError::InvalidConfig(format!(
                     "run '{}' missing router_policy",
                     run.run_id
                 )));
             }
-            if run.norm_policy.is_empty() {
+            if run.norm_policy.trim().is_empty() {
                 return Err(HybridError::InvalidConfig(format!(
                     "run '{}' missing norm_policy",
                     run.run_id
                 )));
             }
 
-            // Grok gate.
-            if run.model_family == "grok" && !grok_ready {
+            // Grok-1 gate: only block runs that specifically reference grok-1.
+            if run.model_family == "grok"
+                && run.model_id_or_path.contains("grok-1")
+                && !grok_ready
+            {
                 return Err(HybridError::InvalidConfig(format!(
-                    "run '{}' selects family 'grok' but GROK1_ARTIFACT_READY is not set to 1",
+                    "run '{}' selects grok-1 but GROK1_ARTIFACT_READY is not set to 1",
                     run.run_id
                 )));
             }
 
-            // Unknown family check (best-effort via slug matching).
-            let known_families: Vec<&str> = vec![
+            const KNOWN_FAMILIES: &[&str] = &[
                 "olmoe",
                 "qwen3_moe",
                 "gemma4",
@@ -282,7 +285,7 @@ impl RunMatrix {
                 "trinity",
                 "grok",
             ];
-            if !known_families.contains(&run.model_family.as_str()) {
+            if !KNOWN_FAMILIES.contains(&run.model_family.as_str()) {
                 return Err(HybridError::InvalidConfig(format!(
                     "run '{}' uses unknown model_family '{}'",
                     run.run_id, run.model_family

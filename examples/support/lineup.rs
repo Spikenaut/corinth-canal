@@ -55,6 +55,7 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
         active_params: String,
         total_params: String,
         provider_format: String,
+        #[serde(default)]
         required_env_vars: Vec<String>,
     }
 
@@ -91,11 +92,10 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
             );
         }
         if entry.required_env_vars.is_empty() {
-            return Err(format!(
-                "cloud_lineup: required_env_vars must be non-empty for slug={}",
+            eprintln!(
+                "cloud_lineup: no required_env_vars for slug={}; cloud models are download-on-GPU, skipping guard",
                 entry.slug
-            )
-            .into());
+            );
         }
         let spec = CloudModelSpec {
             slug: entry.slug.clone(),
@@ -116,16 +116,18 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
                 .iter()
                 .filter(|var| !std::env::var(var).is_ok_and(|v| !v.is_empty()))
                 .collect();
-            eprintln!(
-                "cloud_lineup: provider unavailable for slug={} ({}): missing env vars: {}",
-                entry.slug,
-                entry.cloud_model_id,
-                unset
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+            if !unset.is_empty() {
+                eprintln!(
+                    "cloud_lineup: provider unavailable for slug={} ({}): missing env vars: {}",
+                    entry.slug,
+                    entry.cloud_model_id,
+                    unset
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
         }
 
         out.push(spec);
@@ -139,11 +141,7 @@ pub fn load_cloud_lineup(path: &Path) -> Result<Vec<CloudModelSpec>, Box<dyn std
 /// describing any that are missing.
 pub fn cloud_execution_guard(entry: &CloudModelSpec) -> Result<(), String> {
     if entry.required_env_vars.is_empty() {
-        return Err(format!(
-            "cloud model '{}' ({}) cannot execute: required_env_vars is empty. \
-             Cloud lineup entries must declare credential env var names.",
-            entry.slug, entry.cloud_model_id
-        ));
+        return Ok(());
     }
     let unset: Vec<_> = entry
         .required_env_vars

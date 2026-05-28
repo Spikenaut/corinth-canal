@@ -1,4 +1,4 @@
-# Local-only SAAQ 1.5 lineup with machine-specific paths.
+# Local-only SAAQ 1.0 and 1.5 lineup with machine-specific paths.
 # This file is gitignored — do not commit absolute paths to the repo.
 #
 # Update paths to match your local GGUF model locations.
@@ -22,7 +22,7 @@ path = "/home/raulmc/.models/gguf/ssweens/Kimi-VL-A3B-Instruct-GGUF_Q6_K/Kimi-VL
 
 [[model]]
 slug = "marco_nano_base_q8_0"
-family = "llama_moe"
+family = "qwen3_moe"
 path = "/home/raulmc/.models/gguf/mradermacher/Marco-Nano-Base-GGUF_Q8_0/Marco-Nano-Base.Q8_0.gguf"
 
 # ── Models under ~/Downloads/SNN_Quantization/ ──
