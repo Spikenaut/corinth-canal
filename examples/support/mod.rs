@@ -4,7 +4,6 @@ pub mod config;
 pub mod lineup;
 pub mod observability;
 
-#[allow(unused_imports)]
 pub use config::RunConfig;
 pub use lineup::{
     cloud_execution_guard, cloud_lineup_path_from_env, load_cloud_lineup, load_safetensors_lineup,
@@ -30,7 +29,6 @@ pub const DEFAULT_ENGLISH_EXPLANATION_PROMPT_TEXT: &str =
 
 pub const DEFAULT_PROGRAMMING_RUST_PROMPT_TEXT: &str = "Write a Rust function that parses a comma-separated list of integers into a Vec, returning a Result with a helpful error on invalid input.";
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ValidationModelSpec {
     pub slug: String,
@@ -42,7 +40,6 @@ pub struct ValidationModelSpec {
     pub routing_mode: Option<RoutingMode>,
 }
 
-#[allow(dead_code)]
 #[cfg(feature = "cuda")]
 pub fn default_spiking_model_config(checkpoint_path: String, snn_steps: usize) -> ModelConfig {
     let probe = if checkpoint_path.trim().is_empty() {
@@ -174,7 +171,6 @@ fn resolve_prompt_embedding_provider(value: Option<&str>) -> PromptEmbeddingProv
     }
 }
 
-#[allow(dead_code)]
 pub fn prompt_embedding_for_validation(
     prompt_text: &str,
     target_dim: usize,
@@ -404,7 +400,6 @@ pub enum TelemetrySource {
 /// `source_label` is what lands in the directory path and manifest: one of
 /// `synthetic`, `synthetic_fallback`, or `csv_<stem>` (e.g. `csv_re4` for
 /// `telemetry.csv`). `rows` is only populated on a successful CSV load.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedTelemetry {
     pub source: TelemetrySource,
@@ -414,7 +409,6 @@ pub struct ResolvedTelemetry {
 }
 
 impl ResolvedTelemetry {
-    #[allow(dead_code)]
     pub fn row_count(&self) -> Option<usize> {
         self.rows.as_ref().map(|rows| rows.len())
     }
@@ -607,7 +601,6 @@ fn csv_source_label(path: &Path) -> String {
 /// `timestamp_ms` is always rewritten to `tick + 1` so the resulting latent
 /// CSV joins 1-to-1 against `tick_telemetry.txt` on tick index regardless
 /// of the underlying CSV's absolute timestamps.
-#[allow(dead_code)]
 pub fn telemetry_snapshot_for_tick(
     tick: usize,
     resolved: &ResolvedTelemetry,
@@ -653,7 +646,6 @@ pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot 
 /// comfortably cross threshold and yield healthy 5–15 % firing rates.
 ///
 /// Override via `INPUT_DRIVE_GAIN` env var for per-model tuning.
-#[allow(dead_code)]
 pub fn input_drive_gain_from_env() -> f32 {
     env_f32("INPUT_DRIVE_GAIN", 32.0)
 }

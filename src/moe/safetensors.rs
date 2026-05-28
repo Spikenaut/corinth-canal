@@ -998,6 +998,7 @@ struct TensorLocation {
 
 #[derive(Debug)]
 struct MappedShard {
+    // Retained for debug introspection; not read at runtime.
     #[allow(dead_code)]
     path: PathBuf,
     mmap: Mmap,

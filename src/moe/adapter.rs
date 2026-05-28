@@ -18,7 +18,6 @@ pub(super) enum SynapseSource {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(super) struct ModelAdapter {
     pub(super) family: ModelFamily,
     pub(super) architecture: String,
@@ -32,8 +31,14 @@ pub(super) struct ModelAdapter {
     pub(super) real_gpu_synapse_tensor: Option<String>,
     pub(super) dequant_q8_0_synapse_tensor: Option<String>,
     pub(super) dequant_q5_k_synapse_tensor: Option<String>,
+    // Staged for future CUDA synapse paths; only written, never read at runtime.
+    #[allow(dead_code)]
     pub(super) dequant_q6_k_synapse_tensor: Option<String>,
+    // Staged for future IQ3_M CUDA dequant path; only read in tests.
+    #[allow(dead_code)]
     pub(super) dequant_iq3_m_synapse_tensor: Option<String>,
+    // Staged for future Int4 CUDA dequant path; only written, never read at runtime.
+    #[allow(dead_code)]
     pub(super) dequant_int4_synapse_tensor: Option<String>,
     pub(super) synapse_source: SynapseSource,
     pub(super) quantization: String,

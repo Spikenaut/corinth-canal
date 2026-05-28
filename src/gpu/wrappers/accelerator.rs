@@ -196,6 +196,8 @@ impl GpuAccelerator {
             .map_err(|e| GpuError::LaunchFailed(format!("project_snapshot_current sync: {e:?}")))
     }
 
+    /// Execute one LIF (Leaky Integrate-and-Fire) tick on the GPU.
+    /// Low-level step function; prefer `tick_gpu_temporal` for the full GIF loop.
     pub fn lif_step_tick(&mut self, neuron_count: usize) -> GpuResult<()> {
         self.ensure_temporal_state(neuron_count)?;
 
@@ -257,7 +259,6 @@ impl GpuAccelerator {
         state.membrane.to_vec()
     }
 
-    /// Download current adaptation values (GIF state) from device.
     pub fn temporal_adaptation_to_vec(&self, neuron_count: usize) -> GpuResult<Vec<f32>> {
         if !self.has_context() {
             return Err(GpuError::NoGpu);
