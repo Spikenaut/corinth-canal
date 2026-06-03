@@ -11,15 +11,30 @@ concurrency:
   group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# SECURITY: Restrict top-level permissions to read-only.
+# Job-level permissions override where write access is needed.
+permissions:
+  contents: read
+
 jobs:
   docker:
+    # SECURITY: Fork guard — prevent fork PRs from running on self-hosted runners.
+    # Without this, an attacker could fork the repo, modify the Dockerfile,
+    # open a PR, and execute arbitrary code on our GPU hardware.
+    # See: https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, cuda-13.2, sm_120, gpu]
     env:
       CUDAHOSTCXX: /usr/bin/clang++
     permissions:
       contents: read
+      # SECURITY: packages:write is only needed for pushing images on main.
+      # The push step itself is already gated on event_name == 'push',
+      # but we scope the permission here as defense-in-depth.
       packages: write
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,14 +49,14 @@ jobs:
             TAGS="$TAGS,ghcr.io/${{ github.repository }}:pr-${{ github.event.number }}"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
-      
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:

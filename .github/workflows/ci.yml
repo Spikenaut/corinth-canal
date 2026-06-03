@@ -69,11 +69,17 @@ jobs:
   cpu-tests-ryzen:
     name: CPU Heavy (Self-hosted Ryzen)
     needs: cpu-tests-github
+    # SECURITY: Fork guard — prevent fork PRs from running on self-hosted runners.
+    # Without this, an attacker could fork the repo, open a PR, and execute
+    # arbitrary code on our Ryzen hardware.
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64, ryzen]
     timeout-minutes: 60
+    # SECURITY: Explicit minimal permissions for self-hosted runner job.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

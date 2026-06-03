@@ -8,10 +8,17 @@ concurrency:
   group: gpu-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# SECURITY: Restrict top-level permissions to read-only.
+permissions:
+  contents: read
+
 jobs:
   gpu-tests:
     runs-on: [self-hosted, Linux, X64, cuda-13.2, sm_120, gpu]
     name: GPU CUDA Build Validation
+    # SECURITY: Fork guard — prevent fork PRs from running on self-hosted runners.
+    # Without this, an attacker could fork the repo, modify workflow steps,
+    # open a PR, and execute arbitrary code on our GPU hardware.
     if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
