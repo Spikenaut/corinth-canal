@@ -76,5 +76,5 @@ target = "local"
 [[model]]
 slug = "qwen_moe_2_7b_int4"
 family = "qwen3_moe"
-path = "/absolute/path/to/Downloads/SNN_Quantization/Qwen-MoE-2.7B-Int4"
+path = "/absolute/path/to/.models/safetensors/Qwen-MoE-2.7B-Int4"
 target = "local"

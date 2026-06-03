@@ -143,6 +143,15 @@ impl Model {
         )? {
             return Ok(());
         }
+        if self.load_dequant_synapse(
+            "routing-f32",
+            |r| r.routing_f32_synapse_tensor_name(),
+            |r, n| r.routing_f32_synapse_weights(n),
+            accelerator,
+            neuron_count,
+        )? {
+            return Ok(());
+        }
 
         let fallback_signature = format!("synthetic-f32::{neuron_count}");
         if accelerator.synapse_signature() == Some(fallback_signature.as_str()) {

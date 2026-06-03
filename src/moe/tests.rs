@@ -379,7 +379,7 @@ fn test_dense_sim_uses_real_gate_weights() {
 }
 
 #[test]
-fn test_quantized_synapse_probe_uses_synthetic_fallback() {
+fn test_quantized_synapse_probe_uses_routing_f32_fallback() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(
         &build_quantized_synapse_checkpoint(gate_payload),
@@ -392,7 +392,7 @@ fn test_quantized_synapse_probe_uses_synthetic_fallback() {
         Some("blk.0.attn_q.weight")
     );
     assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
-    assert_eq!(metadata.synapse_source, "synthetic-fallback");
+    assert_eq!(metadata.synapse_source, "routing-f32");
 
     let _ = std::fs::remove_file(path);
 }
@@ -434,13 +434,13 @@ fn test_quantized_attn_q_does_not_advertise_real_gpu_synapse_tensor() {
         Some("blk.0.attn_q.weight")
     );
     assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
-    assert_eq!(metadata.synapse_source, "synthetic-fallback");
+    assert_eq!(metadata.synapse_source, "routing-f32");
 
     let _ = std::fs::remove_file(path);
 }
 
 #[test]
-fn test_preferred_synapse_descriptor_iq3s_has_no_dequant_path() {
+fn test_preferred_synapse_descriptor_iq3s_uses_routing_f32_fallback() {
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
     let path = write_temp_file(
         &build_quantized_synapse_checkpoint(gate_payload),
@@ -459,7 +459,7 @@ fn test_preferred_synapse_descriptor_iq3s_has_no_dequant_path() {
     assert_eq!(descriptor.dims, vec![EMBEDDING_DIM, EMBEDDING_DIM]);
     assert!(!descriptor.has_dequant_path);
     assert_eq!(model.real_gpu_synapse_tensor_name(), None);
-    assert_eq!(model.synapse_source(), "synthetic-fallback");
+    assert_eq!(model.synapse_source(), "routing-f32");
 
     let _ = std::fs::remove_file(path);
 }
@@ -1037,6 +1037,7 @@ fn test_synapse_source_label_new_variants() {
         dequant_q5_k_synapse_tensor: None,
         dequant_q6_k_synapse_tensor: None,
         dequant_iq3_m_synapse_tensor: None,
+        routing_f32_synapse_tensor: None,
         dequant_int4_synapse_tensor: None,
         synapse_source: SynapseSource::DequantizedIQ3M,
         quantization: "IQ3_M".into(),
@@ -1437,7 +1438,7 @@ fn test_adapter_resolve_iq3_m_gguf() {
         super::adapter::resolve_adapter(&metadata, &mapped, None, path.to_str().unwrap()).unwrap();
     assert_eq!(
         adapter.synapse_source,
-        super::adapter::SynapseSource::SyntheticFallback
+        super::adapter::SynapseSource::RoutingF32
     );
 }
 
