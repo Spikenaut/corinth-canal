@@ -13,6 +13,7 @@ pub(super) enum SynapseSource {
     DequantizedQ5K,
     DequantizedQ6K,
     DequantizedIQ3M,
+    RoutingF32,
     DequantizedInt4,
     SyntheticFallback,
 }
@@ -37,6 +38,8 @@ pub(super) struct ModelAdapter {
     // Staged for future IQ3_M CUDA dequant path; only read in tests.
     #[allow(dead_code)]
     pub(super) dequant_iq3_m_synapse_tensor: Option<String>,
+    #[allow(dead_code)]
+    pub(super) routing_f32_synapse_tensor: Option<String>,
     // Staged for future Int4 CUDA dequant path; only written, never read at runtime.
     #[allow(dead_code)]
     pub(super) dequant_int4_synapse_tensor: Option<String>,
@@ -52,6 +55,7 @@ impl ModelAdapter {
             SynapseSource::DequantizedQ5K => "dequantized-q5_k",
             SynapseSource::DequantizedQ6K => "dequantized-q6_k",
             SynapseSource::DequantizedIQ3M => "dequantized-iq3_m",
+            SynapseSource::RoutingF32 => "routing-f32",
             SynapseSource::DequantizedInt4 => "dequantized-int4",
             SynapseSource::SyntheticFallback => "synthetic-fallback",
         }
@@ -183,6 +187,17 @@ pub(super) fn resolve_adapter(
         None
     };
 
+    let routing_f32_synapse_tensor = if real_gpu_synapse_tensor.is_none()
+        && dequant_q8_0_synapse_tensor.is_none()
+        && dequant_q5_k_synapse_tensor.is_none()
+        && dequant_q6_k_synapse_tensor.is_none()
+        && dequant_iq3_m_synapse_tensor.is_none()
+    {
+        Some(routing_tensor.clone())
+    } else {
+        None
+    };
+
     let synapse_source = if real_gpu_synapse_tensor.is_some() {
         SynapseSource::Real
     } else if dequant_q8_0_synapse_tensor.is_some() {
@@ -193,6 +208,8 @@ pub(super) fn resolve_adapter(
         SynapseSource::DequantizedQ6K
     } else if dequant_iq3_m_synapse_tensor.is_some() {
         SynapseSource::DequantizedIQ3M
+    } else if routing_f32_synapse_tensor.is_some() {
+        SynapseSource::RoutingF32
     } else {
         SynapseSource::SyntheticFallback
     };
@@ -213,6 +230,7 @@ pub(super) fn resolve_adapter(
         dequant_q5_k_synapse_tensor,
         dequant_q6_k_synapse_tensor,
         dequant_iq3_m_synapse_tensor,
+        routing_f32_synapse_tensor,
         dequant_int4_synapse_tensor: None,
         quantization: metadata.quantization().to_owned(),
     })
@@ -289,9 +307,19 @@ pub(super) fn resolve_safetensors_adapter(
         dequant_q5_k_synapse_tensor: None,
         dequant_q6_k_synapse_tensor: None,
         dequant_iq3_m_synapse_tensor: None,
+        routing_f32_synapse_tensor: None,
         dequant_int4_synapse_tensor,
         quantization: "safetensors".into(),
     })
+}
+
+fn check_family_compatibility(expected: ModelFamily, inferred: ModelFamily) -> bool {
+    expected == inferred
+        || matches!(
+            (expected, inferred),
+            (ModelFamily::Moonlight16BA3B, ModelFamily::DeepSeek2)
+                | (ModelFamily::DeepSeek2, ModelFamily::Moonlight16BA3B)
+        )
 }
 
 fn infer_family_safetensors(
@@ -323,16 +351,17 @@ fn infer_family_safetensors(
         }
     };
 
-    if let Some(expected) = family_override
-        && expected != inferred
-    {
-        return Err(HybridError::InvalidConfig(format!(
-            "model_family override {:?} does not match Safetensors architecture '{architecture}'",
-            expected
-        )));
+    if let Some(expected) = family_override {
+        if !check_family_compatibility(expected, inferred) {
+            return Err(HybridError::InvalidConfig(format!(
+                "model_family override {:?} does not match Safetensors architecture '{architecture}'",
+                expected
+            )));
+        }
+        Ok(expected)
+    } else {
+        Ok(inferred)
     }
-
-    Ok(inferred)
 }
 
 fn infer_family(
@@ -368,16 +397,17 @@ fn infer_family(
         }
     };
 
-    if let Some(expected) = family_override
-        && expected != inferred
-    {
-        return Err(HybridError::InvalidConfig(format!(
-            "model_family override {:?} does not match GGUF architecture '{architecture}'",
-            expected
-        )));
+    if let Some(expected) = family_override {
+        if !check_family_compatibility(expected, inferred) {
+            return Err(HybridError::InvalidConfig(format!(
+                "model_family override {:?} does not match GGUF architecture '{architecture}'",
+                expected
+            )));
+        }
+        Ok(expected)
+    } else {
+        Ok(inferred)
     }
-
-    Ok(inferred)
 }
 
 #[cfg(test)]
@@ -458,6 +488,46 @@ mod tests {
         assert_eq!(
             infer_family("grok", None, "test.gguf").unwrap(),
             ModelFamily::Grok
+        );
+    }
+
+    #[test]
+    fn test_family_compatibility_overrides() {
+        // Test Moonlight/DeepSeek2 compatibility checks for GGUF path
+        assert_eq!(
+            infer_family("moonlight", Some(ModelFamily::DeepSeek2), "test.gguf").unwrap(),
+            ModelFamily::DeepSeek2
+        );
+        assert_eq!(
+            infer_family("deepseek2", Some(ModelFamily::Moonlight16BA3B), "test.gguf").unwrap(),
+            ModelFamily::Moonlight16BA3B
+        );
+
+        // Verify that incompatible overrides still error
+        assert!(infer_family("olmoe", Some(ModelFamily::DeepSeek2), "test.gguf").is_err());
+
+        // Test Moonlight/DeepSeek2 compatibility checks for Safetensors path
+        assert_eq!(
+            super::infer_family_safetensors(
+                "DeepseekV2ForCausalLM",
+                Some(ModelFamily::Moonlight16BA3B),
+                "test.safetensors"
+            )
+            .unwrap(),
+            ModelFamily::Moonlight16BA3B
+        );
+        assert_eq!(
+            super::infer_family_safetensors("DeepseekV2ForCausalLM", None, "test.safetensors")
+                .unwrap(),
+            ModelFamily::DeepSeek2
+        );
+        assert!(
+            super::infer_family_safetensors(
+                "OlmoeForCausalLM",
+                Some(ModelFamily::DeepSeek2),
+                "test.safetensors"
+            )
+            .is_err()
         );
     }
 }

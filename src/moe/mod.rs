@@ -47,8 +47,9 @@ pub struct GpuSynapseTensorDescriptor {
     pub dims: Vec<usize>,
     /// `true` iff the runtime currently has a code path that can consume
     /// this `ggml_type` as GPU synapse weights. `F16` uses the registered
-    /// direct-load path; `Q8_0` uses the dequantized F32 path. Every other
-    /// type falls back to synthetic synapses.
+    /// direct-load path; supported quantized tensors use dequantized F32
+    /// paths, while unsupported tensors can still use a checkpoint-backed
+    /// routing-gate fallback.
     pub has_dequant_path: bool,
 }
 
@@ -370,6 +371,36 @@ impl Router {
             CheckpointBackend::Safetensors(_) => Err(HybridError::UnsupportedFormat(
                 "Safetensors checkpoint does not support Q6_K dequantization".into(),
             )),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn routing_f32_synapse_tensor_name(&self) -> Option<&str> {
+        self.adapter.as_ref().and_then(|a| {
+            if a.synapse_source == SynapseSource::RoutingF32 {
+                a.routing_f32_synapse_tensor.as_deref()
+            } else {
+                None
+            }
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn routing_f32_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+        let checkpoint = self
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: self.model_path.clone(),
+                reason: "checkpoint not loaded".into(),
+            })?;
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => {
+                Ok(cp.f32_tensor(tensor_name, &self.model_path)?.to_vec())
+            }
+            CheckpointBackend::Safetensors(cp) => {
+                cp.extract_tensor_f32(tensor_name, &self.model_path)
+            }
         }
     }
 
