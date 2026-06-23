@@ -1,0 +1,69 @@
+name: Aikido Security Scan
+
+on:
+  pull_request:
+    branches:
+      - '**'
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: aikido-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  aikido-scan:
+    name: Aikido Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ vars.AIKIDO_REPOSITORY_ID != '' && secrets.AIKIDO_CLIENT_API_KEY != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Aikido CI API client
+        run: npm install --global @aikidosec/ci-api-client
+
+      - name: Run Aikido PR scan
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          AIKIDO_CLIENT_API_KEY: ${{ secrets.AIKIDO_CLIENT_API_KEY }}
+          AIKIDO_REPOSITORY_ID: ${{ vars.AIKIDO_REPOSITORY_ID }}
+        run: |
+          aikido-api-client scan \
+            "${AIKIDO_REPOSITORY_ID}" \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            "${{ github.head_ref }}" \
+            --pull-request-title "${{ github.event.pull_request.title }}" \
+            --pull-request-url "${{ github.event.pull_request.html_url }}" \
+            --fail-on-sast-scan \
+            --fail-on-iac-scan \
+            --fail-on-secrets-scan \
+            --minimum-severity-level MEDIUM
+
+      - name: Run Aikido release scan
+        if: ${{ github.event_name == 'push' }}
+        env:
+          AIKIDO_CLIENT_API_KEY: ${{ secrets.AIKIDO_CLIENT_API_KEY }}
+          AIKIDO_REPOSITORY_ID: ${{ vars.AIKIDO_REPOSITORY_ID }}
+        run: |
+          aikido-api-client scan-release \
+            "${AIKIDO_REPOSITORY_ID}" \
+            "${{ github.sha }}" \
+            --fail-on-sast-scan \
+            --fail-on-iac-scan \
+            --fail-on-secrets-scan \
+            --minimum-severity-level MEDIUM

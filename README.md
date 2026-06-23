@@ -177,6 +177,12 @@ For the full CUDA validation ladder, including host sanity checks, Compute
 Sanitizer, Nsight Systems, Nsight Compute, and DCGM diagnostics, see
 `docs/CUDA_VALIDATION.md`.
 
+## Security
+
+`corinth-canal` is scanned with [Aikido](https://aikido.dev) on pull requests
+and default-branch pushes. See [`SECURITY.md`](SECURITY.md) for setup details
+and vulnerability reporting instructions.
+
 ## Notes
 
 - CPU-only buildability is preserved.
