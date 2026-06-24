@@ -34,7 +34,7 @@ jobs:
         run: rustup component add rustfmt clippy llvm-tools-preview
 
       - name: Cache Cargo + target
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: "cpu-ci-v1"
           cache-on-failure: true
