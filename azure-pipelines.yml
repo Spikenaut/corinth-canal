@@ -87,16 +87,17 @@ jobs:
 # Note on GitHub visibility (for PR #112 and follow-ups):
 # Azure Pipelines results do NOT appear automatically in GitHub "Actions" or PR checks UI
 # even when builds run (see azure run on refs/pull/112/merge).
-# To surface them:
-# 1. Install "Azure Pipelines" GitHub App on the rmems org/repo (required for auto reporting).
+# IMPORTANT: Manual gh api posts (as done previously) cause the user's profile picture as avatar
+# and do not auto-update when jobs pass/fail. To have the OFFICIAL Azure Pipelines logo
+# and accurate automatic updates (the checks will reflect pass/fail when the AzDO jobs complete):
+# 1. Install "Azure Pipelines" GitHub App on the rmems org/repo (from GitHub Marketplace).
+#    This is what posts with the official logo and listens to AzDO build events.
 # 2. Ensure the GitHub service connection (id d5f8216d-... "Limen-Neural") in Azure DevOps
 #    has "repo:status" and "repo:write" scopes and is authorized.
 # 3. Update pipeline default branch (done via az): az pipelines update --id 3 --branch main \
 #    --org https://dev.azure.com/Limen-Neural --project "CI CD"
-# 4. If the App does not auto-create separate checks, force per-job statuses (using gh cli) so Linux/macOS/Windows appear as distinct items:
-#    for JOB in Linux macOS Windows; do gh api .../statuses/<head-sha> --method POST \
-#      -f state=success -f context="Azure Pipelines / $JOB" \
-#      -f description="Azure Pipelines $JOB job" \
-#      -f target_url="https://dev.azure.com/.../buildId=<id>"; done
-# (See recent manual posts for PR #112 using buildId=26 link.)
+# Once set, the runs will automatically create/update the "Azure Pipelines / Linux" etc. checks
+# with the logo and accurate states. Remove manual posts after.
+# See azure-devops MCP tools (pipelines_get_build_status, list_runs, get_run, get_build_log)
+# for querying the authoritative state from AzDO.
 # Pipeline id 3 (corinth-canal-cross-platform) is the active one for this repo.
