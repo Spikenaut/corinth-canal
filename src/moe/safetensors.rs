@@ -14,11 +14,9 @@ use serde_json::{Map, Number, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
-// Windows advanced file identity (volume_serial_number, file_index) requires nightly
-// "windows_by_handle" feature; we fall back to canonicalize on stable for Azure Windows CI.
 use std::path::{Component, Path, PathBuf};
+
+use same_file::is_same_file;
 
 use memmap2::Mmap;
 
@@ -731,31 +729,7 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
     if !left.exists() || !right.exists() {
         return Ok(false);
     }
-
-    #[cfg(unix)]
-    {
-        let left_meta = fs::metadata(left)?;
-        let right_meta = fs::metadata(right)?;
-        Ok(left_meta.dev() == right_meta.dev() && left_meta.ino() == right_meta.ino())
-    }
-
-    #[cfg(windows)]
-    {
-        // Although volume_serial_number() and file_index() are listed as stable in
-        // current Rust docs for std::os::windows::fs::MetadataExt, they triggered
-        // "unstable library feature `windows_by_handle`" (E0658, rust#63010) on the
-        // stable Rust version used by the AzDO windows-latest agent during clippy.
-        // (Kilo bot noted the claim; the compile error was real on CI stable.)
-        // We use canonicalize fallback to ensure reliable builds/clippy on the CI's
-        // stable Windows. Revisit if CI uses nightly or feature is fully stable without
-        // gate on the agent's toolchain.
-        Ok(fs::canonicalize(left)? == fs::canonicalize(right)?)
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        Ok(fs::canonicalize(left)? == fs::canonicalize(right)?)
-    }
+    is_same_file(left, right)
 }
 
 fn canonical_existing_or_parent(path: &Path) -> Result<PathBuf> {
