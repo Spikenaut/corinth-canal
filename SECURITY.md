@@ -26,15 +26,23 @@ repository.
 
 ## Enabling Aikido for this repository
 
-A repository administrator must complete the following steps once:
+Aikido offers a free tier and can be enabled without committing any secrets or
+tokens to this repository:
 
-1. Log in to [Aikido](https://app.aikido.dev) and connect the `rmems` GitHub
-   organization.
-2. Select `corinth-canal` as a scanned repository.
-3. Generate a CI API key from
-   <https://app.aikido.dev/settings/integrations/continuous-integration> and
-   store it as a GitHub Actions secret named `AIKIDO_CLIENT_API_KEY`.
-4. Copy the Aikido internal repository ID for `corinth-canal` and store it as a
-   GitHub Actions variable named `AIKIDO_REPOSITORY_ID`.
+1. Go to the [Aikido GitHub App](https://github.com/apps/aikido-security) page
+   (or install it from the GitHub Marketplace).
+2. Install the app for the `rmems` organization and grant access to the
+   `corinth-canal` repository.
+3. Log in to [Aikido](https://app.aikido.dev) with GitHub and select
+   `corinth-canal` as an active scanned repository.
+4. In Aikido, enable **PR checks** for the repository so pull requests receive
+   scan results and default-branch pushes are scanned automatically.
 
 No API keys, tokens, or repository IDs are committed to this repository.
+
+## Optional CI release gating
+
+Aikido also supports a CI-based release gate through the
+`aikido-api-client` CLI. That approach requires a paid Aikido plan that
+includes CI gating, a CI API key, and the Aikido internal repository ID. It is
+not required for the default PR and branch scanning described above.
