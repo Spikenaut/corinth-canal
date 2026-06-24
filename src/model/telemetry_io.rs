@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Shared CSV telemetry helpers for GPU routing outputs.
 
 use super::core::GPU_ROUTING_TELEMETRY_HEADER;

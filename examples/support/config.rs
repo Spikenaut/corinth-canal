@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Single source of env-driven runtime config for example binaries.
 //!
 //! The runtime crate (`src/`) never reads environment variables for paths.

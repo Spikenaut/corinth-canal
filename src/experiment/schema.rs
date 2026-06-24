@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Standardized experiment output schema for SAAQ quantization runs.
 //!
 //! This module defines the canonical JSON structures emitted by

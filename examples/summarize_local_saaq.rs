@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Summarize SAAQ run artifacts for a sprint-level report.
 //!
 //! Usage:

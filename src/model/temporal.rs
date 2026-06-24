@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! GPU temporal loop helpers for [`Model`](Model).
 
 use super::Model;

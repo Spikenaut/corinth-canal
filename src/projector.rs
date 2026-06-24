@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Spike-to-expert projector — the heart of the neuromorphic-ANN fusion.
 //!
 //! The [`Projector`] sits between the Spikenaut SNN and Router's expert router.

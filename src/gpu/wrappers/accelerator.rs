@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  gpu/accelerator.rs — High-level GPU accelerator facade
 //

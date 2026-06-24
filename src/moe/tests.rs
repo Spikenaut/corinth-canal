@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 use super::checkpoint::{dequantize_row_iq3_m, tensor_row_size};
 use super::safetensors::dtype_size_bytes;
 use super::*;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  satsolver.cu — Parallel WalkSAT / stochastic local-search kernels
 //

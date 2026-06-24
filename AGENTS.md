@@ -160,6 +160,15 @@ cargo test --no-default-features
 On CUDA-equipped setups with `nvcc` available, `just check` and `just test`
 exercise the default feature set.
 
+### Cross-platform and security CI
+
+- GitHub Actions: primary (see `.github/workflows/*.yml` for CPU, GPU, Docker, Sentry).
+- Azure Pipelines: redundant cross-platform CPU verification (Linux/macOS/Windows) on PRs + main (see `azure-pipelines.yml`, GH#109). Runs fmt/clippy/test/check/llvm-cov (CPU-only; GPU stays on GHA).
+- Snyk: security scans for dependencies (`snyk test` on Cargo.lock) and code (`snyk code test`) on PRs/main (see `.github/workflows/snyk.yml`, GH#108). Requires `SNYK_TOKEN` secret. Baseline vulns tolerated; new high/critical should be addressed. Use `.snyk` policy for false positives/ignores if needed (documented here or in follow-up).
+- Aikido: tracked separately (see #70).
+
+Always run `cargo check --no-default-features && cargo test --no-default-features` locally before substantial changes (per Git Workflow below). Azure/GHA provide additional platform coverage.
+
 ## Entry Order
 
 - Start at `src/lib.rs` for the exported crate surface.
@@ -179,6 +188,7 @@ exercise the default feature set.
 - Keep behavioral changes separate from structural refactors when possible.
 - Run `cargo check --no-default-features` and `cargo test --no-default-features` before closing substantial Rust changes.
 - On CUDA-equipped setups with `nvcc` available, also run the default-feature path and `cargo build --examples`.
+- Azure Pipelines (GH#109) and Snyk (GH#108) provide additional signals; treat their failures like GHA (investigate, fix, or document).
 
 ## Repository Context
 

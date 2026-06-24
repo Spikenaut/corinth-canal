@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Model-family adapter resolution for the GGUF and Safetensors router host.
 
 use super::checkpoint::{GgufMetadata, MappedGgufCheckpoint};

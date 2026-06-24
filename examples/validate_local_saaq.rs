@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Dry-run validation for the local SAAQ experiment matrix.
 //!
 //! Usage:

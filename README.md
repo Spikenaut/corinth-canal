@@ -3,7 +3,9 @@
 Single-crate reference implementation of the `rmems` SNN-logic quantization
 bridge.
 
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache%202.0%20OR%20MIT-blue.svg)](LICENSE-APACHE)
+
+This project is dual-licensed under the Apache 2.0 License or the MIT License (see `LICENSE-APACHE` and `LICENSE-MIT`).
 
 ## Overview
 
@@ -160,6 +162,8 @@ cargo test --no-default-features
 
 On CUDA-equipped setups with `nvcc` available, `just check` and `just test`
 exercise the default feature set.
+
+Cross-platform CPU verification also runs via Azure Pipelines (see `azure-pipelines.yml` and GH#109). Snyk security scans run in GHA (GH#108).
 
 ### Run the primary validation loop
 

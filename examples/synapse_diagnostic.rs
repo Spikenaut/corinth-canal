@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Diagnostic pass for issue #31.
 //!
 //! Loads each validation model in the configured lineup (LINEUP_CONFIG, then

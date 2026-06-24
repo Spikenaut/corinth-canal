@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! # corinth-canal
 //!
 //! `corinth-canal` is the single-crate reference implementation for the `rmems`

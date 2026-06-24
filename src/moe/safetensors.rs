@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Safetensors checkpoint inspection, deterministic manifest generation, and
 //! tensor loading for the router bridge.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Public model API for the deterministic SNN -> projector -> MoE pipeline.
 //!
 //! Read this module first when you want the end-to-end runtime behavior.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 pub type Tensor = Vec<f32>;
 
 pub fn zeros(len: usize) -> Tensor {

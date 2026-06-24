@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Shared helper functions for the example binaries.
 
 pub mod config;

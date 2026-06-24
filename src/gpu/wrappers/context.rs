@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  gpu/context.rs — CUDA device context initialisation
 // ════════════════════════════════════════════════════════════════════

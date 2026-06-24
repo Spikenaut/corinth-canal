@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 mod support;
 
 use corinth_canal::{gpu::GpuAccelerator, model::Model};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Generate a deterministic JSON manifest from Safetensors checkpoint headers.
 //!
 //! Usage:

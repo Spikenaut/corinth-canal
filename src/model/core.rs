@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Core model construction, validation, and non-GPU orchestration.
 
 use super::telemetry_io::append_gpu_routing_telemetry_row;

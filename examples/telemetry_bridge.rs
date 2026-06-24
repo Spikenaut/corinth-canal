@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Standalone demo for the deterministic dummy front-end.
 
 mod support;
