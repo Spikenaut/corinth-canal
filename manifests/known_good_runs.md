@@ -15,6 +15,8 @@ Format:
 - artifacts:  <path under VALIDATION_OUTPUT_ROOT, or "artifacts/<run_id>/">
 ```
 
+(Note: some historical entries below predate this format and include legacy fields like `heartbeat` for reference only.)
+
 ---
 
 _No blessed runs yet. Bootstrap this file once Stage E is verified and the
@@ -22,7 +24,7 @@ first artifacts/ tree is reviewed._
 
 ## SAAQ 1.5 OLMoE RE4 Control — 2026-04-23
 
-NOTE (legacy control signal experiment, cleaned 2026-06 per GH#102 + Linear MET-112): The heartbeat on/off entries below (and the May 2026 issue-40 heartbeat data dirs) document null-result baselines from the old experimental control signal. The old `supports_heartbeat` field and all related columns/annotations/supporting code were removed in the hygiene pass (evidence of the null results is preserved in the text of this file and especially artifacts/issue-40-local/issue-40-local-summary.md). Current profiles use clean condition-tagged runs only (no heartbeat dirs or columns). See Linear MET-112 (primary), MET-113, MET-114 for tracking.
+NOTE (legacy control signal experiment, cleaned 2026-06 per GH#102 + Linear MET-112): The entries below (and the May 2026 issue-40 heartbeat data dirs) document null-result baselines from the old experimental control signal. The old `supports_heartbeat` field and all related columns/annotations/supporting code were removed in the hygiene pass (evidence of the null results is preserved in the text of this file and especially artifacts/issue-40-local/issue-40-local-summary.md). Current profiles use clean condition-tagged runs only (no heartbeat dirs or columns). See Linear MET-112 (primary), MET-113, MET-114 for tracking. (No transient branch references.)
 
 - Model: `olmoe_baseline`
 - Family: `Olmoe`
