@@ -771,7 +771,7 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
                 n_file_index_low: u32,
             }
 
-            extern "system" {
+            unsafe extern "system" {
                 fn CreateFileW(
                     lp_file_name: *const u16,
                     dw_desired_access: u32,
@@ -801,15 +801,17 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
                     .encode_wide()
                     .chain(std::iter::once(0))
                     .collect();
-                CreateFileW(
-                    wide.as_ptr(),
-                    GENERIC_READ,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE,
-                    ptr::null_mut(),
-                    OPEN_EXISTING,
-                    FILE_FLAG_BACKUP_SEMANTICS,
-                    ptr::null_mut(),
-                )
+                unsafe {
+                    CreateFileW(
+                        wide.as_ptr(),
+                        GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        ptr::null_mut(),
+                        OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS,
+                        ptr::null_mut(),
+                    )
+                }
             }
 
             let h_left = open_for_info(left);
@@ -818,16 +820,18 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
             }
             let h_right = open_for_info(right);
             if h_right == INVALID_HANDLE_VALUE {
-                CloseHandle(h_left);
+                unsafe { CloseHandle(h_left) };
                 return Ok(false);
             }
 
             let mut info_left: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
             let mut info_right: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
-            let ok_left = GetFileInformationByHandle(h_left, &mut info_left) != 0;
-            let ok_right = GetFileInformationByHandle(h_right, &mut info_right) != 0;
-            CloseHandle(h_left);
-            CloseHandle(h_right);
+            let ok_left = unsafe { GetFileInformationByHandle(h_left, &mut info_left) } != 0;
+            let ok_right = unsafe { GetFileInformationByHandle(h_right, &mut info_right) } != 0;
+            unsafe {
+                CloseHandle(h_left);
+                CloseHandle(h_right);
+            }
 
             if !ok_left || !ok_right {
                 return Ok(false);
