@@ -1,0 +1,74 @@
+# Snyk security scanning (GH#108)
+# Dependency + SAST scans. Related to Aikido (#70).
+# Requires SNYK_TOKEN secret at org/repo level (never committed).
+# Scans run on PRs and main; only new high/critical vulns should block (baseline tolerated).
+
+name: Snyk Security Scan
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 6 * * *'  # Daily
+
+permissions:
+  contents: read
+  security-events: write  # for SARIF upload if used
+
+jobs:
+  snyk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (for Cargo.lock context)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk Dependency Scan (Cargo)
+        run: |
+          snyk test --file=Cargo.lock --all-projects --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true  # Don't break baseline; review new issues
+
+      - name: Snyk Code Test (SAST)
+        run: |
+          snyk code test --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      # Container scan example (if images built in this workflow or on push)
+      # - name: Snyk Container Test (Dockerfile)
+      #   run: snyk container test --file=Dockerfile .
+      #   env:
+      #     SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      #   if: github.event_name == 'push'
+
+      # IaC would be added if k8s/tf files appear.
+
+      - name: Upload Snyk results (optional SARIF for GitHub Security tab)
+        if: always()
+        run: |
+          snyk test --file=Cargo.lock --sarif-file-output=snyk.sarif || true
+          # snyk code test --sarif-file-output=snyk-code.sarif || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: snyk.sarif
+          # category: snyk-deps or similar
+
+# Notes:
+# - Configure SNYK_TOKEN in repo settings (Settings > Secrets and variables > Actions).
+# - Use .snyk policy file for ignores/false positives if needed (documented in AGENTS.md or follow-up).
+# - Per #108: block only on newly introduced high/critical.
+# - For full container/IaC, see open questions in the issue.
