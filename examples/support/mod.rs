@@ -31,7 +31,6 @@ pub const DEFAULT_ENGLISH_EXPLANATION_PROMPT_TEXT: &str =
 
 pub const DEFAULT_PROGRAMMING_RUST_PROMPT_TEXT: &str = "Write a Rust function that parses a comma-separated list of integers into a Vec, returning a Result with a helpful error on invalid input.";
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ValidationModelSpec {
     pub slug: String,
@@ -44,7 +43,6 @@ pub struct ValidationModelSpec {
 }
 
 #[cfg(feature = "cuda")]
-#[allow(dead_code)]
 pub fn default_spiking_model_config(checkpoint_path: String, snn_steps: usize) -> ModelConfig {
     let probe = if checkpoint_path.trim().is_empty() {
         None
@@ -162,7 +160,6 @@ enum PromptEmbeddingProvider {
     SyntheticFallback,
 }
 
-#[allow(dead_code)]
 fn resolve_prompt_embedding_provider(value: Option<&str>) -> PromptEmbeddingProvider {
     match value
         .map(str::trim)
@@ -175,7 +172,6 @@ fn resolve_prompt_embedding_provider(value: Option<&str>) -> PromptEmbeddingProv
     }
 }
 
-#[allow(dead_code)]
 pub fn prompt_embedding_for_validation(
     prompt_text: &str,
     target_dim: usize,
@@ -404,7 +400,6 @@ pub enum TelemetrySource {
 /// `source_label` is what lands in the directory path and manifest: one of
 /// `synthetic`, `synthetic_fallback`, or `csv_<stem>` (e.g. `csv_re4` for
 /// `telemetry.csv`). `rows` is only populated on a successful CSV load.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedTelemetry {
     pub source: TelemetrySource,
@@ -607,7 +602,6 @@ fn csv_source_label(path: &Path) -> String {
 /// `timestamp_ms` is always rewritten to `tick + 1` so the resulting latent
 /// CSV joins 1-to-1 against `tick_telemetry.txt` on tick index regardless
 /// of the underlying CSV's absolute timestamps.
-#[allow(dead_code)]
 pub fn telemetry_snapshot_for_tick(
     tick: usize,
     resolved: &ResolvedTelemetry,
