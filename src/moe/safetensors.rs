@@ -833,9 +833,11 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
                 return Ok(false);
             }
 
-            Ok(info_left.dw_volume_serial_number == info_right.dw_volume_serial_number
-                && info_left.n_file_index_high == info_right.n_file_index_high
-                && info_left.n_file_index_low == info_right.n_file_index_low)
+            Ok(
+                info_left.dw_volume_serial_number == info_right.dw_volume_serial_number
+                    && info_left.n_file_index_high == info_right.n_file_index_high
+                    && info_left.n_file_index_low == info_right.n_file_index_low,
+            )
         }
     }
 
