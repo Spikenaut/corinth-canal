@@ -1,0 +1,80 @@
+# Azure Pipelines cross-platform CPU CI
+# See GH#109 for details. Runs in parallel with GitHub Actions for macOS/Windows/Linux coverage.
+# Non-goals: GPU/CUDA, Docker, Sentry (remain on GitHub Actions).
+
+trigger:
+  branches:
+    include:
+    - main
+pr:
+  branches:
+    include:
+    - main
+
+variables:
+  RUST_VERSION: stable
+
+jobs:
+- job: Linux
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  - checkout: self
+  - script: rustup default $(RUST_VERSION)
+    displayName: 'Install Rust'
+  - script: cargo fmt --all -- --check
+    displayName: 'cargo fmt check'
+  - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
+    displayName: 'cargo clippy (no-default, fail on warnings)'
+  - script: cargo test --lib --no-default-features --locked
+    displayName: 'cargo test --lib (no-default)'
+  - script: cargo check --examples --no-default-features --locked
+    displayName: 'cargo check --examples (no-default)'
+  - script: cargo install cargo-llvm-cov --locked
+    displayName: 'Install cargo-llvm-cov'
+  - script: cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
+    displayName: 'cargo llvm-cov (LCOV)'
+  # Note: coverage upload to Codecov is informational here; see codecov.yml and open questions in #109
+
+- job: macOS
+  pool:
+    vmImage: 'macos-latest'
+  steps:
+  - checkout: self
+  - script: rustup default $(RUST_VERSION)
+    displayName: 'Install Rust'
+  - script: cargo fmt --all -- --check
+    displayName: 'cargo fmt check'
+  - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
+    displayName: 'cargo clippy (no-default, fail on warnings)'
+  - script: cargo test --lib --no-default-features --locked
+    displayName: 'cargo test --lib (no-default)'
+  - script: cargo check --examples --no-default-features --locked
+    displayName: 'cargo check --examples (no-default)'
+  - script: cargo install cargo-llvm-cov --locked
+    displayName: 'Install cargo-llvm-cov'
+  - script: cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
+    displayName: 'cargo llvm-cov (LCOV)'
+
+- job: Windows
+  pool:
+    vmImage: 'windows-latest'
+  steps:
+  - checkout: self
+  - script: rustup default $(RUST_VERSION)
+    displayName: 'Install Rust'
+  - script: cargo fmt --all -- --check
+    displayName: 'cargo fmt check'
+  - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
+    displayName: 'cargo clippy (no-default, fail on warnings)'
+  - script: cargo test --lib --no-default-features --locked
+    displayName: 'cargo test --lib (no-default)'
+  - script: cargo check --examples --no-default-features --locked
+    displayName: 'cargo check --examples (no-default)'
+  - script: cargo install cargo-llvm-cov --locked
+    displayName: 'Install cargo-llvm-cov'
+  - script: cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
+    displayName: 'cargo llvm-cov (LCOV)'
+
+# Caching note: Azure Pipelines Cargo cache can be added via Cache@2 task for target/ and registry if build times become issue.
+# See open questions in #109 for coverage upload and required vs informational.
