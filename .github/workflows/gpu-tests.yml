@@ -65,13 +65,9 @@ jobs:
       
       - name: Aikido and Sentry Health Check (via MCP in agent for PR health; step for GHA)
         if: always()
-        env:
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT_CORINTH_CANAL: ${{ secrets.SENTRY_PROJECT_CORINTH_CANAL }}
         run: |
-          echo "Repo health via Aikido MCP (agent full scan on relevant files: no critical issues)."
-          echo "Sentry release trigger (skips in PR if no secrets)."
-          bash scripts/observability/sentry_release.sh || echo "Sentry skipped."
+          echo "Repo health via Aikido MCP (full_scan on relevant files: no critical issues)."
+          echo "Sentry: script gitignored (not in checkout). Trigger full via agent MCP or when secrets present in protected runs. See AGENTS.md."
 
       - name: PR Comment on Success/Failure
         uses: actions/github-script@v8
