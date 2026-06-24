@@ -163,7 +163,7 @@ cargo test --no-default-features
 On CUDA-equipped setups with `nvcc` available, `just check` and `just test`
 exercise the default feature set.
 
-Cross-platform CPU verification also runs via Azure Pipelines (see `azure-pipelines.yml` and GH#109). Snyk security scans run in GHA (GH#108).
+Cross-platform CPU verification also runs via Azure Pipelines (see `azure-pipelines.yml` and GH#109). Snyk security scans (SCA/SAST/etc.) are available via Snyk MCP tools instead of CI workflow (GH#108).
 
 ### Run the primary validation loop
 

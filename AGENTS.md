@@ -164,10 +164,9 @@ exercise the default feature set.
 
 - GitHub Actions: primary (see `.github/workflows/*.yml` for CPU, GPU, Docker, Sentry).
 - Azure Pipelines: redundant cross-platform CPU verification (Linux/macOS/Windows) on PRs + main (see `azure-pipelines.yml`, GH#109). Runs fmt/clippy/test/check/llvm-cov (CPU-only; GPU stays on GHA).
-- Snyk: security scans for dependencies (`snyk test` on Cargo.lock) and code (`snyk code test`) on PRs/main (see `.github/workflows/snyk.yml`, GH#108). Requires `SNYK_TOKEN` secret. Baseline vulns tolerated; new high/critical should be addressed. Use `.snyk` policy for false positives/ignores if needed (documented here or in follow-up).
-- Aikido: tracked separately (see #70).
+- Snyk: security scans (SCA for open-source deps, Code for SAST, etc.) are performed via the Snyk MCP server tools (e.g. `snyk__snyk_sca_scan`, `snyk__snyk_code_scan`, `snyk__snyk_container_scan`, `snyk__snyk_iac_scan`) instead of a dedicated CI workflow. Use during development, reviews, or agent-assisted tasks. GH#108. Aikido is tracked separately (see #70).
 
-Always run `cargo check --no-default-features && cargo test --no-default-features` locally before substantial changes (per Git Workflow below). Azure/GHA provide additional platform coverage.
+Always run `cargo check --no-default-features && cargo test --no-default-features` locally before substantial changes (per Git Workflow below). Azure/GHA provide additional platform coverage. Snyk MCP provides on-demand security scanning.
 
 ## Entry Order
 
@@ -188,7 +187,7 @@ Always run `cargo check --no-default-features && cargo test --no-default-feature
 - Keep behavioral changes separate from structural refactors when possible.
 - Run `cargo check --no-default-features` and `cargo test --no-default-features` before closing substantial Rust changes.
 - On CUDA-equipped setups with `nvcc` available, also run the default-feature path and `cargo build --examples`.
-- Azure Pipelines (GH#109) and Snyk (GH#108) provide additional signals; treat their failures like GHA (investigate, fix, or document).
+- Azure Pipelines (GH#109) provides additional signals; treat failures like GHA. Snyk scans via MCP tools (see Cross-platform and security CI section) for on-demand use in development/agent flows (GH#108).
 
 ## Repository Context
 
