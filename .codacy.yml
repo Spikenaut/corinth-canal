@@ -1,0 +1,14 @@
+---
+patterns:
+  - pattern: "File has too many non-comment lines of code"
+    files:
+      - "src/moe/checkpoint.rs"
+      - "src/moe/safetensors.rs"
+      - "src/moe/safetensors/tests.rs"
+      - "src/moe/tests.rs"
+      - "src/moe/mod.rs"
+      - "src/gpu/wrappers/accelerator.rs"
+      - "examples/saaq_latent_calibration.rs"
+      - "examples/support/mod.rs"
+      - "examples/support/observability.rs"
+    level: "Info"  # Report but do not count toward issue max (these files are large by design in single-crate reference impl)
