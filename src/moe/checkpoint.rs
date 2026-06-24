@@ -976,6 +976,7 @@ fn quantization_label(file_type: Option<u32>) -> String {
     }
 }
 
+#[cfg(unix)]
 #[allow(dead_code)]
 fn page_size_bytes(path: &str) -> Result<usize> {
     // SAFETY: `sysconf` is a pure query with no preconditions; valid to call at any time.
@@ -987,6 +988,14 @@ fn page_size_bytes(path: &str) -> Result<usize> {
         });
     }
     Ok(page_size as usize)
+}
+
+#[cfg(not(unix))]
+#[allow(dead_code)]
+fn page_size_bytes(_path: &str) -> Result<usize> {
+    // Fallback for Windows and other platforms (common page size 4KiB is sufficient
+    // for the mmap alignment use case here).
+    Ok(4096)
 }
 
 fn align_up(value: usize, alignment: usize) -> usize {

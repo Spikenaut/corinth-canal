@@ -11,9 +11,14 @@ concurrency:
   group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# SECURITY: Restrict top-level permissions to read-only.
+# Permissions: contents read for checkout; packages write is declared at workflow level
+# so the job can push the image to GHCR on main (the build job on PRs does not
+# perform any write because the login/push steps are guarded by `if: push to main`).
+# This addresses codex P2 suggestion about not granting write to PR builds
+# (while still enabling publish); fork PRs are excluded by job guard.
 permissions:
   contents: read
+  packages: write
 
 jobs:
   build:
@@ -25,10 +30,6 @@ jobs:
     runs-on: [self-hosted, Linux, X64, cuda-13.2, sm_120, gpu]
     env:
       CUDAHOSTCXX: /usr/bin/clang++
-    # Job permissions: read for PRs, write for packages only on main push (to allow publish in same job)
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@v4

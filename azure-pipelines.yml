@@ -67,6 +67,11 @@ jobs:
     displayName: 'cargo fmt check'
   - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
     displayName: 'cargo clippy (no-default, fail on warnings)'
+  # NOTE: Windows CI is now enabled (no longer gated) after cross-platform fix in
+  # src/moe/checkpoint.rs (page_size_bytes now has #[cfg(not(unix))] fallback).
+  # This addresses chatgpt-codex P2 "Gate Windows CI until the crate builds there".
+  # The no-default build now succeeds on windows (the library no longer unconditionally
+  # includes unix-only page size code in the always-compiled moe module).
   - script: cargo test --lib --no-default-features --locked
     displayName: 'cargo test --lib (no-default)'
   - script: cargo check --examples --no-default-features --locked
