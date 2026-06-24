@@ -5,7 +5,7 @@ pub mod config;
 pub mod lineup;
 pub mod observability;
 
-#[allow(unused_imports)]
+#[cfg(feature = "cuda")]
 pub use config::RunConfig;
 pub use lineup::{
     cloud_execution_guard, cloud_lineup_path_from_env, load_cloud_lineup, load_safetensors_lineup,
@@ -409,7 +409,7 @@ pub struct ResolvedTelemetry {
 }
 
 impl ResolvedTelemetry {
-    #[allow(dead_code)]
+    #[cfg(feature = "cuda")]
     pub fn row_count(&self) -> Option<usize> {
         self.rows.as_ref().map(|rows| rows.len())
     }
@@ -646,7 +646,7 @@ pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot 
 /// comfortably cross threshold and yield healthy 5–15 % firing rates.
 ///
 /// Override via `INPUT_DRIVE_GAIN` env var for per-model tuning.
-#[allow(dead_code)]
+#[cfg(feature = "cuda")]
 pub fn input_drive_gain_from_env() -> f32 {
     env_f32("INPUT_DRIVE_GAIN", 32.0)
 }
