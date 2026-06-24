@@ -69,7 +69,7 @@ jobs:
     displayName: 'cargo clippy (no-default, fail on warnings)'
   # NOTE: Windows CI is now enabled (no longer gated) after cross-platform fixes:
   # - src/moe/checkpoint.rs: #[cfg(not(unix))] fallback for page_size (addresses P2).
-  # - src/moe/safetensors.rs: use `same-file` crate for proper same-file detection (hardlinks, symlinks, Windows file IDs) without unstable APIs (addresses codex P2 "preserve Windows hard-link file identity" and previous E0658 on stable).
+  # - src/moe/safetensors.rs: direct Win32 CreateFileW + GetFileInformationByHandle for stable file identity (volume+index) on Windows (preserves hardlinks, no unstable windows_by_handle/E0658, addresses codex P2).
   # The no-default build and clippy now succeed on windows-latest stable in Azure.
   # Cargo.lock kept up-to-date for --locked in all jobs.
   - script: cargo test --lib --no-default-features --locked

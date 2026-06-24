@@ -14,9 +14,9 @@ use serde_json::{Map, Number, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
-
-use same_file::is_same_file;
 
 use memmap2::Mmap;
 
@@ -729,7 +729,120 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
     if !left.exists() || !right.exists() {
         return Ok(false);
     }
-    is_same_file(left, right)
+
+    #[cfg(unix)]
+    {
+        let left_meta = fs::metadata(left)?;
+        let right_meta = fs::metadata(right)?;
+        Ok(left_meta.dev() == right_meta.dev() && left_meta.ino() == right_meta.ino())
+    }
+
+    #[cfg(windows)]
+    {
+        // Use direct Win32 API (CreateFileW + GetFileInformationByHandle) for stable
+        // file identity (volume serial + file index) on Windows. This preserves
+        // hard-link detection (addresses codex P2) without relying on the unstable
+        // `windows_by_handle` feature that triggers E0658 on AzDO stable Rust
+        // (even though the MetadataExt methods are listed as stable in docs).
+        // Replaces previous canonicalize fallback and avoids same-file crate
+        // (which internally hits the same unstable gate when compiled for windows).
+        unsafe {
+            use std::ffi::c_void;
+            use std::os::windows::ffi::OsStrExt;
+            use std::ptr;
+
+            #[repr(C)]
+            struct FILETIME {
+                dw_low_date_time: u32,
+                dw_high_date_time: u32,
+            }
+
+            #[repr(C)]
+            struct BY_HANDLE_FILE_INFORMATION {
+                dw_file_attributes: u32,
+                ft_creation_time: FILETIME,
+                ft_last_access_time: FILETIME,
+                ft_last_write_time: FILETIME,
+                dw_volume_serial_number: u32,
+                n_file_size_high: u32,
+                n_file_size_low: u32,
+                n_number_of_links: u32,
+                n_file_index_high: u32,
+                n_file_index_low: u32,
+            }
+
+            extern "system" {
+                fn CreateFileW(
+                    lp_file_name: *const u16,
+                    dw_desired_access: u32,
+                    dw_share_mode: u32,
+                    lp_security_attributes: *mut c_void,
+                    dw_creation_disposition: u32,
+                    dw_flags_and_attributes: u32,
+                    h_template_file: *mut c_void,
+                ) -> *mut c_void;
+                fn GetFileInformationByHandle(
+                    h_file: *mut c_void,
+                    lp_file_information: *mut BY_HANDLE_FILE_INFORMATION,
+                ) -> i32;
+                fn CloseHandle(h_object: *mut c_void) -> i32;
+            }
+
+            const GENERIC_READ: u32 = 0x80000000;
+            const FILE_SHARE_READ: u32 = 0x00000001;
+            const FILE_SHARE_WRITE: u32 = 0x00000002;
+            const OPEN_EXISTING: u32 = 3;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+            const INVALID_HANDLE_VALUE: *mut c_void = -1isize as *mut c_void;
+
+            fn open_for_info(path: &Path) -> *mut c_void {
+                let wide: Vec<u16> = path
+                    .as_os_str()
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
+                CreateFileW(
+                    wide.as_ptr(),
+                    GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    ptr::null_mut(),
+                    OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS,
+                    ptr::null_mut(),
+                )
+            }
+
+            let h_left = open_for_info(left);
+            if h_left == INVALID_HANDLE_VALUE {
+                return Ok(false);
+            }
+            let h_right = open_for_info(right);
+            if h_right == INVALID_HANDLE_VALUE {
+                CloseHandle(h_left);
+                return Ok(false);
+            }
+
+            let mut info_left: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+            let mut info_right: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+            let ok_left = GetFileInformationByHandle(h_left, &mut info_left) != 0;
+            let ok_right = GetFileInformationByHandle(h_right, &mut info_right) != 0;
+            CloseHandle(h_left);
+            CloseHandle(h_right);
+
+            if !ok_left || !ok_right {
+                return Ok(false);
+            }
+
+            Ok(info_left.dw_volume_serial_number == info_right.dw_volume_serial_number
+                && info_left.n_file_index_high == info_right.n_file_index_high
+                && info_left.n_file_index_low == info_right.n_file_index_low)
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        Ok(fs::canonicalize(left)? == fs::canonicalize(right)?)
+    }
 }
 
 fn canonical_existing_or_parent(path: &Path) -> Result<PathBuf> {
