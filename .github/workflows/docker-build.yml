@@ -14,15 +14,15 @@ concurrency:
 # Permissions: contents read for checkout; packages write is declared at workflow level
 # so the job can push the image to GHCR on main (the build job on PRs does not
 # perform any write because the login/push steps are guarded by `if: push to main`).
-# This addresses codex P2 suggestion about not granting write to PR builds
-# (while still enabling publish); fork PRs are excluded by job guard.
-permissions:
-  contents: read
-  packages: write
-
+# Write permission is declared at *job* level (not workflow-global) to address
+# codex P2 "Remove package write permission from PR builds".
+# Fork PRs excluded by job if-guard. Only main-push steps actually login/push.
 jobs:
   build:
     name: Build Docker Image
+    permissions:
+      contents: read
+      packages: write
     # SECURITY: Fork guard — prevent fork PRs from running on self-hosted runners.
     if: >-
       github.event_name == 'push' ||
