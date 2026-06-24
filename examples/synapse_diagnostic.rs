@@ -19,7 +19,7 @@ use serde::Serialize;
 
 use corinth_canal::ModelFamily;
 use corinth_canal::moe::{GpuSynapseTensorDescriptor, Router, RoutingMode};
-use support::config::RunConfig;
+use support::RunConfig;
 use support::{
     ValidationModelSpec,
     observability::{self, CommandObserver, SafeDiagnosticData},

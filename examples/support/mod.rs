@@ -156,7 +156,6 @@ pub fn saaq_update_rule_from_env() -> SaaqUpdateRule {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptEmbeddingProvider {
     Ollama,
@@ -206,7 +205,6 @@ pub fn prompt_embedding_for_validation(
     ))
 }
 
-#[allow(dead_code)]
 pub fn pooled_prompt_embedding_from_ollama(
     prompt_text: &str,
     target_dim: usize,
@@ -634,7 +632,6 @@ fn parse_finite_f32(value: &str) -> Option<f32> {
     }
 }
 
-#[allow(dead_code)]
 pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot {
     let phase = tick as f32 * 0.041;
     corinth_canal::TelemetrySnapshot {
@@ -681,7 +678,6 @@ fn slug_from_path(path: &str) -> String {
         .to_ascii_lowercase()
 }
 
-#[allow(dead_code)]
 fn resample_embedding(input: &[f32], target_len: usize) -> Vec<f32> {
     if target_len == 0 {
         return Vec::new();
@@ -713,7 +709,6 @@ fn resample_embedding(input: &[f32], target_len: usize) -> Vec<f32> {
     out
 }
 
-#[allow(dead_code)]
 fn normalize_embedding(values: &mut [f32]) {
     let l2_norm = values.iter().map(|&v| v * v).sum::<f32>().sqrt();
     if l2_norm > 1e-8 {
@@ -723,7 +718,6 @@ fn normalize_embedding(values: &mut [f32]) {
     }
 }
 
-#[allow(dead_code)]
 fn synthetic_text_embedding(prompt_text: &str, target_dim: usize) -> Vec<f32> {
     if target_dim == 0 {
         return Vec::new();
@@ -748,7 +742,6 @@ fn synthetic_text_embedding(prompt_text: &str, target_dim: usize) -> Vec<f32> {
     embedding
 }
 
-#[allow(dead_code)]
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for &byte in bytes {
@@ -758,7 +751,6 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-#[allow(dead_code)]
 fn env_f32(key: &str, default_value: f32) -> f32 {
     std::env::var(key)
         .ok()

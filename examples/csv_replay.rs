@@ -5,7 +5,7 @@
 
 mod support;
 
-use support::config::RunConfig;
+use support::RunConfig;
 use support::default_spiking_model_config;
 use support::observability::{self, CommandObserver, SafeDiagnosticData};
 

@@ -5,7 +5,7 @@ use corinth_canal::{gpu::GpuAccelerator, model::Model};
 use std::io::Error;
 use std::time::Instant;
 use support::{
-    config::RunConfig,
+    RunConfig,
     default_spiking_model_config,
     observability::{self, CommandObserver, SafeDiagnosticData},
 };
