@@ -16,8 +16,8 @@ use std::fs::{self, File};
 use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
+// Windows advanced file identity (volume_serial_number, file_index) requires nightly
+// "windows_by_handle" feature; we fall back to canonicalize on stable for Azure Windows CI.
 use std::path::{Component, Path, PathBuf};
 
 use memmap2::Mmap;
@@ -732,19 +732,24 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
         return Ok(false);
     }
 
-    let left_meta = fs::metadata(left)?;
-    let right_meta = fs::metadata(right)?;
-
     #[cfg(unix)]
     {
+        let left_meta = fs::metadata(left)?;
+        let right_meta = fs::metadata(right)?;
         Ok(left_meta.dev() == right_meta.dev() && left_meta.ino() == right_meta.ino())
     }
 
     #[cfg(windows)]
     {
-        // Use file_index and volume_serial_number for proper hardlink/alias detection
-        Ok(left_meta.file_index() == right_meta.file_index()
-            && left_meta.volume_serial_number() == right_meta.volume_serial_number())
+        // Although volume_serial_number() and file_index() are listed as stable in
+        // current Rust docs for std::os::windows::fs::MetadataExt, they triggered
+        // "unstable library feature `windows_by_handle`" (E0658, rust#63010) on the
+        // stable Rust version used by the AzDO windows-latest agent during clippy.
+        // (Kilo bot noted the claim; the compile error was real on CI stable.)
+        // We use canonicalize fallback to ensure reliable builds/clippy on the CI's
+        // stable Windows. Revisit if CI uses nightly or feature is fully stable without
+        // gate on the agent's toolchain.
+        Ok(fs::canonicalize(left)? == fs::canonicalize(right)?)
     }
 
     #[cfg(not(any(unix, windows)))]
