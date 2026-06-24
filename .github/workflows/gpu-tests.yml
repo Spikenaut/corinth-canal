@@ -62,6 +62,17 @@ jobs:
               cargo test --lib --features cuda --no-run --locked
               cargo check --examples --features cuda --locked
             '
+        # NOTE: The --locked is required for reproducibility. If this step fails with
+        # "cannot update the lock file ... because --locked was passed", the committed
+        # Cargo.lock is out-of-date for the cuda feature graph + the fresh cargo/index
+        # inside the nvidia/cuda devel image (recent Cargo.toml changes like rustls pin,
+        # sentry, otel can affect resolution).
+        # Fix: Run `cargo metadata --features cuda --format-version 1` (or the test/check
+        # cmds) inside the *exact same docker image* (as done via terminal in the fix PR).
+        # This forces resolution in the CI env and updates Cargo.lock on the host mount.
+        # Commit the resulting Cargo.lock diff. Then --locked will succeed.
+        # Verified in the fixing session: after update, both commands passed with --locked
+        # in fresh docker (no lock error, kernels + checks succeeded).
       
       - name: Aikido and Sentry Health Check (via MCP in agent for PR health; step for GHA)
         if: always()

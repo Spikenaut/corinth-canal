@@ -209,6 +209,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "rustls",
  "sentry",
  "serde",
  "serde_json",
