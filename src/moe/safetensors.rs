@@ -16,8 +16,8 @@ use std::fs::{self, File};
 use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-// Windows advanced file identity (volume_serial_number, file_index) requires nightly
-// "windows_by_handle" feature; we fall back to canonicalize on stable for Azure Windows CI.
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 
 use memmap2::Mmap;
@@ -742,11 +742,9 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
 
     #[cfg(windows)]
     {
-        // volume_serial_number() and file_index() require nightly "windows_by_handle" feature
-        // (see Rust std docs). Use canonicalize fallback so the crate (and clippy) builds
-        // on stable windows-latest in Azure Pipelines. The advanced comparison can be
-        // re-enabled once stabilized or when using nightly for the Windows CI leg.
-        Ok(fs::canonicalize(left)? == fs::canonicalize(right)?)
+        // Use file_index and volume_serial_number for proper hardlink/alias detection
+        Ok(left_meta.file_index() == right_meta.file_index()
+            && left_meta.volume_serial_number() == right_meta.volume_serial_number())
     }
 
     #[cfg(not(any(unix, windows)))]
