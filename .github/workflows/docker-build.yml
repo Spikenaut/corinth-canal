@@ -22,7 +22,7 @@ jobs:
     name: Build Docker Image
     permissions:
       contents: read
-      packages: write
+      packages: write  # Only exercised on main push; login/push steps are if-guarded below
     # SECURITY: Fork guard — prevent fork PRs from running on self-hosted runners.
     if: >-
       github.event_name == 'push' ||

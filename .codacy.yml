@@ -1,3 +1,12 @@
+# NOTE: This file uses a non-standard `patterns` key that is NOT part of Codacy's
+# documented `.codacy.yml` schema. Codacy's native format uses `exclude_patterns`
+# at the top level for file exclusion, and per-tool configuration under `engines:`.
+# There is no native Codacy mechanism to downgrade severity for specific files.
+# The `patterns` block may be silently ignored by Codacy. If Codacy still flags
+# these findings, convert to `exclude_patterns` (full exclusion) or move ignores
+# to the Codacy UI per-branch pattern settings.
+#
+# See: https://docs.codacy.com/repositories-configure/configuring-code-patterns/
 ---
 patterns:
   - pattern: "File has too many non-comment lines of code"
