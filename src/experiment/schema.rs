@@ -166,7 +166,6 @@ pub struct ModelAdapterConfig {
     pub router_policy: String,
     pub norm_policy: String,
     pub expert_policy: String,
-    pub supports_heartbeat: bool,
     pub supports_route_metrics: bool,
     pub supports_block_metrics: bool,
     #[serde(default)]
