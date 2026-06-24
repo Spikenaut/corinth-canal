@@ -339,9 +339,9 @@ pub fn output_root_from_env() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::validate_safetensors_lineup_entries;
-    use crate::support::SafetensorsModelEntry;
+    use super::super::lineup::SafetensorsModelEntry;
     use corinth_canal::ModelFamily;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     #[should_panic(expected = "produced no usable entries")]
