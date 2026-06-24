@@ -904,7 +904,9 @@ mod tests {
         );
         assert_eq!(
             ModelFamily::Granite31A800M.slug(),
-            parse_family_slug(ModelFamily::Granite31A800M.slug()).unwrap().slug()
+            parse_family_slug(ModelFamily::Granite31A800M.slug())
+                .unwrap()
+                .slug()
         );
     }
 
@@ -947,5 +949,4 @@ mod tests {
             Some(ModelFamily::Moonlight16BA3B)
         );
     }
-
 }

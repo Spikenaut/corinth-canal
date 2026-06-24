@@ -84,10 +84,19 @@ jobs:
 # Caching note: Azure Pipelines Cargo cache can be added via Cache@2 task for target/ and registry if build times become issue.
 # See open questions in #109 for coverage upload and required vs informational.
 
-# Note on GitHub visibility (for PR #112):
-# Azure Pipelines results do NOT appear automatically in GitHub "Actions" or PR checks.
+# Note on GitHub visibility (for PR #112 and follow-ups):
+# Azure Pipelines results do NOT appear automatically in GitHub "Actions" or PR checks UI
+# even when builds run (see azure run on refs/pull/112/merge).
 # To surface them:
-# 1. Install "Azure Pipelines" GitHub App on the rmems org/repo.
-# 2. Ensure the "Limen-Neural" GitHub service connection in Azure DevOps is authorized for status updates.
-# 3. After merge, update the pipeline branch: az pipelines update --id 2 --branch main --org https://dev.azure.com/Limen-Neural --project "CI CD"
-# The pipeline will then report commit statuses to GitHub PRs.
+# 1. Install "Azure Pipelines" GitHub App on the rmems org/repo (required for auto reporting).
+# 2. Ensure the GitHub service connection (id d5f8216d-... "Limen-Neural") in Azure DevOps
+#    has "repo:status" and "repo:write" scopes and is authorized.
+# 3. Update pipeline default branch (done via az): az pipelines update --id 3 --branch main \
+#    --org https://dev.azure.com/Limen-Neural --project "CI CD"
+# 4. If still not visible on a PR, force a status (using gh cli):
+#    gh api repos/rmems/corinth-canal/statuses/<head-sha> --method POST \
+#      -f state=pending -f context="Azure Pipelines" \
+#      -f description="Azure Pipelines cross-platform CPU CI" \
+#      -f target_url="https://dev.azure.com/Limen-Neural/CI%20CD/_build/results?buildId=<id>"
+# This posts a commit status that GitHub surfaces in the PR checks.
+# Pipeline id 3 (corinth-canal-cross-platform) is the active one for this repo.

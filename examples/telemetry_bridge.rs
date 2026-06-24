@@ -5,8 +5,7 @@ mod support;
 
 use corinth_canal::{EMBEDDING_DIM, model::Model, moe::RoutingMode, telemetry::TelemetrySnapshot};
 use support::{
-    RunConfig,
-    default_spiking_model_config,
+    RunConfig, default_spiking_model_config,
     observability::{self, CommandObserver, SafeDiagnosticData},
 };
 

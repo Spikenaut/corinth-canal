@@ -20,12 +20,13 @@ use serde::Deserialize;
 use super::lineup::SafetensorsModelEntry;
 use super::{
     ResolvedTelemetry, TelemetrySource, ValidationModelSpec, cloud_execution_guard,
-    cloud_lineup_path_from_env, discover_validation_models, env_flag, input_drive_gain_from_env,
-    default_spiking_model_config, load_cloud_lineup, load_safetensors_lineup, model_family_override_from_env, parse_family_slug,
-    parse_routing_mode, pooled_prompt_embedding_from_ollama, prompt_embedding_for_validation, prompt_profile_slug, prompt_text_for_profile,
-    repeat_count_from_env, resolve_telemetry_source, routing_mode_override_from_env,
-    saaq_update_rule_from_env, safetensors_lineup_path_from_env, telemetry_snapshot_for_tick,
-    ticks_from_env,
+    cloud_lineup_path_from_env, default_spiking_model_config, discover_validation_models, env_flag,
+    input_drive_gain_from_env, load_cloud_lineup, load_safetensors_lineup,
+    model_family_override_from_env, parse_family_slug, parse_routing_mode,
+    pooled_prompt_embedding_from_ollama, prompt_embedding_for_validation, prompt_profile_slug,
+    prompt_text_for_profile, repeat_count_from_env, resolve_telemetry_source,
+    routing_mode_override_from_env, saaq_update_rule_from_env, safetensors_lineup_path_from_env,
+    telemetry_snapshot_for_tick, ticks_from_env,
 };
 
 /// Default output root for per-run artifacts when `VALIDATION_OUTPUT_ROOT`
@@ -392,8 +393,8 @@ pub fn output_root_from_env() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_safetensors_lineup_entries;
     use super::super::lineup::SafetensorsModelEntry;
+    use super::validate_safetensors_lineup_entries;
     use corinth_canal::ModelFamily;
     use std::path::Path;
 
