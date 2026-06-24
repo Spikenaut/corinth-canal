@@ -163,7 +163,7 @@ exercise the default feature set.
 ### Cross-platform and security CI
 
 - GitHub Actions: primary (see `.github/workflows/*.yml` for CPU, GPU, Docker, Sentry).
-- Azure Pipelines: redundant cross-platform CPU verification (Linux/macOS/Windows) on PRs + main (see `azure-pipelines.yml`, GH#109). Runs fmt/clippy/test/check/llvm-cov (CPU-only; GPU stays on GHA).
+- Azure Pipelines: redundant cross-platform CPU verification (Linux/macOS/Windows) on PRs + main (see `azure-pipelines.yml`, GH#109). Runs fmt/clippy/test/check/llvm-cov (CPU-only; GPU stays on GHA). Results do not appear in GitHub Actions UI by default; install the Azure Pipelines GitHub App and configure the service connection to report statuses (see azure-pipelines.yml comments). After merge, run: az pipelines update --id 2 --branch main --org https://dev.azure.com/Limen-Neural --project "CI CD"
 - Snyk: security scans (SCA for open-source deps, Code for SAST, etc.) are performed via the Snyk MCP server tools (e.g. `snyk__snyk_sca_scan`, `snyk__snyk_code_scan`, `snyk__snyk_container_scan`, `snyk__snyk_iac_scan`) instead of a dedicated CI workflow. Use during development, reviews, or agent-assisted tasks. GH#108. Aikido is tracked separately (see #70).
 
 Always run `cargo check --no-default-features && cargo test --no-default-features` locally before substantial changes (per Git Workflow below). Azure/GHA provide additional platform coverage. Snyk MCP provides on-demand security scanning.

@@ -78,3 +78,11 @@ jobs:
 
 # Caching note: Azure Pipelines Cargo cache can be added via Cache@2 task for target/ and registry if build times become issue.
 # See open questions in #109 for coverage upload and required vs informational.
+
+# Note on GitHub visibility (for PR #112):
+# Azure Pipelines results do NOT appear automatically in GitHub "Actions" or PR checks.
+# To surface them:
+# 1. Install "Azure Pipelines" GitHub App on the rmems org/repo.
+# 2. Ensure the "Limen-Neural" GitHub service connection in Azure DevOps is authorized for status updates.
+# 3. After merge, update the pipeline branch: az pipelines update --id 2 --branch main --org https://dev.azure.com/Limen-Neural --project "CI CD"
+# The pipeline will then report commit statuses to GitHub PRs.

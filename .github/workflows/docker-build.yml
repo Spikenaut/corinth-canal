@@ -60,6 +60,8 @@ jobs:
   publish:
     name: Publish Docker Image
     # Only runs on pushes to the main branch of the repository.
+    # On pull_request (including this PR), this job is intentionally skipped (see GitHub UI "skipped").
+    # The "build" job above verifies the image on PRs (without pushing).
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, X64, cuda-13.2, sm_120, gpu]
     env:
