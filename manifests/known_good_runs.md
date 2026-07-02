@@ -17,4 +17,4 @@ Format:
 
 ---
 
-_Bootstrap note retired: blessed historical entries are listed below; append newly reviewed run IDs at the top per this file's format._
+_No blessed runs yet. Append reviewed run IDs at the top per this file's format once Stage E is verified and the first artifacts/ tree is reviewed._
