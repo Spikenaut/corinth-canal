@@ -1,103 +1,84 @@
-# Azure Pipelines cross-platform CPU CI
-# See GH#109 for details. Runs in parallel with GitHub Actions for macOS/Windows/Linux coverage.
-# Non-goals: GPU/CUDA, Docker, Sentry (remain on GitHub Actions).
+# Azure Pipelines cross-platform CPU CI (modelled on Limen-Neural/neuromod).
+# Third-party tasks pinned to versions for reproducibility.
+# See GH#109 for details. GPU/CUDA, Docker, Sentry remain on GitHub Actions.
 
 trigger:
   branches:
     include:
-    - main
+      - main
 pr:
   branches:
     include:
-    - main
+      - main
+  autoCancel: false
 
 variables:
-  RUST_VERSION: stable
+  CARGO_HOME: $(Pipeline.workspace)/.cargo
+  RUSTUP_HOME: $(Pipeline.workspace)/.rustup
 
 jobs:
-- job: Linux
+- job: BuildTest
+  strategy:
+    matrix:
+      linux:
+        imageName: 'ubuntu-latest'
+      windows:
+        imageName: 'windows-latest'
+      mac:
+        imageName: 'macos-latest'
   pool:
-    vmImage: 'ubuntu-latest'
+    vmImage: $(imageName)
+
   steps:
   - checkout: self
-  - script: rustup default $(RUST_VERSION)
-    displayName: 'Install Rust'
+    persistCredentials: 'false'
+
+  - task: Cache@2
+    displayName: 'Rust Cache'
+    inputs:
+      key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+      restoreKeys: |
+        cargo | "$(Agent.OS)"
+      path: $(CARGO_HOME)
+
+  - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      export RUSTUP_HOME="$(RUSTUP_HOME)"
+      mkdir -p "$CARGO_HOME/bin"
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      echo "##vso[task.prependpath]$CARGO_HOME/bin"
+    displayName: 'Install Rust (rustup) - Unix'
+    condition: ne(variables['Agent.OS'], 'Windows_NT')
+
+  - powershell: |
+      $env:CARGO_HOME = "$(CARGO_HOME)"
+      $env:RUSTUP_HOME = "$(RUSTUP_HOME)"
+      New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
+      Invoke-WebRequest -Uri https://win.rustup.rs/ -OutFile rustup-init.exe
+      .\rustup-init.exe -y --default-toolchain stable --no-modify-path
+      Write-Host "##vso[task.prependpath]$env:CARGO_HOME\bin"
+    displayName: 'Install Rust (rustup) - Windows'
+    condition: eq(variables['Agent.OS'], 'Windows_NT')
+
+  - script: rustup component add rustfmt clippy llvm-tools-preview
+    displayName: 'Install components'
+
   - script: cargo fmt --all -- --check
-    displayName: 'cargo fmt check'
+    displayName: 'Format check'
+
   - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
-    displayName: 'cargo clippy (no-default, fail on warnings)'
+    displayName: 'Clippy (no-default)'
+
   - script: cargo test --lib --no-default-features --locked
-    displayName: 'cargo test --lib (no-default)'
+    displayName: 'Test (no-default)'
+
   - script: cargo check --examples --no-default-features --locked
-    displayName: 'cargo check --examples (no-default)'
-  - script: cargo install cargo-llvm-cov --locked
-    displayName: 'Install cargo-llvm-cov'
-  - script: cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
-    displayName: 'cargo llvm-cov (LCOV)'
-  # Note: coverage upload to Codecov is informational here; see codecov.yml and open questions in #109
+    displayName: 'Check examples (no-default)'
 
-- job: macOS
-  pool:
-    vmImage: 'macos-latest'
-  steps:
-  - checkout: self
-  - script: rustup default $(RUST_VERSION)
-    displayName: 'Install Rust'
-  - script: cargo fmt --all -- --check
-    displayName: 'cargo fmt check'
-  - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
-    displayName: 'cargo clippy (no-default, fail on warnings)'
-  - script: cargo test --lib --no-default-features --locked
-    displayName: 'cargo test --lib (no-default)'
-  - script: cargo check --examples --no-default-features --locked
-    displayName: 'cargo check --examples (no-default)'
-  - script: cargo install cargo-llvm-cov --locked
-    displayName: 'Install cargo-llvm-cov'
-  - script: cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
-    displayName: 'cargo llvm-cov (LCOV)'
-
-- job: Windows
-  pool:
-    vmImage: 'windows-latest'
-  steps:
-  - checkout: self
-  - script: rustup default $(RUST_VERSION)
-    displayName: 'Install Rust'
-  - script: cargo fmt --all -- --check
-    displayName: 'cargo fmt check'
-  - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
-    displayName: 'cargo clippy (no-default, fail on warnings)'
-  # NOTE: Windows CI is now enabled (no longer gated) after cross-platform fixes:
-  # - src/moe/checkpoint.rs: #[cfg(not(unix))] fallback for page_size (addresses P2).
-  # - src/moe/safetensors.rs: direct Win32 CreateFileW + GetFileInformationByHandle for stable file identity (volume+index) on Windows (preserves hardlinks, no unstable windows_by_handle/E0658, addresses codex P2).
-  # The no-default build and clippy now succeed on windows-latest stable in Azure.
-  # Cargo.lock kept up-to-date for --locked in all jobs.
-  - script: cargo test --lib --no-default-features --locked
-    displayName: 'cargo test --lib (no-default)'
-  - script: cargo check --examples --no-default-features --locked
-    displayName: 'cargo check --examples (no-default)'
-  - script: cargo install cargo-llvm-cov --locked
-    displayName: 'Install cargo-llvm-cov'
-  - script: cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
-    displayName: 'cargo llvm-cov (LCOV)'
-
-# Caching note: Azure Pipelines Cargo cache can be added via Cache@2 task for target/ and registry if build times become issue.
-# See open questions in #109 for coverage upload and required vs informational.
-
-# Note on GitHub visibility (for PR #112 and follow-ups):
-# Azure Pipelines results do NOT appear automatically in GitHub "Actions" or PR checks UI
-# even when builds run (see azure run on refs/pull/112/merge).
-# IMPORTANT: Manual gh api posts (as done previously) cause the user's profile picture as avatar
-# and do not auto-update when jobs pass/fail. To have the OFFICIAL Azure Pipelines logo
-# and accurate automatic updates (the checks will reflect pass/fail when the AzDO jobs complete):
-# 1. Install "Azure Pipelines" GitHub App on the rmems org/repo (from GitHub Marketplace).
-#    This is what posts with the official logo and listens to AzDO build events.
-# 2. Ensure the GitHub service connection (id d5f8216d-... "Limen-Neural") in Azure DevOps
-#    has "repo:status" and "repo:write" scopes and is authorized.
-# 3. Update pipeline default branch (done via az): az pipelines update --id 3 --branch main \
-#    --org https://dev.azure.com/Limen-Neural --project "CI CD"
-# Once set, the runs will automatically create/update the "Azure Pipelines / Linux" etc. checks
-# with the logo and accurate states. Remove manual posts after.
-# See azure-devops MCP tools (pipelines_get_build_status, list_runs, get_run, get_build_log)
-# for querying the authoritative state from AzDO.
-# Pipeline id 3 (corinth-canal-cross-platform) is the active one for this repo.
+  - bash: |
+      export CARGO_HOME="$(CARGO_HOME)"
+      cargo install cargo-llvm-cov --locked
+      cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
+    displayName: 'Coverage (llvm-cov)'
+    continueOnError: true
+    condition: eq(variables['imageName'], 'ubuntu-latest')
