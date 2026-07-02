@@ -1,0 +1,75 @@
+name: Snyk Security Scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "build.rs"
+
+permissions:
+  contents: read
+
+jobs:
+  snyk-sca:
+    name: Snyk SCA (Cargo.lock)
+    runs-on: ubuntu-latest
+    # SECURITY: Only run when SNYK_TOKEN is configured.
+    if: ${{ secrets.SNYK_TOKEN != '' }}
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+
+      - name: Install Snyk CLI
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+
+      - name: Snyk test (SCA)
+        continue-on-error: true
+        run: snyk test --all-projects --severity-threshold=high
+
+      - name: Snyk monitor (SCA)
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: snyk monitor --all-projects
+
+  snyk-code:
+    name: Snyk Code (SAST)
+    runs-on: ubuntu-latest
+    if: ${{ secrets.SNYK_TOKEN != '' }}
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Install Snyk CLI
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+
+      - name: Snyk code test (SAST)
+        continue-on-error: true
+        run: snyk code test --severity-threshold=high
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@e8e8e51caba890f74f97e228d00b0b81b666ee4c # v3
+        with:
+          sarif_file: snyk-code.sarif
+        continue-on-error: true

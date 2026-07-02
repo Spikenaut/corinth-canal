@@ -752,7 +752,7 @@ fn paths_refer_to_same_file(left: &Path, right: &Path) -> std::io::Result<bool> 
 /// Avoids the unstable `windows_by_handle` feature (E0658 on stable Rust).
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn windows_same_file_via_ffi(left: &Path, right: &Path) -> Result<bool> {
+fn windows_same_file_via_ffi(left: &Path, right: &Path) -> std::io::Result<bool> {
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
 
