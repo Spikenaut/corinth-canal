@@ -4,9 +4,9 @@
 ---
 exclude_paths:
   # Core SNN/GIF/temporal/router/GPU logic — intentionally complex
-  - "src/model/"
+  - "src/model/**"
   - "src/funnel.rs"
-  - "src/gpu/"
+  - "src/gpu/**"
   - "src/moe/routing.rs"
   - "src/telemetry.rs"
   - "src/latent.rs"
