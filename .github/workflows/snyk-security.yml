@@ -1,7 +1,7 @@
-# Snyk security scanning for Rust — single consolidated job.
-# Uses snyk/actions for official Snyk logo in GitHub checks.
-# Gated on SNYK_TOKEN — skipped silently when not configured.
-name: Snyk Security Scan
+# Security audit workflow — RustSec only.
+# Snyk scanning is handled by the Snyk GitHub App (official logo in checks).
+# This workflow only runs the free RustSec cargo-audit.
+name: Security Audit
 
 on:
   workflow_dispatch:
@@ -12,47 +12,15 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
-  snyk:
-    name: Snyk Security Scan
+  rustsec:
+    name: RustSec Audit
     runs-on: ubuntu-latest
-    env:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-
-      - name: Snyk Open Source (SCA)
-        if: env.SNYK_TOKEN != ''
-        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          command: test
-          args: --all-projects --severity-threshold=high
-
-      - name: Snyk Code (SAST)
-        if: env.SNYK_TOKEN != ''
-        uses: snyk/actions/code@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload SARIF
-        if: env.SNYK_TOKEN != '' && always()
-        uses: github/codeql-action/upload-sarif@e8e8e51caba890f74f97e228d00b0b81b666ee4c # v3
-        with:
-          sarif_file: snyk.sarif
-        continue-on-error: true
-
-      - name: RustSec Audit
-        if: always()
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
