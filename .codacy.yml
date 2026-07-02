@@ -1,0 +1,26 @@
+# Codacy configuration — documented schema keys only.
+# Large/complex files are excluded because this is a single-crate reference
+# implementation (per AGENTS.md) where architectural complexity is intentional.
+---
+exclude_paths:
+  # Core SNN/GIF/temporal/router/GPU logic — intentionally complex
+  - "src/model/"
+  - "src/funnel.rs"
+  - "src/gpu/"
+  - "src/moe/routing.rs"
+  - "src/telemetry.rs"
+  - "src/latent.rs"
+  # Large checkpoint/safetensor parsing — by design
+  - "src/moe/checkpoint.rs"
+  - "src/moe/safetensors.rs"
+  - "src/moe/safetensors/tests.rs"
+  - "src/moe/tests.rs"
+  - "src/moe/mod.rs"
+  # Examples with shared support modules
+  - "examples/saaq_latent_calibration.rs"
+  - "examples/support/mod.rs"
+  - "examples/support/observability.rs"
+  # Tooling/config noise
+  - ".kilo/**"
+  - ".codex/**"
+  - "node_modules/**"
