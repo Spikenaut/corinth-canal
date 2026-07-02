@@ -11,12 +11,11 @@ concurrency:
   group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Permissions: contents read for checkout; packages write is declared at workflow level
-# so the job can push the image to GHCR on main (the build job on PRs does not
-# perform any write because the login/push steps are guarded by `if: push to main`).
-# Write permission is declared at *job* level (not workflow-global) to address
-# codex P2 "Remove package write permission from PR builds".
-# Fork PRs excluded by job if-guard. Only main-push steps actually login/push.
+# SECURITY: Restrict default token permissions to read-only at workflow level.
+# The build job escalates to packages:write only for main-push publish steps.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build Docker Image
@@ -32,7 +31,7 @@ jobs:
       CUDAHOSTCXX: /usr/bin/clang++
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
 
@@ -50,14 +49,14 @@ jobs:
 
       - name: Login to GitHub Container Registry (only on main push)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker Image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

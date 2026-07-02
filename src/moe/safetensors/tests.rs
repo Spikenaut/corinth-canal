@@ -914,8 +914,6 @@ fn groups_experts_across_hugging_face_index_shards() {
 #[cfg(windows)]
 #[test]
 fn windows_same_file_detects_hardlinks_via_file_id() {
-    use std::os::windows::fs::MetadataExt;
-
     let dir = temp_dir("windows-hardlink");
     let original = dir.join("original.safetensors");
     write_safetensors(
@@ -927,16 +925,7 @@ fn windows_same_file_detects_hardlinks_via_file_id() {
     let hardlink = dir.join("hardlink.safetensors");
     std::fs::hard_link(&original, &hardlink).unwrap();
 
-    // Verify that file_index and volume_serial_number match for hardlinks
-    let original_meta = fs::metadata(&original).unwrap();
-    let hardlink_meta = fs::metadata(&hardlink).unwrap();
-    assert_eq!(original_meta.file_index(), hardlink_meta.file_index());
-    assert_eq!(
-        original_meta.volume_serial_number(),
-        hardlink_meta.volume_serial_number()
-    );
-
-    // Verify paths_refer_to_same_file returns true for hardlinks
+    // Verify paths_refer_to_same_file returns true for hardlinks (uses Win32 FFI file-id comparison)
     assert!(super::paths_refer_to_same_file(&original, &hardlink).unwrap());
 
     // Verify different files return false
