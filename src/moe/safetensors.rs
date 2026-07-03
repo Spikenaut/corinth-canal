@@ -757,12 +757,14 @@ fn windows_same_file_via_ffi(left: &Path, right: &Path) -> std::io::Result<bool>
     use std::os::windows::ffi::OsStrExt;
 
     #[repr(C)]
+    #[allow(clippy::upper_case_acronyms)]
     struct FILETIME {
         dw_low_date_time: u32,
         dw_high_date_time: u32,
     }
 
     #[repr(C)]
+    #[allow(clippy::upper_case_acronyms)]
     struct BY_HANDLE_FILE_INFORMATION {
         dw_file_attributes: u32,
         ft_creation_time: FILETIME,
