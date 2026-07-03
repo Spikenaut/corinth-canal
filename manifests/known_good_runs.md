@@ -10,7 +10,6 @@ Format:
 ## <run_id>
 - checkpoint: <model_slug> (<family>)
 - telemetry:  <source_label>
-- heartbeat:  on|off
 - saaq_rule:  saaq_v1_5 | legacy
 - conclusion: <one line>
 - artifacts:  <path under VALIDATION_OUTPUT_ROOT, or "artifacts/<run_id>/">
@@ -18,12 +17,9 @@ Format:
 
 ---
 
-_No blessed runs yet. Bootstrap this file once Stage E is verified and the
-first artifacts/ tree is reviewed._
-
 ## SAAQ 1.5 OLMoE RE4 Control — 2026-04-23
 
-NOTE (legacy control signal experiment, cleaned 2026-06 per GH#102): The heartbeat on/off entries below (and the May 2026 issue-40 heartbeat data dirs) document null-result baselines from the old experimental control signal. `supports_heartbeat` + all related fields/columns/tick annotations + supporting code were removed. The artifact data directories were deleted in this hygiene pass (evidence of the null results is preserved in the text of this file and especially artifacts/issue-40-local/issue-40-local-summary.md which contains the full tables, numbers, and analysis). Current sviz profiles use clean condition-tagged runs only (no heartbeat dirs or columns).
+NOTE (legacy control signal experiment, cleaned 2026-06 per GH#102): The heartbeat on/off entries below document null-result baselines from the old experimental control signal. `supports_heartbeat` + all related fields/columns/tick annotations + supporting code were removed. The artifact data directories were deleted in this hygiene pass (evidence of the null results is preserved in the text of this file and especially artifacts/issue-40-local/issue-40-local-summary.md). Current sviz profiles use clean condition-tagged runs only.
 
 - Model: `olmoe_baseline`
 - Family: `Olmoe`

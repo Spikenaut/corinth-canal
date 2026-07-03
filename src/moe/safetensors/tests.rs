@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 use super::*;
 use std::io::Write;
 use std::ops::Deref;
@@ -908,4 +909,31 @@ fn groups_experts_across_hugging_face_index_shards() {
             .iter()
             .all(|tensor| tensor.source_shard.ends_with(".safetensors"))
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_same_file_detects_hardlinks_via_file_id() {
+    let dir = temp_dir("windows-hardlink");
+    let original = dir.join("original.safetensors");
+    write_safetensors(
+        &original,
+        r#"{"a.weight": {"dtype": "F16", "shape": [1], "data_offsets": [0, 2]}}"#,
+        2,
+    );
+
+    let hardlink = dir.join("hardlink.safetensors");
+    std::fs::hard_link(&original, &hardlink).unwrap();
+
+    // Verify paths_refer_to_same_file returns true for hardlinks (uses Win32 FFI file-id comparison)
+    assert!(super::paths_refer_to_same_file(&original, &hardlink).unwrap());
+
+    // Verify different files return false
+    let different = dir.join("different.safetensors");
+    write_safetensors(
+        &different,
+        r#"{"b.weight": {"dtype": "F16", "shape": [1], "data_offsets": [0, 2]}}"#,
+        2,
+    );
+    assert!(!super::paths_refer_to_same_file(&original, &different).unwrap());
 }

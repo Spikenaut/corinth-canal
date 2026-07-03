@@ -1,11 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 mod support;
 
 use corinth_canal::{gpu::GpuAccelerator, model::Model};
 use std::io::Error;
 use std::time::Instant;
 use support::{
-    config::RunConfig,
-    default_spiking_model_config,
+    RunConfig, default_spiking_model_config,
     observability::{self, CommandObserver, SafeDiagnosticData},
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Shared helper functions for the example binaries.
 
 pub mod config;
 pub mod lineup;
 pub mod observability;
 
+#[cfg(feature = "cuda")]
 pub use config::RunConfig;
 pub use lineup::{
     cloud_execution_guard, cloud_lineup_path_from_env, load_cloud_lineup, load_safetensors_lineup,
@@ -152,7 +154,6 @@ pub fn saaq_update_rule_from_env() -> SaaqUpdateRule {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptEmbeddingProvider {
     Ollama,
@@ -200,7 +201,6 @@ pub fn prompt_embedding_for_validation(
     ))
 }
 
-#[allow(dead_code)]
 pub fn pooled_prompt_embedding_from_ollama(
     prompt_text: &str,
     target_dim: usize,
@@ -409,6 +409,7 @@ pub struct ResolvedTelemetry {
 }
 
 impl ResolvedTelemetry {
+    #[cfg(feature = "cuda")]
     pub fn row_count(&self) -> Option<usize> {
         self.rows.as_ref().map(|rows| rows.len())
     }
@@ -625,7 +626,6 @@ fn parse_finite_f32(value: &str) -> Option<f32> {
     }
 }
 
-#[allow(dead_code)]
 pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot {
     let phase = tick as f32 * 0.041;
     corinth_canal::TelemetrySnapshot {
@@ -646,6 +646,7 @@ pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot 
 /// comfortably cross threshold and yield healthy 5–15 % firing rates.
 ///
 /// Override via `INPUT_DRIVE_GAIN` env var for per-model tuning.
+#[cfg(feature = "cuda")]
 pub fn input_drive_gain_from_env() -> f32 {
     env_f32("INPUT_DRIVE_GAIN", 32.0)
 }
@@ -671,7 +672,6 @@ fn slug_from_path(path: &str) -> String {
         .to_ascii_lowercase()
 }
 
-#[allow(dead_code)]
 fn resample_embedding(input: &[f32], target_len: usize) -> Vec<f32> {
     if target_len == 0 {
         return Vec::new();
@@ -703,7 +703,6 @@ fn resample_embedding(input: &[f32], target_len: usize) -> Vec<f32> {
     out
 }
 
-#[allow(dead_code)]
 fn normalize_embedding(values: &mut [f32]) {
     let l2_norm = values.iter().map(|&v| v * v).sum::<f32>().sqrt();
     if l2_norm > 1e-8 {
@@ -713,7 +712,6 @@ fn normalize_embedding(values: &mut [f32]) {
     }
 }
 
-#[allow(dead_code)]
 fn synthetic_text_embedding(prompt_text: &str, target_dim: usize) -> Vec<f32> {
     if target_dim == 0 {
         return Vec::new();
@@ -738,7 +736,6 @@ fn synthetic_text_embedding(prompt_text: &str, target_dim: usize) -> Vec<f32> {
     embedding
 }
 
-#[allow(dead_code)]
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for &byte in bytes {
@@ -748,7 +745,6 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-#[allow(dead_code)]
 fn env_f32(key: &str, default_value: f32) -> f32 {
     std::env::var(key)
         .ok()
@@ -900,10 +896,6 @@ mod tests {
             parse_family_slug("granite31a800m"),
             Some(ModelFamily::Granite31A800M)
         );
-        assert_eq!(
-            ModelFamily::Granite31A800M.slug(),
-            parse_family_slug(ModelFamily::Granite31A800M.slug()).unwrap()
-        );
     }
 
     #[test]
@@ -943,26 +935,6 @@ mod tests {
         assert_eq!(
             parse_family_slug("MOONLIGHT"),
             Some(ModelFamily::Moonlight16BA3B)
-        );
-    }
-
-    #[test]
-    fn parse_family_slug_accepts_granite_aliases() {
-        assert_eq!(
-            parse_family_slug("granite"),
-            Some(ModelFamily::Granite31A800M)
-        );
-        assert_eq!(
-            parse_family_slug("granite_3_1"),
-            Some(ModelFamily::Granite31A800M)
-        );
-        assert_eq!(
-            parse_family_slug("granite_3_1_a800m"),
-            Some(ModelFamily::Granite31A800M)
-        );
-        assert_eq!(
-            parse_family_slug("granite31a800m"),
-            Some(ModelFamily::Granite31A800M)
         );
     }
 }

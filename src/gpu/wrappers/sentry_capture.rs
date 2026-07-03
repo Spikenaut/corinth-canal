@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  gpu/sentry_capture.rs — Sentry telemetry for CUDA launch failures
 //

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  vector_similarity.cu — GPU cosine-similarity kernels
 //

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  common.cuh — Shared definitions for all neuro-spike CUDA kernels
 //

@@ -160,6 +160,14 @@ cargo test --no-default-features
 On CUDA-equipped setups with `nvcc` available, `just check` and `just test`
 exercise the default feature set.
 
+### Cross-platform and security CI
+
+- GitHub Actions: primary (see `.github/workflows/*.yml` for CPU, GPU, Docker, Sentry).
+- Azure Pipelines: redundant cross-platform CPU verification (Linux/macOS/Windows) on PRs + main (see `azure-pipelines.yml`, GH#109). Runs fmt/clippy/test/check/llvm-cov (CPU-only; GPU stays on GHA). Results do not appear in GitHub Actions UI by default; install the Azure Pipelines GitHub App (for official logo + auto accurate pass/fail updates per job) and configure the service connection to report statuses (see azure-pipelines.yml comments). After merge, run: az pipelines update --id 3 --branch main --org https://dev.azure.com/Limen-Neural --project "CI CD". Use azure-devops MCP tools (e.g. pipelines_get_build_status, list_runs) for authoritative state. Note: /scripts/* (incl. sentry_release.sh) are deliberately gitignored (chore d1d02c8) for local-only use; GHA health steps use echo + MCP for PRs.
+- Snyk: security scans (SCA for open-source deps, Code for SAST, etc.) are performed via the Snyk MCP server tools (e.g. `snyk__snyk_sca_scan`, `snyk__snyk_code_scan`, `snyk__snyk_container_scan`, `snyk__snyk_iac_scan`) instead of a dedicated CI workflow. Use during development, reviews, or agent-assisted tasks. GH#108. Aikido is tracked separately (see #70).
+
+Run `cargo check --no-default-features && cargo test --no-default-features` locally before substantial Rust changes (per Git Workflow below). Docs-only, license-only, CI-only, or similar non-behavioral/non-Rust edits do not require full cargo validation (use targeted checks or skip as escape hatch). Azure/GHA provide additional platform coverage. Snyk MCP provides on-demand security scanning.
+
 ## Entry Order
 
 - Start at `src/lib.rs` for the exported crate surface.
@@ -177,8 +185,9 @@ exercise the default feature set.
 
 - Prefer `git` commands over MCP tools for branch and PR operations in this environment.
 - Keep behavioral changes separate from structural refactors when possible.
-- Run `cargo check --no-default-features` and `cargo test --no-default-features` before closing substantial Rust changes.
+- Run `cargo check --no-default-features` and `cargo test --no-default-features` before closing substantial Rust changes. Docs-only, license-only, or similar non-Rust edits do not require cargo validation.
 - On CUDA-equipped setups with `nvcc` available, also run the default-feature path and `cargo build --examples`.
+- Azure Pipelines (GH#109) provides additional signals; treat failures like GHA. Snyk scans via MCP tools (see Cross-platform and security CI section) for on-demand use in development/agent flows (GH#108).
 
 ## Repository Context
 

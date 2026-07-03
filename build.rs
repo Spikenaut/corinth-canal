@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

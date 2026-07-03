@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Experiment orchestration and output schema.
 //!
 //! This module holds the canonical data structures consumed by downstream

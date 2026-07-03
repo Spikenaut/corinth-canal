@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  gpu/mod.rs — GPU sub-module declarations and public re-exports
 // ════════════════════════════════════════════════════════════════════

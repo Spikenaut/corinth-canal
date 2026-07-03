@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 #include "myelin_shim.h"
 
 #include "spiking_network.cu"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 #![cfg(feature = "cuda")]
 // ════════════════════════════════════════════════════════════════════
 //  gpu/kernel.rs — Fatbin Module Loading and Kernel Management

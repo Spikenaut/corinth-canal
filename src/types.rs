@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Public data types for `corinth-canal`.
 
 use std::path::PathBuf;

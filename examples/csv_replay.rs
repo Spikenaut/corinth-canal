@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! CSV replay example: ingest canonical telemetry CSV into Model.
 //!
 //! Canonical CSV format: timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w
 
 mod support;
 
-use support::config::RunConfig;
+use support::RunConfig;
 use support::default_spiking_model_config;
 use support::observability::{self, CommandObserver, SafeDiagnosticData};
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Integration tests for GPU Sentry telemetry capture.
 //!
 //! These tests verify that CUDA launch failures are properly captured and

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Diagnostic pass for issue #31.
 //!
 //! Loads each validation model in the configured lineup (LINEUP_CONFIG, then
@@ -18,7 +19,7 @@ use serde::Serialize;
 
 use corinth_canal::ModelFamily;
 use corinth_canal::moe::{GpuSynapseTensorDescriptor, Router, RoutingMode};
-use support::config::RunConfig;
+use support::RunConfig;
 use support::{
     ValidationModelSpec,
     observability::{self, CommandObserver, SafeDiagnosticData},

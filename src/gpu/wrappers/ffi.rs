@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 // ════════════════════════════════════════════════════════════════════
 //  gpu/ffi.rs — C ABI shim wrappers for Blackwell-critical kernels
 //

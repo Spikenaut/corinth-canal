@@ -1,0 +1,84 @@
+# Security scanning: RustSec audit + Snyk SCA (SBOM-based) + Snyk Code (SAST).
+# Snyk Rust support: SCA via sbom test (generate SBOM from Cargo.lock first),
+# SAST via snyk code test (Enterprise). See https://docs.snyk.io/supported-languages/supported-languages-list/rust
+name: Security Scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  rustsec:
+    name: RustSec Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  snyk-sca:
+    name: Snyk SCA
+    runs-on: ubuntu-latest
+    if: ${{ vars.SNYK_ENABLED == 'true' || secrets.SNYK_TOKEN != '' }}
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Install Snyk CLI
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json
+
+      - name: Snyk SBOM test
+        if: env.SNYK_TOKEN != ''
+        continue-on-error: true
+        run: snyk sbom test --file=bom.json --severity-threshold=high --sarif-file-output=snyk.sarif
+
+      - name: Upload SARIF
+        if: always() && hashFiles('snyk.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e8e8e51caba890f74f97e228d00b0b81b666ee4c # v3
+        with:
+          sarif_file: snyk.sarif
+        continue-on-error: true
+
+  snyk-code:
+    name: Snyk Code (SAST)
+    runs-on: ubuntu-latest
+    if: ${{ vars.SNYK_ENABLED == 'true' || secrets.SNYK_TOKEN != '' }}
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Install Snyk CLI
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+
+      - name: Snyk Code test
+        if: env.SNYK_TOKEN != ''
+        continue-on-error: true
+        run: snyk code test --severity-threshold=high --sarif-file-output=snyk-code.sarif
+
+      - name: Upload SARIF
+        if: always() && hashFiles('snyk-code.sarif') != ''
+        uses: github/codeql-action/upload-sarif@e8e8e51caba890f74f97e228d00b0b81b666ee4c # v3
+        with:
+          sarif_file: snyk-code.sarif
+        continue-on-error: true

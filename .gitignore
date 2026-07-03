@@ -50,3 +50,4 @@ configs/safetensors_lineup.toml
 .dolt/
 *.db
 .beads-credential-key
+.cursor/

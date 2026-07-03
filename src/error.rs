@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Error types for `corinth-canal`.
 //!
 //! All public functions in this crate return [`HybridError`] wrapped in a
