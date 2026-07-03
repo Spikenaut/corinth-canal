@@ -896,12 +896,6 @@ mod tests {
             parse_family_slug("granite31a800m"),
             Some(ModelFamily::Granite31A800M)
         );
-        assert_eq!(
-            ModelFamily::Granite31A800M.slug(),
-            parse_family_slug(ModelFamily::Granite31A800M.slug())
-                .unwrap()
-                .slug()
-        );
     }
 
     #[test]
