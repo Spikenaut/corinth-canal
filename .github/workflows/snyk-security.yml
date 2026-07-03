@@ -48,7 +48,7 @@ jobs:
       - name: Snyk SBOM test
         if: env.SNYK_TOKEN != ''
         continue-on-error: true
-        run: snyk sbom test --file=bom.json --severity-threshold=high
+        run: snyk sbom test --file=bom.json --severity-threshold=high --sarif-file-output=snyk.sarif
 
       - name: Upload SARIF
         if: always() && hashFiles('snyk.sarif') != ''
