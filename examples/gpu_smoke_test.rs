@@ -12,21 +12,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::from_filename(".env.local");
 
     // Suppress broken pipe panics when stdout is piped to a short-lived process.
+    // Note: a panic hook cannot stop unwinding, so `main` also catches unwinds
+    // and treats Broken pipe panics as a clean exit.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Some(s) = info.payload().downcast_ref::<&str>() {
-            if s.contains("Broken pipe") {
-                return;
-            }
+        let is_broken_pipe = info
+            .payload()
+            .downcast_ref::<&str>()
+            .is_some_and(|s| s.contains("Broken pipe"))
+            || info
+                .payload()
+                .downcast_ref::<String>()
+                .is_some_and(|s| s.contains("Broken pipe"));
+
+        if is_broken_pipe {
+            return;
         }
+
         default_hook(info);
     }));
 
     let _sentry_guard = observability::init_sentry("gpu_smoke_test");
     let observer = observability::start_command("gpu_smoke_test");
-    let result = run(&observer);
+
+    let result = match std::panic::catch_unwind(|| run(&observer)) {
+        Ok(result) => result,
+        Err(payload) => {
+            if is_broken_pipe_payload(&*payload) {
+                Ok(())
+            } else {
+                std::panic::resume_unwind(payload);
+            }
+        }
+    };
+
     observer.finish(&result, SafeDiagnosticData::default());
     result
+}
+
+fn is_broken_pipe_payload(payload: &(dyn std::any::Any + Send)) -> bool {
+    payload
+        .downcast_ref::<&str>()
+        .is_some_and(|s| s.contains("Broken pipe"))
+        || payload
+            .downcast_ref::<String>()
+            .is_some_and(|s| s.contains("Broken pipe"))
 }
 
 fn run(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>> {
