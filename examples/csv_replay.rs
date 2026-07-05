@@ -55,9 +55,9 @@ fn main() -> corinth_canal::Result<()> {
 fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        return Err(HybridError::InvalidConfig(format!(
-            "missing telemetry CSV path. Usage: cargo run --example csv_replay <telemetry.csv>; CSV format: {EXPECTED_HEADER}"
-        )));
+        eprintln!("Usage: cargo run --example csv_replay <telemetry.csv>");
+        eprintln!("CSV format: {EXPECTED_HEADER}");
+        std::process::exit(1);
     }
 
     let run_cfg = RunConfig::from_env();

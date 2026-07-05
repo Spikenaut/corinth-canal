@@ -161,28 +161,31 @@ impl RunConfig {
 fn validate_optional_lineups_from_env() {
     if let Some(path) = cloud_lineup_path_from_env() {
         let entries = load_cloud_lineup(&path).unwrap_or_else(|err| {
-            panic!(
+            eprintln!(
                 "CLOUD_LINEUP_CONFIG={} could not be loaded: {err}",
                 path.display()
-            )
+            );
+            std::process::exit(1);
         });
         for entry in &entries {
             cloud_execution_guard(entry).unwrap_or_else(|err| {
-                panic!(
+                eprintln!(
                     "CLOUD_LINEUP_CONFIG={} failed validation for slug={}: {err}",
                     path.display(),
                     entry.slug
-                )
+                );
+                std::process::exit(1);
             });
         }
     }
 
     if let Some(path) = safetensors_lineup_path_from_env() {
         let entries = load_safetensors_lineup(&path).unwrap_or_else(|err| {
-            panic!(
+            eprintln!(
                 "SAFETENSORS_LINEUP_CONFIG={} could not be loaded: {err}",
                 path.display()
-            )
+            );
+            std::process::exit(1);
         });
         validate_safetensors_lineup_entries(&path, &entries);
     }
@@ -190,35 +193,39 @@ fn validate_optional_lineups_from_env() {
 
 fn validate_safetensors_lineup_entries(path: &Path, entries: &[SafetensorsModelEntry]) {
     if entries.is_empty() {
-        panic!(
+        eprintln!(
             "SAFETENSORS_LINEUP_CONFIG={} produced no usable entries. \
              Placeholder-only or missing-path lineups are not valid runtime config.",
             path.display()
         );
+        std::process::exit(1);
     }
     for entry in entries {
         if entry.slug.trim().is_empty() {
-            panic!(
+            eprintln!(
                 "SAFETENSORS_LINEUP_CONFIG={} contains an empty slug for path={}",
                 path.display(),
                 entry.path.display()
             );
+            std::process::exit(1);
         }
         if !entry.target.eq_ignore_ascii_case("local") {
-            panic!(
+            eprintln!(
                 "SAFETENSORS_LINEUP_CONFIG={} has invalid target={} for slug={}",
                 path.display(),
                 entry.target,
                 entry.slug
             );
+            std::process::exit(1);
         }
         if !entry.path.exists() {
-            panic!(
+            eprintln!(
                 "SAFETENSORS_LINEUP_CONFIG={} resolved missing path={} for slug={}",
                 path.display(),
                 entry.path.display(),
                 entry.slug
             );
+            std::process::exit(1);
         }
         if let Some(family) = entry.family {
             let _ = family.slug();
@@ -246,7 +253,8 @@ fn resolve_validation_models(
                 } else {
                     ""
                 };
-                panic!("LINEUP_CONFIG={path_str} could not be loaded: {err}{hint}");
+                eprintln!("LINEUP_CONFIG={path_str} could not be loaded: {err}{hint}");
+                std::process::exit(1);
             }
         }
     }
@@ -266,7 +274,8 @@ fn resolve_validation_models(
             }
             Err(err) => {
                 let path_str = path.display().to_string();
-                panic!("SAFETENSORS_LINEUP_CONFIG={path_str} could not be loaded: {err}");
+                eprintln!("SAFETENSORS_LINEUP_CONFIG={path_str} could not be loaded: {err}");
+                std::process::exit(1);
             }
         }
     }
