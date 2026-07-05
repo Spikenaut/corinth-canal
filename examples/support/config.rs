@@ -249,9 +249,9 @@ fn resolve_validation_models(
             Err(err) => {
                 let path_str = path.display().to_string();
                 let hint = if path_str.contains("/absolute/path/to/") {
-                    "\n\nHINT: The path appears to be a placeholder from .env.example or a config template.\n      Please update LINEUP_CONFIG in .env.local with a real path."
+                    "\n\nHINT: The path appears to be a placeholder from .env.example or a config template.\n      Please update LINEUP_CONFIG in .env.local with a real path.\n      Also verify the file exists and is readable (check file permissions)."
                 } else {
-                    ""
+                    "\n\nHINT: Verify the file exists at the given path and is readable (check file permissions)."
                 };
                 eprintln!("LINEUP_CONFIG={path_str} could not be loaded: {err}{hint}");
                 std::process::exit(1);
