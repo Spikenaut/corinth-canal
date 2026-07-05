@@ -14,10 +14,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Suppress broken pipe panics when stdout is piped to a short-lived process.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Some(s) = info.payload().downcast_ref::<&str>() {
-            if s.contains("Broken pipe") {
-                return;
-            }
+        let is_broken_pipe = info
+            .payload()
+            .downcast_ref::<String>()
+            .is_some_and(|s| s.contains("Broken pipe"))
+            || info
+                .payload()
+                .downcast_ref::<&str>()
+                .is_some_and(|s| s.contains("Broken pipe"));
+        if is_broken_pipe {
+            return;
         }
         default_hook(info);
     }));
