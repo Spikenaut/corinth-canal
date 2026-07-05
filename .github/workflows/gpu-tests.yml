@@ -6,7 +6,7 @@ on:
 
 concurrency:
   group: gpu-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 # SECURITY: Restrict top-level permissions to read-only.
 permissions:

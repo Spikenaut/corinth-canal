@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 # SECURITY: Restrict default token permissions to read-only at workflow level.
 # The build job escalates to packages:write only for main-push publish steps.
