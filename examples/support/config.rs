@@ -193,39 +193,35 @@ fn validate_optional_lineups_from_env() {
 
 fn validate_safetensors_lineup_entries(path: &Path, entries: &[SafetensorsModelEntry]) {
     if entries.is_empty() {
-        eprintln!(
+        panic!(
             "SAFETENSORS_LINEUP_CONFIG={} produced no usable entries. \
              Placeholder-only or missing-path lineups are not valid runtime config.",
             path.display()
         );
-        std::process::exit(1);
     }
     for entry in entries {
         if entry.slug.trim().is_empty() {
-            eprintln!(
+            panic!(
                 "SAFETENSORS_LINEUP_CONFIG={} contains an empty slug for path={}",
                 path.display(),
                 entry.path.display()
             );
-            std::process::exit(1);
         }
         if !entry.target.eq_ignore_ascii_case("local") {
-            eprintln!(
+            panic!(
                 "SAFETENSORS_LINEUP_CONFIG={} has invalid target={} for slug={}",
                 path.display(),
                 entry.target,
                 entry.slug
             );
-            std::process::exit(1);
         }
         if !entry.path.exists() {
-            eprintln!(
+            panic!(
                 "SAFETENSORS_LINEUP_CONFIG={} resolved missing path={} for slug={}",
                 path.display(),
                 entry.path.display(),
                 entry.slug
             );
-            std::process::exit(1);
         }
         if let Some(family) = entry.family {
             let _ = family.slug();

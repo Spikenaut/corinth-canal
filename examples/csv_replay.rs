@@ -45,14 +45,8 @@ fn mean_squared_error(output: &[f32], target: &[f32]) -> f32 {
 
 fn main() -> corinth_canal::Result<()> {
     let _ = dotenvy::from_filename(".env.local");
-    let _sentry_guard = observability::init_sentry("csv_replay");
-    let observer = observability::start_command("csv_replay");
-    let result = run(&observer);
-    observer.finish(&result, SafeDiagnosticData::default());
-    result
-}
 
-fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
+    // Validate args before initializing Sentry/observer so usage errors exit cleanly.
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: cargo run --example csv_replay <telemetry.csv>");
@@ -60,6 +54,15 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
         std::process::exit(1);
     }
 
+    let _sentry_guard = observability::init_sentry("csv_replay");
+    let observer = observability::start_command("csv_replay");
+    let result = run(&observer, &args);
+    observer.finish(&result, SafeDiagnosticData::default());
+    result
+}
+
+fn run(observer: &CommandObserver, args: &[String]) -> corinth_canal::Result<()> {
+    let csv_path = &args[1];
     let run_cfg = RunConfig::from_env();
     let mut safe = SafeDiagnosticData::default().with_telemetry_source("csv");
     if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.checkpoint_path) {
@@ -69,7 +72,6 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
         observer.annotate(safe);
     }
 
-    let csv_path = &args[1];
     let cfg = default_spiking_model_config(run_cfg.checkpoint_path.clone(), 20);
 
     let mut model = Model::new_with_projector_neurons(cfg.clone(), FUNNEL_HIDDEN_NEURONS)?;
