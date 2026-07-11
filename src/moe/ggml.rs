@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! GGML type constants, labels, and diagnostic helpers.
 
-pub(super) const GGUF_MAGIC: [u8; 4] = [b'G', b'G', b'U', b'F'];
+pub(super) const GGUF_MAGIC: [u8; 4] = *b"GGUF";
 pub(super) const GGUF_VERSION: u32 = 3;
 pub(super) const GGML_TYPE_F32: u32 = 0;
 pub(super) const GGML_TYPE_F16: u32 = 1;
