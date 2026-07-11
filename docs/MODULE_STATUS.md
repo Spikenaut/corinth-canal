@@ -12,7 +12,8 @@ Status legend: `reference` · `stabilizing` · `proven` · `frozen`
 | `src/model/temporal.rs` | stabilizing | `rmems-model` | GPU temporal loop is tight and proven. Legacy fallback to a CWD-relative routing CSV still exists when `ModelConfig::gpu_routing_telemetry_path` is unset, so callers must keep the sink explicit. |
 | `src/model/telemetry_io.rs` | stabilizing | `rmems-model` | Pure helper. Public behavior is stable; promotion depends mainly on the surrounding runtime/API cleanup. |
 | `src/moe/mod.rs` | stabilizing | `rmems-moe` | Host entry for `Router`; surface is clean. Pending full model-family validation matrix. |
-| `src/moe/checkpoint.rs` | reference | `rmems-moe` | GGUF parser/mmap/dequant layer works, but still needs a broader parser and format test battery before promotion. |
+| `src/moe/checkpoint.rs` | reference | `rmems-moe` | Thin façade re-exporting `src/moe/gguf/` (metadata/map/dequant/cuda_register). GGUF parser/mmap/dequant works; needs broader format test battery before promotion. |
+| `src/moe/gguf/` | reference | `rmems-moe` | Internal split of former monolithic checkpoint: parse, mmap access, dequant, CUDA host register. |
 | `src/moe/adapter.rs` | stabilizing | `rmems-moe` | Five-family adapter resolution is implemented; needs broader validation coverage. |
 | `src/moe/routing.rs` | stabilizing | `rmems-moe` | Stateless routing math. Low-risk promotion candidate. |
 | `src/projector.rs` | stabilizing | `rmems-projector` | `ProjectionMode` surface is stable; `SpikingTernary` remains the live research path. |

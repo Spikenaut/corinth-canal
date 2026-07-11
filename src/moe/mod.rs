@@ -2,7 +2,8 @@
 //! Public MoE router API backed by a family-aware GGUF and Safetensors bridge.
 //!
 //! Private helpers live in:
-//! - `moe/checkpoint.rs` for GGUF parsing + mapped tensor access
+//! - `moe/gguf/` for GGUF parsing + mapped tensor access (via `checkpoint` façade)
+//! - `moe/checkpoint.rs` compatibility re-export of `gguf/`
 //! - `moe/adapter.rs` for model-family detection and tensor selection
 //! - `moe/routing.rs` for routing math and embedding resampling
 //! - `moe/safetensors.rs` for Safetensors header inspection, manifests, and tensor loading
@@ -10,6 +11,7 @@
 mod adapter;
 mod checkpoint;
 mod ggml;
+mod gguf;
 mod routing;
 pub mod safetensors;
 
@@ -17,9 +19,15 @@ use self::adapter::{ModelAdapter, SynapseSource, resolve_adapter, resolve_safete
 use self::checkpoint::{
     MappedGgufCheckpoint, extract_named_token_embedding_from_checkpoint, probe_and_map_checkpoint,
 };
+// Constants used by adapter/routing helpers in this module tree.
 use self::ggml::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
-    GGML_TYPE_Q8_0, GGUF_MAGIC, GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
+};
+// GGUF test fixture helpers (`moe/tests.rs`) pull these via `use super::*`.
+#[cfg(test)]
+#[allow(unused_imports)]
+use self::ggml::{
+    GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGUF_MAGIC, GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL,
     GGUF_VALUE_TYPE_FLOAT32, GGUF_VALUE_TYPE_FLOAT64, GGUF_VALUE_TYPE_INT8, GGUF_VALUE_TYPE_INT16,
     GGUF_VALUE_TYPE_INT32, GGUF_VALUE_TYPE_INT64, GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT8,
     GGUF_VALUE_TYPE_UINT16, GGUF_VALUE_TYPE_UINT32, GGUF_VALUE_TYPE_UINT64, GGUF_VERSION,
