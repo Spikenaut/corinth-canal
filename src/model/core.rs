@@ -29,6 +29,46 @@ pub(super) fn resolve_gpu_routing_telemetry_path(config: &ModelConfig) -> std::p
         .unwrap_or_else(|| std::path::PathBuf::from(GPU_ROUTING_TELEMETRY_PATH))
 }
 
+/// Validate config fields that can be checked before the router is loaded.
+fn validate_initial_config(config: &ModelConfig) -> Result<()> {
+    if config.snn_steps == 0 {
+        return Err(HybridError::InvalidConfig("snn_steps must be ≥ 1".into()));
+    }
+    if config.num_experts > 0
+        && config.top_k_experts > 0
+        && config.top_k_experts > config.num_experts
+    {
+        return Err(HybridError::InvalidConfig(format!(
+            "top_k_experts ({}) > num_experts ({})",
+            config.top_k_experts, config.num_experts
+        )));
+    }
+    Ok(())
+}
+
+/// Fill expert-related config from the loaded router and re-validate top_k.
+fn finalize_experts_from_router(config: &mut ModelConfig, router: &Router) -> Result<()> {
+    if config.num_experts == 0 {
+        config.num_experts = router.checkpoint_num_experts();
+    }
+    if config.top_k_experts > 0 && config.top_k_experts > config.num_experts {
+        return Err(HybridError::InvalidConfig(format!(
+            "top_k_experts ({}) > num_experts ({})",
+            config.top_k_experts, config.num_experts
+        )));
+    }
+    if config.top_k_experts == 0 {
+        config.top_k_experts = router.checkpoint_expert_used_count();
+    }
+    if config.gpu_synapse_tensor_name.trim().is_empty() {
+        config.gpu_synapse_tensor_name = router
+            .real_gpu_synapse_tensor_name()
+            .unwrap_or_default()
+            .to_owned();
+    }
+    Ok(())
+}
+
 /// Standalone runtime that keeps the projector and router logic real while
 /// replacing the original front-end with deterministic synthetic spikes.
 pub struct Model {
@@ -47,18 +87,7 @@ impl Model {
         mut config: ModelConfig,
         projector_neurons: usize,
     ) -> Result<Self> {
-        if config.snn_steps == 0 {
-            return Err(HybridError::InvalidConfig("snn_steps must be ≥ 1".into()));
-        }
-        if config.num_experts > 0
-            && config.top_k_experts > 0
-            && config.top_k_experts > config.num_experts
-        {
-            return Err(HybridError::InvalidConfig(format!(
-                "top_k_experts ({}) > num_experts ({})",
-                config.top_k_experts, config.num_experts
-            )));
-        }
+        validate_initial_config(&config)?;
 
         let projector = Projector::with_input_neurons(config.projection_mode, projector_neurons);
         let router = Router::load_with_family_and_mode(
@@ -68,24 +97,7 @@ impl Model {
             config.model_family,
             config.routing_mode,
         )?;
-        if config.num_experts == 0 {
-            config.num_experts = router.checkpoint_num_experts();
-        }
-        if config.top_k_experts > 0 && config.top_k_experts > config.num_experts {
-            return Err(HybridError::InvalidConfig(format!(
-                "top_k_experts ({}) > num_experts ({})",
-                config.top_k_experts, config.num_experts
-            )));
-        }
-        if config.top_k_experts == 0 {
-            config.top_k_experts = router.checkpoint_expert_used_count();
-        }
-        if config.gpu_synapse_tensor_name.trim().is_empty() {
-            config.gpu_synapse_tensor_name = router
-                .real_gpu_synapse_tensor_name()
-                .unwrap_or_default()
-                .to_owned();
-        }
+        finalize_experts_from_router(&mut config, &router)?;
 
         Ok(Self {
             config,
