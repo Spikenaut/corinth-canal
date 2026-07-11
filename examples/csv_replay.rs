@@ -195,19 +195,30 @@ fn print_summary(
     total_hidden_spikes: usize,
     model: &Model,
 ) {
-    let avg_loss = if rows_processed > 0 { total_loss / rows_processed as f32 } else { 0.0 };
+    let avg_loss = if rows_processed > 0 {
+        total_loss / rows_processed as f32
+    } else {
+        0.0
+    };
     println!("rows_processed={}", rows_processed);
     println!("rows_skipped={}", rows_skipped);
     println!("avg_loss={:.6}", avg_loss);
     println!(
         "avg_input_spikes_per_row={:.3}",
-        if rows_processed > 0 { total_input_spikes as f32 / rows_processed as f32 } else { 0.0 }
+        if rows_processed > 0 {
+            total_input_spikes as f32 / rows_processed as f32
+        } else {
+            0.0
+        }
     );
     println!(
         "avg_hidden_spikes_per_row={:.3}",
-        if rows_processed > 0 { total_hidden_spikes as f32 / rows_processed as f32 } else { 0.0 }
+        if rows_processed > 0 {
+            total_hidden_spikes as f32 / rows_processed as f32
+        } else {
+            0.0
+        }
     );
     println!("global_step={}", model.global_step());
     println!("router_loaded={}", model.router_loaded());
 }
-
