@@ -101,8 +101,11 @@ fn validate_header(header: &str) -> corinth_canal::Result<()> {
 
 fn dummy_snap() -> TelemetrySnapshot {
     TelemetrySnapshot {
-        timestamp_ms: 0, gpu_temp_c: 0.0, gpu_power_w: 0.0,
-        cpu_tctl_c: 0.0, cpu_package_power_w: 0.0,
+        timestamp_ms: 0,
+        gpu_temp_c: 0.0,
+        gpu_power_w: 0.0,
+        cpu_tctl_c: 0.0,
+        cpu_package_power_w: 0.0,
     }
 }
 
@@ -121,7 +124,7 @@ fn process_one_line(
         eprintln!(
             "Skipping malformed row {}: expected 5 columns, got {}",
             line_number,
-            fields.len()
+            fields.len(),
         );
         return Ok((true, 0, 0, 0.0, dummy_snap(), vec![]));
     }
@@ -138,10 +141,20 @@ fn process_one_line(
     let activity = funnel.encode_snapshot(&snap);
     let ternary = activity.ternary_events.clone();
     let output = model.forward_activity(
-        &activity.spike_train, &activity.potentials, &activity.iz_potentials,
+        &activity.spike_train,
+        &activity.potentials,
+        &activity.iz_potentials,
     )?;
-    let input_spikes = activity.input_spike_train.iter().map(Vec::len).sum::<usize>();
-    let hidden_spikes = activity.spike_train.iter().map(Vec::len).sum::<usize>();
+    let input_spikes = activity
+        .input_spike_train
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>();
+    let hidden_spikes = activity
+        .spike_train
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>();
     let loss = mean_squared_error(output.embedding.as_slice(), target);
     Ok((false, input_spikes, hidden_spikes, loss, snap, ternary))
 }
@@ -173,12 +186,25 @@ fn process_rows(
         if rows_processed.is_multiple_of(100) || rows_processed <= 5 {
             println!(
                 "step={:>4} gpu_temp={:5.1}C gpu_power={:6.1}W cpu_temp={:5.1}C ternary={:?} input_spikes={:>3} hidden_spikes={:>4} loss={:.6}",
-                rows_processed, snap.gpu_temp_c, snap.gpu_power_w, snap.cpu_tctl_c,
-                ternary, input_spikes, hidden_spikes, loss
+                rows_processed,
+                snap.gpu_temp_c,
+                snap.gpu_power_w,
+                snap.cpu_tctl_c,
+                ternary,
+                input_spikes,
+                hidden_spikes,
+                loss
             );
         }
     }
-    print_summary(rows_processed, rows_skipped, total_loss, total_input_spikes, total_hidden_spikes, model);
+    print_summary(
+        rows_processed,
+        rows_skipped,
+        total_loss,
+        total_input_spikes,
+        total_hidden_spikes,
+        model,
+    );
     Ok(())
 }
 
@@ -189,7 +215,11 @@ fn parse_csv_row(fields: Vec<&str>, line_number: usize) -> Option<TelemetrySnaps
     let cpu_tctl_c = parse_f32(fields[3])?;
     let cpu_package_power_w = parse_f32(fields[4])?;
     Some(TelemetrySnapshot {
-        timestamp_ms, gpu_temp_c, gpu_power_w, cpu_tctl_c, cpu_package_power_w,
+        timestamp_ms,
+        gpu_temp_c,
+        gpu_power_w,
+        cpu_tctl_c,
+        cpu_package_power_w,
     })
 }
 
