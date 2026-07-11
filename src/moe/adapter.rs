@@ -131,89 +131,14 @@ pub(super) fn resolve_adapter(
     let preferred_gpu_synapse_tensor = checkpoint
         .has_tensor("blk.0.attn_q.weight")
         .then(|| "blk.0.attn_q.weight".to_owned());
-    let real_gpu_synapse_tensor = preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-        let info = checkpoint.tensor_info(name, path).ok()?;
-        (info.ggml_type == GGML_TYPE_F16 && info.dims == [hidden_size, hidden_size])
-            .then(|| name.clone())
-    });
-    let dequant_q8_0_synapse_tensor = if real_gpu_synapse_tensor.is_none() {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q8_0 && info.dims.len() == 2 && info.dims[0] % 32 == 0)
-                .then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    let dequant_q5_k_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-    {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q5_K && info.dims.len() == 2 && info.dims[0] % 256 == 0)
-                .then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    let dequant_q6_k_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-        && dequant_q5_k_synapse_tensor.is_none()
-    {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q6_K && info.dims.len() == 2 && info.dims[0] % 256 == 0)
-                .then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    let dequant_iq3_m_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-        && dequant_q5_k_synapse_tensor.is_none()
-        && dequant_q6_k_synapse_tensor.is_none()
-    {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            // IQ3_M detection: check quantization metadata + tensor dimensions
-            // (individual tensor ggml_type may vary in mixed-quant models)
-            let is_iq3_m = metadata.quantization().contains("IQ3_M")
-                || metadata.quantization().contains("iq3_m");
-            (is_iq3_m && info.dims.len() == 2 && info.dims[0] % 256 == 0).then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    let routing_f32_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-        && dequant_q5_k_synapse_tensor.is_none()
-        && dequant_q6_k_synapse_tensor.is_none()
-        && dequant_iq3_m_synapse_tensor.is_none()
-    {
-        Some(routing_tensor.clone())
-    } else {
-        None
-    };
-
-    let synapse_source = if real_gpu_synapse_tensor.is_some() {
-        SynapseSource::Real
-    } else if dequant_q8_0_synapse_tensor.is_some() {
-        SynapseSource::DequantizedQ8_0
-    } else if dequant_q5_k_synapse_tensor.is_some() {
-        SynapseSource::DequantizedQ5K
-    } else if dequant_q6_k_synapse_tensor.is_some() {
-        SynapseSource::DequantizedQ6K
-    } else if dequant_iq3_m_synapse_tensor.is_some() {
-        SynapseSource::DequantizedIQ3M
-    } else if routing_f32_synapse_tensor.is_some() {
-        SynapseSource::RoutingF32
-    } else {
-        SynapseSource::SyntheticFallback
-    };
+    let selection = select_gguf_synapse(
+        preferred_gpu_synapse_tensor.as_deref(),
+        &routing_tensor,
+        checkpoint,
+        metadata,
+        hidden_size,
+        path,
+    );
 
     Ok(ModelAdapter {
         family,
@@ -225,16 +150,103 @@ pub(super) fn resolve_adapter(
         token_embedding_tensor,
         routing_tensor,
         preferred_gpu_synapse_tensor,
-        synapse_source,
-        real_gpu_synapse_tensor,
-        dequant_q8_0_synapse_tensor,
-        dequant_q5_k_synapse_tensor,
-        dequant_q6_k_synapse_tensor,
-        dequant_iq3_m_synapse_tensor,
-        routing_f32_synapse_tensor,
+        synapse_source: selection.synapse_source,
+        real_gpu_synapse_tensor: selection.real_gpu_synapse_tensor,
+        dequant_q8_0_synapse_tensor: selection.dequant_q8_0_synapse_tensor,
+        dequant_q5_k_synapse_tensor: selection.dequant_q5_k_synapse_tensor,
+        dequant_q6_k_synapse_tensor: selection.dequant_q6_k_synapse_tensor,
+        dequant_iq3_m_synapse_tensor: selection.dequant_iq3_m_synapse_tensor,
+        routing_f32_synapse_tensor: selection.routing_f32_synapse_tensor,
         dequant_int4_synapse_tensor: None,
         quantization: metadata.quantization().to_owned(),
     })
+}
+
+/// Priority-ordered GGUF synapse source selection.
+///
+/// First matching candidate wins; all lower-priority Option fields stay `None`.
+struct SynapseSelection {
+    synapse_source: SynapseSource,
+    real_gpu_synapse_tensor: Option<String>,
+    dequant_q8_0_synapse_tensor: Option<String>,
+    dequant_q5_k_synapse_tensor: Option<String>,
+    dequant_q6_k_synapse_tensor: Option<String>,
+    dequant_iq3_m_synapse_tensor: Option<String>,
+    routing_f32_synapse_tensor: Option<String>,
+}
+
+fn select_gguf_synapse(
+    preferred: Option<&str>,
+    routing_tensor: &str,
+    checkpoint: &MappedGgufCheckpoint,
+    metadata: &GgufMetadata,
+    hidden_size: usize,
+    path: &str,
+) -> SynapseSelection {
+    let empty = SynapseSelection {
+        synapse_source: SynapseSource::SyntheticFallback,
+        real_gpu_synapse_tensor: None,
+        dequant_q8_0_synapse_tensor: None,
+        dequant_q5_k_synapse_tensor: None,
+        dequant_q6_k_synapse_tensor: None,
+        dequant_iq3_m_synapse_tensor: None,
+        routing_f32_synapse_tensor: None,
+    };
+
+    if let Some(name) = preferred {
+        if let Ok(info) = checkpoint.tensor_info(name, path) {
+            // Real: F16 square [hidden_size, hidden_size]
+            if info.ggml_type == GGML_TYPE_F16 && info.dims == [hidden_size, hidden_size] {
+                return SynapseSelection {
+                    synapse_source: SynapseSource::Real,
+                    real_gpu_synapse_tensor: Some(name.to_owned()),
+                    ..empty
+                };
+            }
+            // Q8_0: rank-2, dims[0] % 32 == 0
+            if info.ggml_type == GGML_TYPE_Q8_0 && info.dims.len() == 2 && info.dims[0] % 32 == 0 {
+                return SynapseSelection {
+                    synapse_source: SynapseSource::DequantizedQ8_0,
+                    dequant_q8_0_synapse_tensor: Some(name.to_owned()),
+                    ..empty
+                };
+            }
+            // Q5_K: rank-2, dims[0] % 256 == 0
+            if info.ggml_type == GGML_TYPE_Q5_K && info.dims.len() == 2 && info.dims[0] % 256 == 0 {
+                return SynapseSelection {
+                    synapse_source: SynapseSource::DequantizedQ5K,
+                    dequant_q5_k_synapse_tensor: Some(name.to_owned()),
+                    ..empty
+                };
+            }
+            // Q6_K: rank-2, dims[0] % 256 == 0
+            if info.ggml_type == GGML_TYPE_Q6_K && info.dims.len() == 2 && info.dims[0] % 256 == 0 {
+                return SynapseSelection {
+                    synapse_source: SynapseSource::DequantizedQ6K,
+                    dequant_q6_k_synapse_tensor: Some(name.to_owned()),
+                    ..empty
+                };
+            }
+            // IQ3_M: quant label contains IQ3_M/iq3_m, rank-2, dims[0] % 256 == 0
+            // (individual tensor ggml_type may vary in mixed-quant models)
+            let is_iq3_m = metadata.quantization().contains("IQ3_M")
+                || metadata.quantization().contains("iq3_m");
+            if is_iq3_m && info.dims.len() == 2 && info.dims[0] % 256 == 0 {
+                return SynapseSelection {
+                    synapse_source: SynapseSource::DequantizedIQ3M,
+                    dequant_iq3_m_synapse_tensor: Some(name.to_owned()),
+                    ..empty
+                };
+            }
+        }
+    }
+
+    // RoutingF32 fallback when no preferred tensor matched a dequant path.
+    SynapseSelection {
+        synapse_source: SynapseSource::RoutingF32,
+        routing_f32_synapse_tensor: Some(routing_tensor.to_owned()),
+        ..empty
+    }
 }
 
 pub(super) fn resolve_safetensors_adapter(
