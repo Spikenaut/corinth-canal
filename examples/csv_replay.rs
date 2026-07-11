@@ -115,9 +115,9 @@ fn process_one_line(
     target: &[f32],
     line: &str,
     line_number: usize,
-) -> corinth_canal::Result<(bool, usize, usize, f32, TelemetrySnapshot, Vec<bool>)> {
+) -> corinth_canal::Result<(bool, usize, usize, f32, TelemetrySnapshot, [i8; 4])> {
     if line.is_empty() {
-        return Ok((true, 0, 0, 0.0, dummy_snap(), vec![]));
+        return Ok((true, 0, 0, 0.0, dummy_snap(), [0; 4]));
     }
     let fields: Vec<&str> = line.split(',').collect();
     if fields.len() != 5 {
@@ -126,7 +126,7 @@ fn process_one_line(
             line_number,
             fields.len(),
         );
-        return Ok((true, 0, 0, 0.0, dummy_snap(), vec![]));
+        return Ok((true, 0, 0, 0.0, dummy_snap(), [0; 4]));
     }
     let snap = match parse_csv_row(fields, line_number) {
         Some(s) => s,
@@ -135,7 +135,7 @@ fn process_one_line(
                 "Skipping malformed row {}: parse/finite check failed",
                 line_number
             );
-            return Ok((true, 0, 0, 0.0, dummy_snap(), vec![]));
+            return Ok((true, 0, 0, 0.0, dummy_snap(), [0; 4]));
         }
     };
     let activity = funnel.encode_snapshot(&snap);
@@ -204,7 +204,7 @@ fn process_rows(
     Ok(())
 }
 
-fn parse_csv_row(fields: Vec<&str>, line_number: usize) -> Option<TelemetrySnapshot> {
+fn parse_csv_row(fields: Vec<&str>, _line_number: usize) -> Option<TelemetrySnapshot> {
     let timestamp_ms = parse_u64(fields[0])?;
     let gpu_temp_c = parse_f32(fields[1])?;
     let gpu_power_w = parse_f32(fields[2])?;
