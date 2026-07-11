@@ -51,3 +51,7 @@ configs/safetensors_lineup.toml
 *.db
 .beads-credential-key
 .cursor/
+
+# IDE/tool dirs
+.mimocode/
+.opencode/
