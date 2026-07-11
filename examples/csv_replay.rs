@@ -45,21 +45,24 @@ fn mean_squared_error(output: &[f32], target: &[f32]) -> f32 {
 
 fn main() -> corinth_canal::Result<()> {
     let _ = dotenvy::from_filename(".env.local");
+
+    // Validate args before initializing Sentry/observer so usage errors exit cleanly.
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: cargo run --example csv_replay <telemetry.csv>");
+        eprintln!("CSV format: {EXPECTED_HEADER}");
+        std::process::exit(1);
+    }
+
     let _sentry_guard = observability::init_sentry("csv_replay");
     let observer = observability::start_command("csv_replay");
-    let result = run(&observer);
+    let result = run(&observer, &args);
     observer.finish(&result, SafeDiagnosticData::default());
     result
 }
 
-fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        return Err(HybridError::InvalidConfig(format!(
-            "missing telemetry CSV path. Usage: cargo run --example csv_replay <telemetry.csv>; CSV format: {EXPECTED_HEADER}"
-        )));
-    }
-
+fn run(observer: &CommandObserver, args: &[String]) -> corinth_canal::Result<()> {
+    let csv_path = &args[1];
     let run_cfg = RunConfig::from_env();
     let mut safe = SafeDiagnosticData::default().with_telemetry_source("csv");
     if let Some(model_slug) = observability::checkpoint_slug(&run_cfg.checkpoint_path) {
@@ -69,32 +72,90 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
         observer.annotate(safe);
     }
 
-    let csv_path = &args[1];
     let cfg = default_spiking_model_config(run_cfg.checkpoint_path.clone(), 20);
-
     let mut model = Model::new_with_projector_neurons(cfg.clone(), FUNNEL_HIDDEN_NEURONS)?;
     let mut funnel = TelemetryFunnel::new(TELEMETRY_THRESHOLDS, cfg.snn_steps);
-    println!(
-        "router_loaded={} routing_mode={:?} funnel_hidden_neurons={}",
-        model.router_loaded(),
-        model.config().routing_mode,
-        FUNNEL_HIDDEN_NEURONS,
-    );
-
     let csv_content = std::fs::read_to_string(csv_path)?;
     let mut lines = csv_content.lines();
-
     let header = lines
         .next()
         .ok_or_else(|| HybridError::InvalidConfig("empty CSV file".to_owned()))?
         .trim();
+    validate_header(header)?;
+    process_rows(&mut model, &mut funnel, lines.map(String::from))?;
+    Ok(())
+}
 
+fn validate_header(header: &str) -> corinth_canal::Result<()> {
     if header != EXPECTED_HEADER {
         return Err(HybridError::InvalidConfig(format!(
             "invalid CSV header: expected '{EXPECTED_HEADER}', got '{header}'"
         )));
     }
+    Ok(())
+}
 
+fn dummy_snap() -> TelemetrySnapshot {
+    TelemetrySnapshot {
+        timestamp_ms: 0,
+        gpu_temp_c: 0.0,
+        gpu_power_w: 0.0,
+        cpu_tctl_c: 0.0,
+        cpu_package_power_w: 0.0,
+    }
+}
+
+fn process_one_line(
+    model: &mut Model,
+    funnel: &mut TelemetryFunnel,
+    target: &[f32],
+    line: &str,
+    line_number: usize,
+) -> corinth_canal::Result<(bool, usize, usize, f32, TelemetrySnapshot, [i8; 4])> {
+    if line.is_empty() {
+        return Ok((true, 0, 0, 0.0, dummy_snap(), [0; 4]));
+    }
+    let fields: Vec<&str> = line.split(',').collect();
+    if fields.len() != 5 {
+        eprintln!(
+            "Skipping malformed row {}: expected 5 columns, got {}",
+            line_number,
+            fields.len(),
+        );
+        return Ok((true, 0, 0, 0.0, dummy_snap(), [0; 4]));
+    }
+    let snap = match parse_csv_row(fields, line_number) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "Skipping malformed row {}: parse/finite check failed",
+                line_number
+            );
+            return Ok((true, 0, 0, 0.0, dummy_snap(), [0; 4]));
+        }
+    };
+    let activity = funnel.encode_snapshot(&snap);
+    let ternary = activity.ternary_events.clone();
+    let output = model.forward_activity(
+        &activity.spike_train,
+        &activity.potentials,
+        &activity.iz_potentials,
+    )?;
+    let input_spikes = activity
+        .input_spike_train
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>();
+    let hidden_spikes = activity.spike_train.iter().map(Vec::len).sum::<usize>();
+    let loss = mean_squared_error(output.embedding.as_slice(), target);
+    Ok((false, input_spikes, hidden_spikes, loss, snap, ternary))
+}
+
+fn process_rows(
+    model: &mut Model,
+    funnel: &mut TelemetryFunnel,
+    lines: impl Iterator<Item = String>,
+) -> corinth_canal::Result<()> {
     let mut total_loss = 0.0_f32;
     let mut rows_processed = 0_usize;
     let mut rows_skipped = 0_usize;
@@ -104,97 +165,69 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
 
     for (idx, raw_line) in lines.enumerate() {
         let line_number = idx + 2;
-        let line = raw_line.trim();
-
-        if line.is_empty() {
+        let (skip, input_spikes, hidden_spikes, loss, snap, ternary) =
+            process_one_line(model, funnel, &target, raw_line.trim(), line_number)?;
+        if skip {
             rows_skipped += 1;
             continue;
         }
-
-        let fields: Vec<&str> = line.split(',').collect();
-        if fields.len() != 5 {
-            rows_skipped += 1;
-            eprintln!(
-                "Skipping malformed row {}: expected 5 columns, got {}",
-                line_number,
-                fields.len()
-            );
-            continue;
-        }
-
-        let parsed = (
-            parse_u64(fields[0]),
-            parse_f32(fields[1]),
-            parse_f32(fields[2]),
-            parse_f32(fields[3]),
-            parse_f32(fields[4]),
-        );
-
-        let (
-            Some(timestamp_ms),
-            Some(gpu_temp_c),
-            Some(gpu_power_w),
-            Some(cpu_tctl_c),
-            Some(cpu_package_power_w),
-        ) = parsed
-        else {
-            rows_skipped += 1;
-            eprintln!(
-                "Skipping malformed row {}: parse/finite check failed",
-                line_number
-            );
-            continue;
-        };
-
-        let snap = TelemetrySnapshot {
-            timestamp_ms,
-            gpu_temp_c,
-            gpu_power_w,
-            cpu_tctl_c,
-            cpu_package_power_w,
-        };
-
-        let activity = funnel.encode_snapshot(&snap);
-        let output = model.forward_activity(
-            &activity.spike_train,
-            &activity.potentials,
-            &activity.iz_potentials,
-        )?;
-        let input_spikes = activity
-            .input_spike_train
-            .iter()
-            .map(Vec::len)
-            .sum::<usize>();
-        let hidden_spikes = activity.spike_train.iter().map(Vec::len).sum::<usize>();
-
-        let loss = mean_squared_error(output.embedding.as_slice(), target.as_slice());
-
         total_loss += loss;
         rows_processed += 1;
         total_input_spikes += input_spikes;
         total_hidden_spikes += hidden_spikes;
-
         if rows_processed.is_multiple_of(100) || rows_processed <= 5 {
             println!(
                 "step={:>4} gpu_temp={:5.1}C gpu_power={:6.1}W cpu_temp={:5.1}C ternary={:?} input_spikes={:>3} hidden_spikes={:>4} loss={:.6}",
                 rows_processed,
-                gpu_temp_c,
-                gpu_power_w,
-                cpu_tctl_c,
-                activity.ternary_events,
+                snap.gpu_temp_c,
+                snap.gpu_power_w,
+                snap.cpu_tctl_c,
+                ternary,
                 input_spikes,
                 hidden_spikes,
                 loss
             );
         }
     }
+    print_summary(
+        rows_processed,
+        rows_skipped,
+        total_loss,
+        total_input_spikes,
+        total_hidden_spikes,
+        model,
+    );
+    Ok(())
+}
 
+fn parse_csv_row(fields: Vec<&str>, _line_number: usize) -> Option<TelemetrySnapshot> {
+    let timestamp_ms = parse_u64(fields[0])?;
+    let gpu_temp_c = parse_f32(fields[1])?;
+    let gpu_power_w = parse_f32(fields[2])?;
+    let cpu_tctl_c = parse_f32(fields[3])?;
+    let cpu_package_power_w = parse_f32(fields[4])?;
+    Some(TelemetrySnapshot {
+        timestamp_ms,
+        gpu_temp_c,
+        gpu_power_w,
+        cpu_tctl_c,
+        cpu_package_power_w,
+    })
+}
+
+fn print_summary(
+    rows_processed: usize,
+    rows_skipped: usize,
+    total_loss: f32,
+    total_input_spikes: usize,
+    total_hidden_spikes: usize,
+    model: &Model,
+) {
     let avg_loss = if rows_processed > 0 {
         total_loss / rows_processed as f32
     } else {
         0.0
     };
-
     println!("\n=== Replay Summary ===");
     println!("rows_processed={}", rows_processed);
     println!("rows_skipped={}", rows_skipped);
@@ -217,6 +250,4 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
     );
     println!("global_step={}", model.global_step());
     println!("router_loaded={}", model.router_loaded());
-
-    Ok(())
 }

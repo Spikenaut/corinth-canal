@@ -161,28 +161,31 @@ impl RunConfig {
 fn validate_optional_lineups_from_env() {
     if let Some(path) = cloud_lineup_path_from_env() {
         let entries = load_cloud_lineup(&path).unwrap_or_else(|err| {
-            panic!(
+            eprintln!(
                 "CLOUD_LINEUP_CONFIG={} could not be loaded: {err}",
                 path.display()
-            )
+            );
+            std::process::exit(1);
         });
         for entry in &entries {
             cloud_execution_guard(entry).unwrap_or_else(|err| {
-                panic!(
+                eprintln!(
                     "CLOUD_LINEUP_CONFIG={} failed validation for slug={}: {err}",
                     path.display(),
                     entry.slug
-                )
+                );
+                std::process::exit(1);
             });
         }
     }
 
     if let Some(path) = safetensors_lineup_path_from_env() {
         let entries = load_safetensors_lineup(&path).unwrap_or_else(|err| {
-            panic!(
+            eprintln!(
                 "SAFETENSORS_LINEUP_CONFIG={} could not be loaded: {err}",
                 path.display()
-            )
+            );
+            std::process::exit(1);
         });
         validate_safetensors_lineup_entries(&path, &entries);
     }
@@ -246,7 +249,8 @@ fn resolve_validation_models(
                 } else {
                     ""
                 };
-                panic!("LINEUP_CONFIG={path_str} could not be loaded: {err}{hint}");
+                eprintln!("LINEUP_CONFIG={path_str} could not be loaded: {err}{hint}");
+                std::process::exit(1);
             }
         }
     }
@@ -266,7 +270,8 @@ fn resolve_validation_models(
             }
             Err(err) => {
                 let path_str = path.display().to_string();
-                panic!("SAFETENSORS_LINEUP_CONFIG={path_str} could not be loaded: {err}");
+                eprintln!("SAFETENSORS_LINEUP_CONFIG={path_str} could not be loaded: {err}");
+                std::process::exit(1);
             }
         }
     }

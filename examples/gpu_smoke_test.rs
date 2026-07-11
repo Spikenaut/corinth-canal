@@ -10,7 +10,27 @@ use support::{
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::from_filename(".env.local");
+
     let _sentry_guard = observability::init_sentry("gpu_smoke_test");
+
+    // Suppress broken pipe panics when stdout is piped to a short-lived process.
+    // Registered after init_sentry so our hook wraps Sentry's panic integration
+    // and broken-pipe events are not captured by Sentry.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let is_broken_pipe = info
+            .payload()
+            .downcast_ref::<String>()
+            .is_some_and(|s| s.contains("Broken pipe"))
+            || info
+                .payload()
+                .downcast_ref::<&str>()
+                .is_some_and(|s| s.contains("Broken pipe"));
+        if is_broken_pipe {
+            return;
+        }
+        default_hook(info);
+    }));
     let observer = observability::start_command("gpu_smoke_test");
     let result = run(&observer);
     observer.finish(&result, SafeDiagnosticData::default());
