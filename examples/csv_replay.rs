@@ -158,7 +158,7 @@ fn process_one_line(
 fn process_rows(
     model: &mut Model,
     funnel: &mut TelemetryFunnel,
-    lines: impl Iterator<Item = String>,
+    lines: impl Iterator<Item = &str>,
 ) -> corinth_canal::Result<()> {
     let mut total_loss = 0.0_f32;
     let mut rows_processed = 0_usize;
