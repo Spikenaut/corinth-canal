@@ -20,9 +20,7 @@ use self::checkpoint::{
     MappedGgufCheckpoint, extract_named_token_embedding_from_checkpoint, probe_and_map_checkpoint,
 };
 // Constants used by adapter/routing helpers in this module tree.
-use self::ggml::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
-};
+use self::ggml::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
 // GGUF test fixture helpers (`moe/tests.rs`) pull these via `use super::*`.
 #[cfg(test)]
 #[allow(unused_imports)]

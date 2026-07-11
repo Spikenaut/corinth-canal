@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Mapped GGUF checkpoint access, probe/mmap, and tensor extraction.
 
+use super::super::ggml::{
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
+    GGML_TYPE_Q8_0,
+};
+#[cfg(feature = "cuda")]
+use super::cuda_register::RegisteredTensorSliceU16;
 use super::dequant::{
     dequantize_row_iq3_m, dequantize_row_q5_k, dequantize_row_q6_k, dequantize_row_q8_0,
     f16_to_f32, tensor_row_size,
 };
 use super::metadata::{GgufMetadata, GgufTensorInfo, parse_checkpoint_layout};
-#[cfg(feature = "cuda")]
-use super::cuda_register::RegisteredTensorSliceU16;
-use super::super::ggml::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
-    GGML_TYPE_Q8_0,
-};
 use crate::error::{HybridError, Result};
 use memmap2::{MmapMut, MmapOptions};
 use std::collections::HashMap;
@@ -90,7 +90,9 @@ impl MappedGgufCheckpoint {
     }
 }
 
-pub(in crate::moe) fn probe_and_map_checkpoint(path: &str) -> Result<(GgufMetadata, MappedGgufCheckpoint)> {
+pub(in crate::moe) fn probe_and_map_checkpoint(
+    path: &str,
+) -> Result<(GgufMetadata, MappedGgufCheckpoint)> {
     let file = OpenOptions::new()
         .read(true)
         .open(path)
@@ -143,7 +145,11 @@ impl MappedGgufCheckpoint {
         matches.into_iter().next()
     }
 
-    pub(in crate::moe) fn tensor_info<'a>(&'a self, name: &str, path: &str) -> Result<&'a GgufTensorInfo> {
+    pub(in crate::moe) fn tensor_info<'a>(
+        &'a self,
+        name: &str,
+        path: &str,
+    ) -> Result<&'a GgufTensorInfo> {
         self.tensors
             .get(name)
             .ok_or_else(|| HybridError::MissingTensor {
@@ -320,7 +326,11 @@ impl MappedGgufCheckpoint {
     /// block-scale dequantization, producing `dims[0] * dims[1]` output
     /// elements laid out row-major. `dims[0]` must be divisible by 32.
     #[allow(dead_code)]
-    pub(in crate::moe) fn dequantize_q8_0_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+    pub(in crate::moe) fn dequantize_q8_0_tensor(
+        &self,
+        name: &str,
+        path: &str,
+    ) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_Q8_0 {
             return Err(HybridError::UnsupportedFormat(format!(
@@ -356,7 +366,11 @@ impl MappedGgufCheckpoint {
     /// block-scale dequantization, producing `dims[0] * dims[1]` output
     /// elements laid out row-major. `dims[0]` must be divisible by 256.
     #[allow(dead_code)]
-    pub(in crate::moe) fn dequantize_q5_k_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+    pub(in crate::moe) fn dequantize_q5_k_tensor(
+        &self,
+        name: &str,
+        path: &str,
+    ) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_Q5_K {
             return Err(HybridError::UnsupportedFormat(format!(
@@ -387,7 +401,11 @@ impl MappedGgufCheckpoint {
     }
 
     #[allow(dead_code)]
-    pub(in crate::moe) fn dequantize_q6_k_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+    pub(in crate::moe) fn dequantize_q6_k_tensor(
+        &self,
+        name: &str,
+        path: &str,
+    ) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_Q6_K {
             return Err(HybridError::UnsupportedFormat(format!(
@@ -423,7 +441,11 @@ impl MappedGgufCheckpoint {
     /// block-scale dequantization, producing `dims[0] * dims[1]` output
     /// elements laid out row-major. `dims[0]` must be divisible by 256.
     #[allow(dead_code)]
-    pub(in crate::moe) fn dequantize_iq3_m_tensor(&self, name: &str, path: &str) -> Result<Vec<f32>> {
+    pub(in crate::moe) fn dequantize_iq3_m_tensor(
+        &self,
+        name: &str,
+        path: &str,
+    ) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
         if info.ggml_type != GGML_TYPE_IQ3_M {
             return Err(HybridError::UnsupportedFormat(format!(

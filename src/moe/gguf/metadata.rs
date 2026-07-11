@@ -50,7 +50,10 @@ impl GgufMetadata {
     }
 }
 
-pub(in crate::moe) fn parse_checkpoint_layout(bytes: &[u8], path: &str) -> Result<ParsedCheckpointLayout> {
+pub(in crate::moe) fn parse_checkpoint_layout(
+    bytes: &[u8],
+    path: &str,
+) -> Result<ParsedCheckpointLayout> {
     let mut cursor = GgufCursor::new(bytes);
 
     let magic = cursor.read_exact(4, path)?;

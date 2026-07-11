@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Row dequantization helpers and f16 conversion for GGUF tensors.
 
-use super::super::ggml::{
-    GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
-};
+use super::super::ggml::{GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
 use crate::error::{HybridError, Result};
 
 pub(in crate::moe) fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
