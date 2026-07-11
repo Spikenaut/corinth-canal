@@ -83,10 +83,6 @@ fn run(observer: &CommandObserver, args: &[String]) -> corinth_canal::Result<()>
         .trim();
     validate_header(header)?;
     process_rows(&mut model, &mut funnel, lines.map(String::from))?;
-
-    println!("\n=== Replay Summary ===");
-    println!("rows_processed={}", model.global_step());
-    println!("router_loaded={}", model.router_loaded());
     Ok(())
 }
 
@@ -232,6 +228,7 @@ fn print_summary(
     } else {
         0.0
     };
+    println!("\n=== Replay Summary ===");
     println!("rows_processed={}", rows_processed);
     println!("rows_skipped={}", rows_skipped);
     println!("avg_loss={:.6}", avg_loss);
