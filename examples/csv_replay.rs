@@ -125,10 +125,16 @@ fn process_one_line(
         );
         return Ok((true, 0, 0, 0.0, dummy_snap(), vec![]));
     }
-    let snap = parse_csv_row(fields, line_number)
-        .ok_or_else(|| HybridError::InvalidConfig(format!(
-            "Skipping malformed row {}: parse/finite check failed", line_number
-        )))?;
+    let snap = match parse_csv_row(fields, line_number) {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "Skipping malformed row {}: parse/finite check failed",
+                line_number
+            );
+            return Ok((true, 0, 0, 0.0, dummy_snap(), vec![]));
+        }
+    };
     let activity = funnel.encode_snapshot(&snap);
     let ternary = activity.ternary_events.clone();
     let output = model.forward_activity(
