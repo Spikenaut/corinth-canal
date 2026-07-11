@@ -323,40 +323,92 @@ fn check_family_compatibility(expected: ModelFamily, inferred: ModelFamily) -> b
         )
 }
 
-fn infer_family_safetensors(
+/// Discriminator for architecture-string tables (GGUF vs Safetensors/HF names).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArchFormat {
+    Gguf,
+    Safetensors,
+}
+
+impl ArchFormat {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Gguf => "GGUF",
+            Self::Safetensors => "Safetensors",
+        }
+    }
+}
+
+fn map_architecture(architecture: &str, format: ArchFormat) -> Option<ModelFamily> {
+    match format {
+        ArchFormat::Gguf => match architecture {
+            "olmoe" => Some(ModelFamily::Olmoe),
+            "qwen3moe" => Some(ModelFamily::Qwen3Moe),
+            "gemma4" => Some(ModelFamily::Gemma4),
+            "deepseek2" => Some(ModelFamily::DeepSeek2),
+            "llama" => Some(ModelFamily::LlamaMoe),
+            "moonlight" => Some(ModelFamily::Moonlight16BA3B),
+            "granite" | "granitemoe" => Some(ModelFamily::Granite31A800M),
+            "nemotronh" => Some(ModelFamily::Nemotron),
+            "lfm2" | "lfm2moe" => Some(ModelFamily::Lfm2Moe),
+            "phimoe" | "slimmoe" => Some(ModelFamily::SlimMoe),
+            "zaya" => Some(ModelFamily::Zaya),
+            "glm4" | "glm4moe" => Some(ModelFamily::Glm4),
+            "gptoss" => Some(ModelFamily::GptOss),
+            "step" | "step3" => Some(ModelFamily::Step),
+            "minimax" => Some(ModelFamily::MiniMax),
+            "cohere" => Some(ModelFamily::Cohere),
+            "grin" | "grinmoe" => Some(ModelFamily::Grin),
+            "skyworks" | "skyworkmoe" => Some(ModelFamily::Skyworks),
+            "trinity" => Some(ModelFamily::Trinity),
+            "grok" => Some(ModelFamily::Grok),
+            _ => None,
+        },
+        ArchFormat::Safetensors => match architecture {
+            "OlmoeForCausalLM" => Some(ModelFamily::Olmoe),
+            "Qwen3MoeForCausalLM" => Some(ModelFamily::Qwen3Moe),
+            "Gemma4ForCausalLM" => Some(ModelFamily::Gemma4),
+            "DeepseekV2ForCausalLM" => Some(ModelFamily::DeepSeek2),
+            "LlamaMoeForCausalLM" => Some(ModelFamily::LlamaMoe),
+            "NemotronHForCausalLM" => Some(ModelFamily::Nemotron),
+            "Lfm2MoeForCausalLM" => Some(ModelFamily::Lfm2Moe),
+            "PhiMoEForCausalLM" => Some(ModelFamily::SlimMoe),
+            "GptOssForCausalLM" => Some(ModelFamily::GptOss),
+            "Step3ForCausalLM" => Some(ModelFamily::Step),
+            "MiniMaxForCausalLM" => Some(ModelFamily::MiniMax),
+            "CohereForCausalLM" => Some(ModelFamily::Cohere),
+            "GrinMoeForCausalLM" => Some(ModelFamily::Grin),
+            "SkyworkMoeForCausalLM" => Some(ModelFamily::Skyworks),
+            "TrinityForCausalLM" => Some(ModelFamily::Trinity),
+            "GrokForCausalLM" => Some(ModelFamily::Grok),
+            _ => None,
+        },
+    }
+}
+
+/// Unified family inference for GGUF and Safetensors architecture strings.
+///
+/// Format-specific arch tables live in [`map_architecture`]; override
+/// compatibility and error formatting are shared here.
+fn infer_family_for_format(
     architecture: &str,
     family_override: Option<ModelFamily>,
     path: &str,
+    format: ArchFormat,
 ) -> Result<ModelFamily> {
-    let inferred = match architecture {
-        "OlmoeForCausalLM" => ModelFamily::Olmoe,
-        "Qwen3MoeForCausalLM" => ModelFamily::Qwen3Moe,
-        "Gemma4ForCausalLM" => ModelFamily::Gemma4,
-        "DeepseekV2ForCausalLM" => ModelFamily::DeepSeek2,
-        "LlamaMoeForCausalLM" => ModelFamily::LlamaMoe,
-        "NemotronHForCausalLM" => ModelFamily::Nemotron,
-        "Lfm2MoeForCausalLM" => ModelFamily::Lfm2Moe,
-        "PhiMoEForCausalLM" => ModelFamily::SlimMoe,
-        "GptOssForCausalLM" => ModelFamily::GptOss,
-        "Step3ForCausalLM" => ModelFamily::Step,
-        "MiniMaxForCausalLM" => ModelFamily::MiniMax,
-        "CohereForCausalLM" => ModelFamily::Cohere,
-        "GrinMoeForCausalLM" => ModelFamily::Grin,
-        "SkyworkMoeForCausalLM" => ModelFamily::Skyworks,
-        "TrinityForCausalLM" => ModelFamily::Trinity,
-        "GrokForCausalLM" => ModelFamily::Grok,
-        other => {
-            return Err(HybridError::UnsupportedFormat(format!(
-                "unsupported Safetensors architecture '{other}' in '{path}'"
-            )));
-        }
-    };
+    let inferred = map_architecture(architecture, format).ok_or_else(|| {
+        HybridError::UnsupportedFormat(format!(
+            "unsupported {} architecture '{architecture}' in '{path}'",
+            format.label()
+        ))
+    })?;
 
     if let Some(expected) = family_override {
         if !check_family_compatibility(expected, inferred) {
             return Err(HybridError::InvalidConfig(format!(
-                "model_family override {:?} does not match Safetensors architecture '{architecture}'",
-                expected
+                "model_family override {:?} does not match {} architecture '{architecture}'",
+                expected,
+                format.label()
             )));
         }
         Ok(expected)
@@ -365,50 +417,27 @@ fn infer_family_safetensors(
     }
 }
 
+/// GGUF entry point (kept for call sites and unit tests).
 fn infer_family(
     architecture: &str,
     family_override: Option<ModelFamily>,
     path: &str,
 ) -> Result<ModelFamily> {
-    let inferred = match architecture {
-        "olmoe" => ModelFamily::Olmoe,
-        "qwen3moe" => ModelFamily::Qwen3Moe,
-        "gemma4" => ModelFamily::Gemma4,
-        "deepseek2" => ModelFamily::DeepSeek2,
-        "llama" => ModelFamily::LlamaMoe,
-        "moonlight" => ModelFamily::Moonlight16BA3B,
-        "granite" | "granitemoe" => ModelFamily::Granite31A800M,
-        "nemotronh" => ModelFamily::Nemotron,
-        "lfm2" | "lfm2moe" => ModelFamily::Lfm2Moe,
-        "phimoe" | "slimmoe" => ModelFamily::SlimMoe,
-        "zaya" => ModelFamily::Zaya,
-        "glm4" | "glm4moe" => ModelFamily::Glm4,
-        "gptoss" => ModelFamily::GptOss,
-        "step" | "step3" => ModelFamily::Step,
-        "minimax" => ModelFamily::MiniMax,
-        "cohere" => ModelFamily::Cohere,
-        "grin" | "grinmoe" => ModelFamily::Grin,
-        "skyworks" | "skyworkmoe" => ModelFamily::Skyworks,
-        "trinity" => ModelFamily::Trinity,
-        "grok" => ModelFamily::Grok,
-        other => {
-            return Err(HybridError::UnsupportedFormat(format!(
-                "unsupported GGUF architecture '{other}' in '{path}'"
-            )));
-        }
-    };
+    infer_family_for_format(architecture, family_override, path, ArchFormat::Gguf)
+}
 
-    if let Some(expected) = family_override {
-        if !check_family_compatibility(expected, inferred) {
-            return Err(HybridError::InvalidConfig(format!(
-                "model_family override {:?} does not match GGUF architecture '{architecture}'",
-                expected
-            )));
-        }
-        Ok(expected)
-    } else {
-        Ok(inferred)
-    }
+/// Safetensors entry point (kept for call sites and unit tests).
+fn infer_family_safetensors(
+    architecture: &str,
+    family_override: Option<ModelFamily>,
+    path: &str,
+) -> Result<ModelFamily> {
+    infer_family_for_format(
+        architecture,
+        family_override,
+        path,
+        ArchFormat::Safetensors,
+    )
 }
 
 #[cfg(test)]
