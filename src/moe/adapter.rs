@@ -432,12 +432,7 @@ fn infer_family_safetensors(
     family_override: Option<ModelFamily>,
     path: &str,
 ) -> Result<ModelFamily> {
-    infer_family_for_format(
-        architecture,
-        family_override,
-        path,
-        ArchFormat::Safetensors,
-    )
+    infer_family_for_format(architecture, family_override, path, ArchFormat::Safetensors)
 }
 
 #[cfg(test)]
