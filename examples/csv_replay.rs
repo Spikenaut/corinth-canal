@@ -150,11 +150,7 @@ fn process_one_line(
         .iter()
         .map(Vec::len)
         .sum::<usize>();
-    let hidden_spikes = activity
-        .spike_train
-        .iter()
-        .map(Vec::len)
-        .sum::<usize>();
+    let hidden_spikes = activity.spike_train.iter().map(Vec::len).sum::<usize>();
     let loss = mean_squared_error(output.embedding.as_slice(), target);
     Ok((false, input_spikes, hidden_spikes, loss, snap, ternary))
 }
