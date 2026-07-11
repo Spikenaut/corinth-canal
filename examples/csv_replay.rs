@@ -82,7 +82,7 @@ fn run(observer: &CommandObserver, args: &[String]) -> corinth_canal::Result<()>
         .ok_or_else(|| HybridError::InvalidConfig("empty CSV file".to_owned()))?
         .trim();
     validate_header(header)?;
-    process_rows(&mut model, &mut funnel, lines)?;
+    process_rows(&mut model, &mut funnel, lines.map(String::from))?;
 
     println!("\n=== Replay Summary ===");
     println!("rows_processed={}", model.global_step());
@@ -158,7 +158,7 @@ fn process_one_line(
 fn process_rows(
     model: &mut Model,
     funnel: &mut TelemetryFunnel,
-    lines: impl Iterator<Item = &str>,
+    lines: impl Iterator<Item = String>,
 ) -> corinth_canal::Result<()> {
     let mut total_loss = 0.0_f32;
     let mut rows_processed = 0_usize;
