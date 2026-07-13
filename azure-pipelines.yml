@@ -1,34 +1,44 @@
 # Azure Pipelines cross-platform CPU CI (modelled on Limen-Neural/neuromod).
 # Third-party tasks pinned to versions for reproducibility.
 # See GH#109 for details. GPU/CUDA, Docker, Sentry remain on GitHub Actions.
+#
+# Free-tier posture (2026-07):
+# - ACTIVE: self-hosted Linux agent in the Default pool (ShipOfTheseus / ~/myagent).
+#   Does NOT consume Microsoft-hosted free minutes.
+# - DISABLED (not deleted): PR auto-triggers and Microsoft-hosted 3-OS matrix.
+#   Re-enable those blocks when Limen-Neural has free hosted minutes again
+#   (org → Project settings / org → Parallel jobs / resource limits).
 
+# Push to main only (self-hosted). Manual "Run pipeline" also works when agent is online.
 trigger:
   branches:
     include:
       - main
-pr:
-  branches:
-    include:
-      - main
-  autoCancel: false
+
+# DISABLED — PR triggers burned free hosted minutes on every PR (3× OS matrix).
+# Re-enable when free minutes are available OR keep disabled and rely on GHA for PRs.
+# pr:
+#   branches:
+#     include:
+#       - main
+#   autoCancel: true
+pr: none
 
 variables:
   CARGO_HOME: $(Pipeline.workspace)/.cargo
   RUSTUP_HOME: $(Pipeline.workspace)/.rustup
 
+# ---------------------------------------------------------------------------
+# ACTIVE: self-hosted Linux (Default pool). Start agent: cd ~/myagent && ./run.sh
+# ---------------------------------------------------------------------------
 jobs:
-- job: BuildTest
-  strategy:
-    matrix:
-      linux:
-        imageName: 'ubuntu-latest'
-      windows:
-        imageName: 'windows-latest'
-      mac:
-        imageName: 'macos-latest'
+- job: BuildTest_SelfHosted_Linux
+  displayName: 'CPU Tests (self-hosted Linux)'
   pool:
-    vmImage: $(imageName)
-
+    name: Default
+    # Optional pin to this machine once registered:
+    # demands:
+    # - Agent.Name -equals ShipOfTheseus
   steps:
   - checkout: self
     persistCredentials: 'false'
@@ -36,29 +46,33 @@ jobs:
   - task: Cache@2
     displayName: 'Rust Cache'
     inputs:
-      key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+      key: 'cargo | "$(Agent.OS)" | self-hosted | Cargo.lock'
       restoreKeys: |
+        cargo | "$(Agent.OS)" | self-hosted
         cargo | "$(Agent.OS)"
       path: $(CARGO_HOME)
 
   - bash: |
+      set -euo pipefail
       export CARGO_HOME="$(CARGO_HOME)"
       export RUSTUP_HOME="$(RUSTUP_HOME)"
       mkdir -p "$CARGO_HOME/bin"
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      if ! command -v rustc >/dev/null 2>&1; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      fi
+      # Prefer agent-local cargo if rustup just installed; else system PATH.
+      if [ -f "$CARGO_HOME/env" ]; then
+        # shellcheck source=/dev/null
+        . "$CARGO_HOME/env"
+      elif [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck source=/dev/null
+        . "$HOME/.cargo/env"
+      fi
       echo "##vso[task.prependpath]$CARGO_HOME/bin"
-    displayName: 'Install Rust (rustup) - Unix'
-    condition: ne(variables['Agent.OS'], 'Windows_NT')
-
-  - powershell: |
-      $env:CARGO_HOME = "$(CARGO_HOME)"
-      $env:RUSTUP_HOME = "$(RUSTUP_HOME)"
-      New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
-      Invoke-WebRequest -Uri https://win.rustup.rs/ -OutFile rustup-init.exe
-      .\rustup-init.exe -y --default-toolchain stable --no-modify-path
-      Write-Host "##vso[task.prependpath]$env:CARGO_HOME\bin"
-    displayName: 'Install Rust (rustup) - Windows'
-    condition: eq(variables['Agent.OS'], 'Windows_NT')
+      echo "##vso[task.prependpath]$HOME/.cargo/bin"
+      rustc --version
+      cargo --version
+    displayName: 'Ensure Rust (rustup if missing)'
 
   - script: rustup component add rustfmt clippy llvm-tools-preview
     displayName: 'Install components'
@@ -76,9 +90,86 @@ jobs:
     displayName: 'Check examples (no-default)'
 
   - bash: |
+      set -euo pipefail
       export CARGO_HOME="$(CARGO_HOME)"
+      if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck source=/dev/null
+        . "$HOME/.cargo/env"
+      fi
       cargo install cargo-llvm-cov --locked
       cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
     displayName: 'Coverage (llvm-cov)'
     continueOnError: true
-    condition: eq(variables['imageName'], 'ubuntu-latest')
+
+# ---------------------------------------------------------------------------
+# DISABLED — Microsoft-hosted multi-OS matrix (consumes free parallel minutes).
+# Uncomment this entire job and remove/disable BuildTest_SelfHosted_Linux above
+# (or run both) when the org has hosted capacity again.
+# Also re-enable the `pr:` block at the top for PR coverage.
+# ---------------------------------------------------------------------------
+# - job: BuildTest_Hosted_Matrix
+#   displayName: 'CPU Tests (Microsoft-hosted matrix)'
+#   strategy:
+#     matrix:
+#       linux:
+#         imageName: 'ubuntu-latest'
+#       windows:
+#         imageName: 'windows-latest'
+#       mac:
+#         imageName: 'macos-latest'
+#   pool:
+#     vmImage: $(imageName)
+#
+#   steps:
+#   - checkout: self
+#     persistCredentials: 'false'
+#
+#   - task: Cache@2
+#     displayName: 'Rust Cache'
+#     inputs:
+#       key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+#       restoreKeys: |
+#         cargo | "$(Agent.OS)"
+#       path: $(CARGO_HOME)
+#
+#   - bash: |
+#       export CARGO_HOME="$(CARGO_HOME)"
+#       export RUSTUP_HOME="$(RUSTUP_HOME)"
+#       mkdir -p "$CARGO_HOME/bin"
+#       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+#       echo "##vso[task.prependpath]$CARGO_HOME/bin"
+#     displayName: 'Install Rust (rustup) - Unix'
+#     condition: ne(variables['Agent.OS'], 'Windows_NT')
+#
+#   - powershell: |
+#       $env:CARGO_HOME = "$(CARGO_HOME)"
+#       $env:RUSTUP_HOME = "$(RUSTUP_HOME)"
+#       New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
+#       Invoke-WebRequest -Uri https://win.rustup.rs/ -OutFile rustup-init.exe
+#       .\rustup-init.exe -y --default-toolchain stable --no-modify-path
+#       Write-Host "##vso[task.prependpath]$env:CARGO_HOME\bin"
+#     displayName: 'Install Rust (rustup) - Windows'
+#     condition: eq(variables['Agent.OS'], 'Windows_NT')
+#
+#   - script: rustup component add rustfmt clippy llvm-tools-preview
+#     displayName: 'Install components'
+#
+#   - script: cargo fmt --all -- --check
+#     displayName: 'Format check'
+#
+#   - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
+#     displayName: 'Clippy (no-default)'
+#
+#   - script: cargo test --lib --no-default-features --locked
+#     displayName: 'Test (no-default)'
+#
+#   - script: cargo check --examples --no-default-features --locked
+#     displayName: 'Check examples (no-default)'
+#
+#   - bash: |
+#       export CARGO_HOME="$(CARGO_HOME)"
+#       cargo install cargo-llvm-cov --locked
+#       cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
+#     displayName: 'Coverage (llvm-cov)'
+#     continueOnError: true
+#     condition: eq(variables['imageName'], 'ubuntu-latest')
