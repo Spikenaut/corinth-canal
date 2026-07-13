@@ -339,60 +339,138 @@ impl ArchFormat {
     }
 }
 
+/// Per-family architecture aliases for GGUF `general.architecture` and
+/// Safetensors/HF `architectures[]` class names.
+///
+/// Adding a family (or an alias) is a single table row — no second match arm.
+/// Empty `safetensors` means that family is GGUF-only for inference today
+/// (override + Moonlight/DeepSeek2 compatibility still apply separately).
+struct FamilyArchNames {
+    family: ModelFamily,
+    gguf: &'static [&'static str],
+    safetensors: &'static [&'static str],
+}
+
+/// Single source of truth for architecture → [`ModelFamily`] maps.
+///
+/// Order is not significant for lookup; keep rows aligned with
+/// [`ModelFamily`] variant order for reviewability. `NemotronLegacy` is a
+/// serde alias of Nemotron and is not listed (same arch strings as Nemotron).
+const FAMILY_ARCHES: &[FamilyArchNames] = &[
+    FamilyArchNames {
+        family: ModelFamily::Olmoe,
+        gguf: &["olmoe"],
+        safetensors: &["OlmoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Qwen3Moe,
+        gguf: &["qwen3moe"],
+        safetensors: &["Qwen3MoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Gemma4,
+        gguf: &["gemma4"],
+        safetensors: &["Gemma4ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::DeepSeek2,
+        gguf: &["deepseek2"],
+        safetensors: &["DeepseekV2ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::LlamaMoe,
+        gguf: &["llama"],
+        safetensors: &["LlamaMoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Moonlight16BA3B,
+        // Kimi-VL-A3B GGUF packages are classified under the Moonlight-16B family
+        // (Moonshot AI lineage), not Qwen3/DeepSeek2.
+        gguf: &["moonlight", "kimi", "kimi_vl_a3b", "kimi_vl_a3b_q6_k"],
+        // DeepseekV3 is the HF architecture tag used by Moonlight-16B-A3B ST packs.
+        safetensors: &["MoonlightForCausalLM", "DeepseekV3ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Granite31A800M,
+        gguf: &["granite", "granitemoe"],
+        // Dense GraniteForCausalLM intentionally omitted (MoE A800M only).
+        safetensors: &["GraniteMoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Nemotron,
+        gguf: &["nemotronh"],
+        safetensors: &["NemotronHForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Lfm2Moe,
+        gguf: &["lfm2", "lfm2moe"],
+        safetensors: &["Lfm2MoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::SlimMoe,
+        gguf: &["phimoe", "slimmoe"],
+        safetensors: &["PhiMoEForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Zaya,
+        gguf: &["zaya"],
+        safetensors: &["ZayaForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Glm4,
+        gguf: &["glm4", "glm4moe"],
+        safetensors: &["Glm4ForCausalLM", "Glm4MoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::GptOss,
+        gguf: &["gptoss"],
+        safetensors: &["GptOssForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Step,
+        gguf: &["step", "step3"],
+        safetensors: &["Step3ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::MiniMax,
+        gguf: &["minimax"],
+        safetensors: &["MiniMaxForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Cohere,
+        gguf: &["cohere"],
+        safetensors: &["CohereForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Grin,
+        gguf: &["grin", "grinmoe"],
+        safetensors: &["GrinMoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Skyworks,
+        gguf: &["skyworks", "skyworkmoe"],
+        safetensors: &["SkyworkMoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Trinity,
+        gguf: &["trinity"],
+        safetensors: &["TrinityForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Grok,
+        gguf: &["grok"],
+        safetensors: &["GrokForCausalLM"],
+    },
+];
+
 fn map_architecture(architecture: &str, format: ArchFormat) -> Option<ModelFamily> {
-    match format {
-        ArchFormat::Gguf => match architecture {
-            "olmoe" => Some(ModelFamily::Olmoe),
-            "qwen3moe" => Some(ModelFamily::Qwen3Moe),
-            "gemma4" => Some(ModelFamily::Gemma4),
-            "deepseek2" => Some(ModelFamily::DeepSeek2),
-            "llama" => Some(ModelFamily::LlamaMoe),
-            "moonlight" => Some(ModelFamily::Moonlight16BA3B),
-            "granite" | "granitemoe" => Some(ModelFamily::Granite31A800M),
-            "nemotronh" => Some(ModelFamily::Nemotron),
-            "lfm2" | "lfm2moe" => Some(ModelFamily::Lfm2Moe),
-            "phimoe" | "slimmoe" => Some(ModelFamily::SlimMoe),
-            "zaya" => Some(ModelFamily::Zaya),
-            "glm4" | "glm4moe" => Some(ModelFamily::Glm4),
-            "gptoss" => Some(ModelFamily::GptOss),
-            "step" | "step3" => Some(ModelFamily::Step),
-            "minimax" => Some(ModelFamily::MiniMax),
-            "cohere" => Some(ModelFamily::Cohere),
-            "grin" | "grinmoe" => Some(ModelFamily::Grin),
-            "skyworks" | "skyworkmoe" => Some(ModelFamily::Skyworks),
-            "trinity" => Some(ModelFamily::Trinity),
-            "grok" => Some(ModelFamily::Grok),
-            _ => None,
-        },
-        ArchFormat::Safetensors => match architecture {
-            "OlmoeForCausalLM" => Some(ModelFamily::Olmoe),
-            "Qwen3MoeForCausalLM" => Some(ModelFamily::Qwen3Moe),
-            "Gemma4ForCausalLM" => Some(ModelFamily::Gemma4),
-            // DeepSeek-V2 class name; V3 is the HF tag used by Moonlight-16B-A3B
-            // Safetensors packages (see configs/local_safetensors_lineup.template.toml).
-            "DeepseekV2ForCausalLM" => Some(ModelFamily::DeepSeek2),
-            "DeepseekV3ForCausalLM" => Some(ModelFamily::Moonlight16BA3B),
-            "LlamaMoeForCausalLM" => Some(ModelFamily::LlamaMoe),
-            "MoonlightForCausalLM" => Some(ModelFamily::Moonlight16BA3B),
-            // Dense `GraniteForCausalLM` is intentionally not mapped — the MoE
-            // A800M target reports `GraniteMoeForCausalLM` (Codex review on #125).
-            "GraniteMoeForCausalLM" => Some(ModelFamily::Granite31A800M),
-            "ZayaForCausalLM" => Some(ModelFamily::Zaya),
-            "Glm4ForCausalLM" | "Glm4MoeForCausalLM" => Some(ModelFamily::Glm4),
-            "NemotronHForCausalLM" => Some(ModelFamily::Nemotron),
-            "Lfm2MoeForCausalLM" => Some(ModelFamily::Lfm2Moe),
-            "PhiMoEForCausalLM" => Some(ModelFamily::SlimMoe),
-            "GptOssForCausalLM" => Some(ModelFamily::GptOss),
-            "Step3ForCausalLM" => Some(ModelFamily::Step),
-            "MiniMaxForCausalLM" => Some(ModelFamily::MiniMax),
-            "CohereForCausalLM" => Some(ModelFamily::Cohere),
-            "GrinMoeForCausalLM" => Some(ModelFamily::Grin),
-            "SkyworkMoeForCausalLM" => Some(ModelFamily::Skyworks),
-            "TrinityForCausalLM" => Some(ModelFamily::Trinity),
-            "GrokForCausalLM" => Some(ModelFamily::Grok),
-            _ => None,
-        },
-    }
+    FAMILY_ARCHES.iter().find_map(|entry| {
+        let names = match format {
+            ArchFormat::Gguf => entry.gguf,
+            ArchFormat::Safetensors => entry.safetensors,
+        };
+        names.contains(&architecture).then_some(entry.family)
+    })
 }
 
 /// Unified family inference for GGUF and Safetensors architecture strings.
