@@ -60,6 +60,14 @@ fn finalize_experts_from_router(config: &mut ModelConfig, router: &Router) -> Re
     if config.top_k_experts == 0 {
         config.top_k_experts = router.checkpoint_expert_used_count();
     }
+    // Re-check after zero-fill: checkpoint expert_used_count can exceed a
+    // caller-capped num_experts (Gemini review on #127).
+    if config.top_k_experts > config.num_experts {
+        return Err(HybridError::InvalidConfig(format!(
+            "top_k_experts ({}) > num_experts ({})",
+            config.top_k_experts, config.num_experts
+        )));
+    }
     if config.gpu_synapse_tensor_name.trim().is_empty() {
         config.gpu_synapse_tensor_name = router
             .real_gpu_synapse_tensor_name()
