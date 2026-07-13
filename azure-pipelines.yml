@@ -24,6 +24,9 @@ trigger:
 #   autoCancel: true
 pr: none
 
+# Hosted matrix (commented below) still uses workspace cargo/rustup homes.
+# Self-hosted active job uses the agent user's normal ~/.cargo + ~/.rustup so
+# `rustup component add` matches the same toolchain as `cargo`/`rustc`.
 variables:
   CARGO_HOME: $(Pipeline.workspace)/.cargo
   RUSTUP_HOME: $(Pipeline.workspace)/.rustup
@@ -44,38 +47,31 @@ jobs:
     persistCredentials: 'false'
 
   - task: Cache@2
-    displayName: 'Rust Cache'
+    displayName: 'Rust registry cache'
     inputs:
-      key: 'cargo | "$(Agent.OS)" | self-hosted | Cargo.lock'
+      key: 'cargo-registry | "$(Agent.OS)" | self-hosted | Cargo.lock'
       restoreKeys: |
-        cargo | "$(Agent.OS)" | self-hosted
-        cargo | "$(Agent.OS)"
-      path: $(CARGO_HOME)
+        cargo-registry | "$(Agent.OS)" | self-hosted
+        cargo-registry | "$(Agent.OS)"
+      path: $(HOME)/.cargo/registry
 
   - bash: |
       set -euo pipefail
-      export CARGO_HOME="$(CARGO_HOME)"
-      mkdir -p "$CARGO_HOME/bin"
-      if ! command -v rustc >/dev/null 2>&1; then
-        export RUSTUP_HOME="$(RUSTUP_HOME)"
+      # Require rustup (not bare rustc): later steps call `rustup component add`.
+      # Cursor Bugbot + Gemini: checking only rustc can leave rustup missing and
+      # a workspace RUSTUP_HOME empty/mismatched with the agent toolchain.
+      if ! command -v rustup >/dev/null 2>&1; then
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-      else
-        export RUSTUP_HOME="${HOME}/.rustup"
-        echo "##vso[task.setvariable variable=RUSTUP_HOME]${HOME}/.rustup"
       fi
-      # Prefer agent-local cargo if rustup just installed; else system PATH.
-      if [ -f "$CARGO_HOME/env" ]; then
+      if [ -f "${HOME}/.cargo/env" ]; then
         # shellcheck source=/dev/null
-        . "$CARGO_HOME/env"
-      elif [ -f "$HOME/.cargo/env" ]; then
-        # shellcheck source=/dev/null
-        . "$HOME/.cargo/env"
+        . "${HOME}/.cargo/env"
       fi
-      echo "##vso[task.prependpath]$CARGO_HOME/bin"
-      echo "##vso[task.prependpath]$HOME/.cargo/bin"
+      echo "##vso[task.prependpath]${HOME}/.cargo/bin"
+      rustup --version
       rustc --version
       cargo --version
-    displayName: 'Ensure Rust (rustup if missing)'
+    displayName: 'Ensure rustup toolchain'
 
   - script: rustup component add rustfmt clippy llvm-tools-preview
     displayName: 'Install components'
@@ -92,13 +88,10 @@ jobs:
   - script: cargo check --examples --no-default-features --locked
     displayName: 'Check examples (no-default)'
 
+  # PATH already has cargo from the ensure-rustup step (##vso[task.prependpath]).
+  # Do not re-source ~/.cargo/env here (can fight a custom CARGO_HOME).
   - bash: |
       set -euo pipefail
-      export CARGO_HOME="$(CARGO_HOME)"
-      if [ -f "$HOME/.cargo/env" ]; then
-        # shellcheck source=/dev/null
-        . "$HOME/.cargo/env"
-      fi
       cargo install cargo-llvm-cov --locked
       cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
     displayName: 'Coverage (llvm-cov)'
