@@ -1432,15 +1432,22 @@ fn test_adapter_resolve_iq3_m_gguf() {
     );
 
     let path = write_temp_file(&checkpoint, "iq3_m_adapter");
-    let (metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    mapped.set_quantization_for_test("IQ3_M".into());
 
     // Manually set IQ3_M in metadata quantization so resolve_adapter detects it
     let adapter =
-        super::adapter::resolve_adapter(&metadata, &mapped, None, path.to_str().unwrap()).unwrap();
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap())
+            .unwrap();
     assert_eq!(
         adapter.synapse_source,
-        super::adapter::SynapseSource::RoutingF32
+        super::adapter::SynapseSource::DequantizedIQ3M
     );
+    assert_eq!(
+        adapter.dequant_iq3_m_synapse_tensor.as_deref(),
+        Some("blk.0.attn_q.weight")
+    );
+    assert!(adapter.routing_f32_synapse_tensor.is_none());
 }
 
 #[test]
