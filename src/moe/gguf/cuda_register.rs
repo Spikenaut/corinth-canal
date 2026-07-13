@@ -37,13 +37,12 @@ impl RegisteredTensorSliceU16 {
         n_elements: usize,
         path: &str,
     ) -> Result<Self> {
-        let byte_len =
-            n_elements
-                .checked_mul(size_of::<u16>())
-                .ok_or_else(|| HybridError::ModelLoad {
-                    path: path.to_owned(),
-                    reason: format!("tensor '{tensor_name}' byte length overflow"),
-                })?;
+        let byte_len = n_elements
+            .checked_mul(std::mem::size_of::<u16>())
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: path.to_owned(),
+                reason: format!("tensor '{tensor_name}' byte length overflow"),
+            })?;
 
         let page_size = page_size_bytes(path)?;
         let aligned_start = absolute_offset / page_size * page_size;
@@ -103,7 +102,7 @@ impl RegisteredTensorSliceU16 {
         // SAFETY: `ptr` and `len` are set in `register` and satisfy the
         // invariants of `slice::from_raw_parts`: the pointer is non-null,
         // correctly aligned (u16 = 2 bytes, GGUF alignment ≥ 32), and the
-        // slice is live as long as the owning `MappedOlmoeCheckpoint` (and
+        // slice is live as long as the owning `MappedGgufCheckpoint` (and
         // hence the mmap) is alive.
         unsafe { slice::from_raw_parts(self.ptr, self.len) }
     }

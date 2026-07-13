@@ -170,7 +170,7 @@ impl MappedGgufCheckpoint {
         let start = info.absolute_offset;
         let byte_len = info
             .n_elements
-            .checked_mul(size_of::<f32>())
+            .checked_mul(std::mem::size_of::<f32>())
             .ok_or_else(|| HybridError::ModelLoad {
                 path: path.to_owned(),
                 reason: format!("tensor '{name}' byte length overflow"),
@@ -212,7 +212,7 @@ impl MappedGgufCheckpoint {
         let byte_start = info.absolute_offset;
         let byte_len = info
             .n_elements
-            .checked_mul(size_of::<u16>())
+            .checked_mul(std::mem::size_of::<u16>())
             .ok_or_else(|| HybridError::ModelLoad {
                 path: path.to_owned(),
                 reason: format!("tensor '{tensor_name}' byte length overflow"),
