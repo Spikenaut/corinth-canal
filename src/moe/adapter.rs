@@ -368,10 +368,15 @@ fn map_architecture(architecture: &str, format: ArchFormat) -> Option<ModelFamil
             "OlmoeForCausalLM" => Some(ModelFamily::Olmoe),
             "Qwen3MoeForCausalLM" => Some(ModelFamily::Qwen3Moe),
             "Gemma4ForCausalLM" => Some(ModelFamily::Gemma4),
+            // DeepSeek-V2 class name; V3 is the HF tag used by Moonlight-16B-A3B
+            // Safetensors packages (see configs/local_safetensors_lineup.template.toml).
             "DeepseekV2ForCausalLM" => Some(ModelFamily::DeepSeek2),
+            "DeepseekV3ForCausalLM" => Some(ModelFamily::Moonlight16BA3B),
             "LlamaMoeForCausalLM" => Some(ModelFamily::LlamaMoe),
             "MoonlightForCausalLM" => Some(ModelFamily::Moonlight16BA3B),
-            "GraniteForCausalLM" | "GraniteMoeForCausalLM" => Some(ModelFamily::Granite31A800M),
+            // Dense `GraniteForCausalLM` is intentionally not mapped — the MoE
+            // A800M target reports `GraniteMoeForCausalLM` (Codex review on #125).
+            "GraniteMoeForCausalLM" => Some(ModelFamily::Granite31A800M),
             "ZayaForCausalLM" => Some(ModelFamily::Zaya),
             "Glm4ForCausalLM" | "Glm4MoeForCausalLM" => Some(ModelFamily::Glm4),
             "NemotronHForCausalLM" => Some(ModelFamily::Nemotron),
@@ -517,6 +522,30 @@ mod tests {
         assert_eq!(
             infer_family("grok", None, "test.gguf").unwrap(),
             ModelFamily::Grok
+        );
+    }
+
+    #[test]
+    fn infer_family_safetensors_moonlight_and_granite_moe_tags() {
+        assert_eq!(
+            super::infer_family_safetensors("DeepseekV3ForCausalLM", None, "test.safetensors")
+                .unwrap(),
+            ModelFamily::Moonlight16BA3B
+        );
+        assert_eq!(
+            super::infer_family_safetensors("MoonlightForCausalLM", None, "test.safetensors")
+                .unwrap(),
+            ModelFamily::Moonlight16BA3B
+        );
+        assert_eq!(
+            super::infer_family_safetensors("GraniteMoeForCausalLM", None, "test.safetensors")
+                .unwrap(),
+            ModelFamily::Granite31A800M
+        );
+        // Dense Granite is not the MoE A800M family.
+        assert!(
+            super::infer_family_safetensors("GraniteForCausalLM", None, "test.safetensors")
+                .is_err()
         );
     }
 
