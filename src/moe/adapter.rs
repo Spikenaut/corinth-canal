@@ -224,6 +224,10 @@ fn select_real_synapse(
     })
 }
 
+fn is_quantization_iq3_m(quantization: &str) -> bool {
+    quantization.contains("IQ3_M") || quantization.contains("iq3_m")
+}
+
 fn select_quantized_synapse(
     name: &str,
     info: &GgufTensorInfo,
@@ -233,8 +237,7 @@ fn select_quantized_synapse(
         return None;
     }
     let d0 = info.dims[0];
-    let is_iq3_m =
-        metadata.quantization().contains("IQ3_M") || metadata.quantization().contains("iq3_m");
+    let is_iq3_m = is_quantization_iq3_m(metadata.quantization());
     match info.ggml_type {
         GGML_TYPE_Q8_0 if d0.is_multiple_of(32) => Some(SynapseSelection {
             synapse_source: SynapseSource::DequantizedQ8_0,
