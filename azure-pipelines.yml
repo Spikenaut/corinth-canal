@@ -4,11 +4,19 @@
 #
 # Free-tier posture (2026-07):
 # - ACTIVE: self-hosted Linux agent in the Default pool (ShipOfTheseus / ~/myagent)
-#   on every push to main AND every PR into main. Does NOT use Microsoft-hosted free minutes.
+#   on every push to main AND every same-repo PR into main.
+#   Does NOT use Microsoft-hosted free minutes.
 # - DISABLED (not deleted): Microsoft-hosted 3-OS vmImage matrix (burns free minutes).
 #   Re-enable that block when Limen-Neural has hosted free minutes again.
 #
+# SECURITY: Self-hosted PR jobs execute PR-authored code on a shared host.
+# Only same-repo PRs run here (forks are skipped via job condition). Also set in
+# Azure DevOps: Project settings → Pipelines → Settings →
+#   limit building fork PRs / require approval for forks.
+#
 # Agent must be online or jobs queue: cd ~/myagent && ./run.sh
+# First-time: open a stuck build and "Permit" the pipeline to use pool Default
+# (Checkpoint.Authorization). Org settings → Agent pools → Default → Security.
 
 trigger:
   branches:
@@ -16,18 +24,12 @@ trigger:
       - main
 
 # PR validation on self-hosted (every push to the PR branch).
+# Same-repo only at the job condition below; forks do not use ShipOfTheseus.
 pr:
   branches:
     include:
       - main
   autoCancel: true
-
-# Hosted matrix (commented below) still uses workspace cargo/rustup homes.
-# Self-hosted active job uses the agent user's normal ~/.cargo + ~/.rustup so
-# `rustup component add` matches the same toolchain as `cargo`/`rustc`.
-variables:
-  CARGO_HOME: $(Pipeline.workspace)/.cargo
-  RUSTUP_HOME: $(Pipeline.workspace)/.rustup
 
 # ---------------------------------------------------------------------------
 # ACTIVE: self-hosted Linux (Default pool). Start agent: cd ~/myagent && ./run.sh
@@ -35,6 +37,19 @@ variables:
 jobs:
 - job: BuildTest_SelfHosted_Linux
   displayName: 'CPU Tests (self-hosted Linux)'
+  # Skip fork PRs (mirror GHA fork guards). Non-PR reasons (main CI / manual) run.
+  condition: |
+    and(
+      succeeded(),
+      or(
+        ne(variables['Build.Reason'], 'PullRequest'),
+        ne(variables['System.PullRequest.IsFork'], 'True')
+      )
+    )
+  # Use agent-home toolchains (do NOT inject workspace CARGO_HOME/RUSTUP_HOME).
+  variables:
+    CARGO_HOME: $(HOME)/.cargo
+    RUSTUP_HOME: $(HOME)/.rustup
   pool:
     name: Default
     # Optional pin to this machine once registered:
@@ -51,58 +66,99 @@ jobs:
       restoreKeys: |
         cargo-registry | "$(Agent.OS)" | self-hosted
         cargo-registry | "$(Agent.OS)"
-      path: $(HOME)/.cargo/registry
+      path: $(CARGO_HOME)/registry
 
   - bash: |
       set -euo pipefail
+      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      mkdir -p "$CARGO_HOME/bin"
+
       # Require rustup (not bare rustc): later steps call `rustup component add`.
-      # Cursor Bugbot + Gemini: checking only rustc can leave rustup missing and
-      # a workspace RUSTUP_HOME empty/mismatched with the agent toolchain.
       if ! command -v rustup >/dev/null 2>&1; then
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --default-toolchain stable --no-modify-path
       fi
-      if [ -f "${HOME}/.cargo/env" ]; then
+
+      # Always put the install root on PATH (workspace or home — matches CARGO_HOME).
+      echo "##vso[task.prependpath]${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+
+      if [ -f "${CARGO_HOME}/env" ]; then
         # shellcheck source=/dev/null
-        . "${HOME}/.cargo/env"
+        . "${CARGO_HOME}/env"
       fi
-      echo "##vso[task.prependpath]${HOME}/.cargo/bin"
+
+      # Ensure a default toolchain exists under this RUSTUP_HOME (fresh workspaces).
+      if ! rustup show active-toolchain >/dev/null 2>&1; then
+        rustup default stable
+      fi
+
       rustup --version
       rustc --version
       cargo --version
     displayName: 'Ensure rustup toolchain'
 
-  - script: rustup component add rustfmt clippy llvm-tools-preview
+  - script: |
+      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      rustup component add rustfmt clippy llvm-tools-preview
     displayName: 'Install components'
 
-  - script: cargo fmt --all -- --check
+  - script: |
+      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo fmt --all -- --check
     displayName: 'Format check'
 
-  - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
+  - script: |
+      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
     displayName: 'Clippy (no-default)'
 
-  - script: cargo test --lib --no-default-features --locked
+  - script: |
+      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo test --lib --no-default-features --locked
     displayName: 'Test (no-default)'
 
-  - script: cargo check --examples --no-default-features --locked
+  - script: |
+      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo check --examples --no-default-features --locked
     displayName: 'Check examples (no-default)'
 
-  # PATH already has cargo from the ensure-rustup step (##vso[task.prependpath]).
-  # Do not re-source ~/.cargo/env here (can fight a custom CARGO_HOME).
   - bash: |
       set -euo pipefail
+      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
       cargo install cargo-llvm-cov --locked
+      # cargo install puts binaries under CARGO_HOME/bin — already on PATH above.
       cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
     displayName: 'Coverage (llvm-cov)'
     continueOnError: true
 
 # ---------------------------------------------------------------------------
 # DISABLED — Microsoft-hosted multi-OS matrix (consumes free parallel minutes).
-# Uncomment this entire job and remove/disable BuildTest_SelfHosted_Linux above
-# (or run both) when the org has hosted capacity again.
-# Also re-enable the `pr:` block at the top for PR coverage.
+# Uncomment this entire job (and optionally keep or disable BuildTest_SelfHosted_Linux)
+# when the org has hosted free minutes again. PR triggers at the top are already active.
+# When re-enabling hosted jobs, set CARGO_HOME/RUSTUP_HOME on that job only, e.g.:
+#   variables:
+#     CARGO_HOME: $(Pipeline.workspace)/.cargo
+#     RUSTUP_HOME: $(Pipeline.workspace)/.rustup
 # ---------------------------------------------------------------------------
 # - job: BuildTest_Hosted_Matrix
 #   displayName: 'CPU Tests (Microsoft-hosted matrix)'
+#   variables:
+#     CARGO_HOME: $(Pipeline.workspace)/.cargo
+#     RUSTUP_HOME: $(Pipeline.workspace)/.rustup
 #   strategy:
 #     matrix:
 #       linux:
