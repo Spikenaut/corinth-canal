@@ -55,10 +55,13 @@ jobs:
   - bash: |
       set -euo pipefail
       export CARGO_HOME="$(CARGO_HOME)"
-      export RUSTUP_HOME="$(RUSTUP_HOME)"
       mkdir -p "$CARGO_HOME/bin"
       if ! command -v rustc >/dev/null 2>&1; then
+        export RUSTUP_HOME="$(RUSTUP_HOME)"
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      else
+        export RUSTUP_HOME="${HOME}/.rustup"
+        echo "##vso[task.setvariable variable=RUSTUP_HOME]${HOME}/.rustup"
       fi
       # Prefer agent-local cargo if rustup just installed; else system PATH.
       if [ -f "$CARGO_HOME/env" ]; then
