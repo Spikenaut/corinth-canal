@@ -3,26 +3,24 @@
 # See GH#109 for details. GPU/CUDA, Docker, Sentry remain on GitHub Actions.
 #
 # Free-tier posture (2026-07):
-# - ACTIVE: self-hosted Linux agent in the Default pool (ShipOfTheseus / ~/myagent).
-#   Does NOT consume Microsoft-hosted free minutes.
-# - DISABLED (not deleted): PR auto-triggers and Microsoft-hosted 3-OS matrix.
-#   Re-enable those blocks when Limen-Neural has free hosted minutes again
-#   (org → Project settings / org → Parallel jobs / resource limits).
+# - ACTIVE: self-hosted Linux agent in the Default pool (ShipOfTheseus / ~/myagent)
+#   on every push to main AND every PR into main. Does NOT use Microsoft-hosted free minutes.
+# - DISABLED (not deleted): Microsoft-hosted 3-OS vmImage matrix (burns free minutes).
+#   Re-enable that block when Limen-Neural has hosted free minutes again.
+#
+# Agent must be online or jobs queue: cd ~/myagent && ./run.sh
 
-# Push to main only (self-hosted). Manual "Run pipeline" also works when agent is online.
 trigger:
   branches:
     include:
       - main
 
-# DISABLED — PR triggers burned free hosted minutes on every PR (3× OS matrix).
-# Re-enable when free minutes are available OR keep disabled and rely on GHA for PRs.
-# pr:
-#   branches:
-#     include:
-#       - main
-#   autoCancel: true
-pr: none
+# PR validation on self-hosted (every push to the PR branch).
+pr:
+  branches:
+    include:
+      - main
+  autoCancel: true
 
 # Hosted matrix (commented below) still uses workspace cargo/rustup homes.
 # Self-hosted active job uses the agent user's normal ~/.cargo + ~/.rustup so
