@@ -105,14 +105,11 @@ fn resolve_routing_tensor(
     Ok(routing_tensor)
 }
 
-pub(super) fn resolve_adapter(
+fn resolve_gguf_topology(
     metadata: &GgufMetadata,
-    checkpoint: &MappedGgufCheckpoint,
-    family_override: Option<ModelFamily>,
+    architecture: &str,
     path: &str,
-) -> Result<ModelAdapter> {
-    let architecture = metadata.architecture().to_owned();
-    let family = infer_family(&architecture, family_override, path)?;
+) -> Result<(usize, usize, usize, usize)> {
     let hidden_size = metadata
         .numeric(&format!("{architecture}.embedding_length"))
         .ok_or_else(|| {
@@ -137,6 +134,19 @@ pub(super) fn resolve_adapter(
     let expert_used_count = metadata
         .numeric(&format!("{architecture}.expert_used_count"))
         .unwrap_or(1);
+    Ok((hidden_size, num_layers, num_experts, expert_used_count))
+}
+
+pub(super) fn resolve_adapter(
+    metadata: &GgufMetadata,
+    checkpoint: &MappedGgufCheckpoint,
+    family_override: Option<ModelFamily>,
+    path: &str,
+) -> Result<ModelAdapter> {
+    let architecture = metadata.architecture().to_owned();
+    let family = infer_family(&architecture, family_override, path)?;
+    let (hidden_size, num_layers, num_experts, expert_used_count) =
+        resolve_gguf_topology(metadata, &architecture, path)?;
     let token_embedding_tensor = resolve_token_embedding_tensor(checkpoint, path)?;
 
     let routing_tensor = resolve_routing_tensor(checkpoint, num_experts, path)?;

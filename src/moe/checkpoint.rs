@@ -305,6 +305,14 @@ impl MappedGgufCheckpoint {
         self.metadata.quantization = quantization;
     }
 
+    #[cfg(test)]
+    pub(super) fn set_numeric_for_test(&mut self, key: &str, value: Option<u64>) {
+        match value {
+            Some(v) => self.metadata.numerics.insert(key.to_owned(), v),
+            None => self.metadata.numerics.remove(key),
+        };
+    }
+
     pub(super) fn has_tensor(&self, name: &str) -> bool {
         self.tensors.contains_key(name)
     }

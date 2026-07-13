@@ -1451,6 +1451,394 @@ fn test_adapter_resolve_iq3_m_gguf() {
 }
 
 #[test]
+fn test_adapter_resolve_tok_embeddings_fallback() {
+    // token_embd.weight is absent; tok_embeddings.weight should be used instead.
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "tok_embeddings.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "tok-embeddings-fallback");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let adapter =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap())
+            .unwrap();
+
+    assert_eq!(adapter.token_embedding_tensor, "tok_embeddings.weight");
+    assert_eq!(
+        adapter.synapse_source,
+        super::adapter::SynapseSource::RoutingF32
+    );
+}
+
+#[test]
+fn test_adapter_resolve_token_embedding_missing() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "token-embedding-missing");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::MissingTensor { name, .. }) if name == "token_embd.weight"
+    ));
+}
+
+#[test]
+fn test_adapter_resolve_routing_missing() {
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "routing-missing");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::MissingTensor { name, .. }) if name == "ffn_gate_inp.weight"
+    ));
+}
+
+#[test]
+fn test_adapter_resolve_routing_wrong_type() {
+    let gate_payload = build_q8_0_payload(EMBEDDING_DIM, 64, 0x3c00, 1);
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_Q8_0,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "routing-wrong-type");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("must be rank-2 F32")
+    ));
+}
+
+#[test]
+fn test_adapter_resolve_routing_insufficient_experts() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 1],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "routing-insufficient-experts");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("only exposes 1 experts")
+    ));
+}
+
+#[test]
+fn test_adapter_resolve_quantized_synapse_rank_not_two() {
+    // attn_q is rank-1, so select_quantized_synapse should return None early.
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = build_q8_0_payload(EMBEDDING_DIM, 1, 0x3c00, 1);
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM],
+                GGML_TYPE_Q8_0,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "quantized-rank-not-two");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let adapter =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap())
+            .unwrap();
+
+    assert_eq!(
+        adapter.synapse_source,
+        super::adapter::SynapseSource::RoutingF32
+    );
+    assert_eq!(
+        adapter.routing_f32_synapse_tensor.as_deref(),
+        Some("blk.0.ffn_gate_inp.weight")
+    );
+}
+
+#[test]
+fn test_adapter_resolve_gguf_topology_missing_embedding_length() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "topology-missing-embedding-length");
+    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    mapped.set_numeric_for_test("olmoe.embedding_length", None);
+
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("embedding_length")
+    ));
+}
+
+#[test]
+fn test_adapter_resolve_gguf_topology_missing_block_count() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "topology-missing-block-count");
+    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    mapped.set_numeric_for_test("olmoe.block_count", None);
+
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("block_count")
+    ));
+}
+
+#[test]
+fn test_adapter_resolve_gguf_topology_missing_expert_count() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "topology-missing-expert-count");
+    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    mapped.set_numeric_for_test("olmoe.expert_count", None);
+
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("expert_count")
+    ));
+}
+
+#[test]
+fn test_synapse_source_label_synthetic_fallback() {
+    let adapter = super::adapter::ModelAdapter {
+        family: ModelFamily::Olmoe,
+        architecture: "olmoe".to_owned(),
+        hidden_size: EMBEDDING_DIM,
+        num_layers: 16,
+        num_experts: 64,
+        expert_used_count: 8,
+        token_embedding_tensor: "token_embd.weight".to_owned(),
+        routing_tensor: "blk.0.ffn_gate_inp.weight".to_owned(),
+        preferred_gpu_synapse_tensor: None,
+        real_gpu_synapse_tensor: None,
+        dequant_q8_0_synapse_tensor: None,
+        dequant_q5_k_synapse_tensor: None,
+        dequant_q6_k_synapse_tensor: None,
+        dequant_iq3_m_synapse_tensor: None,
+        routing_f32_synapse_tensor: None,
+        dequant_int4_synapse_tensor: None,
+        synapse_source: super::adapter::SynapseSource::SyntheticFallback,
+        quantization: "Q8_0".to_owned(),
+    };
+
+    assert_eq!(adapter.synapse_source_label(), "synthetic-fallback");
+}
+
+#[test]
 fn test_iq3_m_multi_row_dequantization() {
     // Test dequantize_iq3_m_tensor with multiple rows (covers the row loop)
     let mut block = vec![0u8; 111];
