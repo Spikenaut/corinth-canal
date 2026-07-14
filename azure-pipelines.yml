@@ -4,15 +4,16 @@
 #
 # Free-tier posture (2026-07):
 # - ACTIVE: self-hosted Linux agent in the Default pool (ShipOfTheseus / ~/myagent)
-#   on every push to main AND every same-repo PR into main.
+#   on pushes to main only.
 #   Does NOT use Microsoft-hosted free minutes.
 # - DISABLED (not deleted): Microsoft-hosted 3-OS vmImage matrix (burns free minutes).
 #   Re-enable that block when Limen-Neural has hosted free minutes again.
 #
-# SECURITY: Self-hosted PR jobs execute PR-authored code on a shared host.
-# Only same-repo PRs run here (forks are skipped via job condition). Also set in
-# Azure DevOps: Project settings → Pipelines → Settings →
-#   limit building fork PRs / require approval for forks.
+# SECURITY: Self-hosted jobs execute repository-authored code on a shared host.
+# Do not run this pipeline directly for PR validation: Azure evaluates merged
+# PR-authored YAML before scheduling jobs, so a YAML-level fork/same-repo gate is
+# not a reliable boundary for protecting the Default self-hosted pool. Use GitHub
+# Actions or an Azure pipeline definition kept outside PR-authored YAML for PRs.
 #
 # Agent must be online or jobs queue: cd ~/myagent && ./run.sh
 # First-time: open a stuck build and "Permit" the pipeline to use pool Default
@@ -23,13 +24,11 @@ trigger:
     include:
       - main
 
-# PR validation on self-hosted (every push to the PR branch).
-# Same-repo only at the job condition below; forks do not use ShipOfTheseus.
-pr:
-  branches:
-    include:
-      - main
-  autoCancel: true
+# Self-hosted Azure PR validation is disabled here. A fork/same-repo gate inside
+# this PR-authored YAML can be edited by the same PR before Azure schedules the
+# Default self-hosted pool. Keep PR validation on GitHub Actions or in an Azure
+# pipeline definition that PR authors cannot modify.
+pr: none
 
 # ---------------------------------------------------------------------------
 # ACTIVE: self-hosted Linux (Default pool). Start agent: cd ~/myagent && ./run.sh
@@ -37,19 +36,9 @@ pr:
 jobs:
 - job: BuildTest_SelfHosted_Linux
   displayName: 'CPU Tests (self-hosted Linux)'
-  # Skip fork PRs (mirror GHA fork guards). Non-PR reasons (main CI / manual) run.
-  condition: |
-    and(
-      succeeded(),
-      or(
-        ne(variables['Build.Reason'], 'PullRequest'),
-        ne(variables['System.PullRequest.IsFork'], 'True')
-      )
-    )
-  # Use agent-home toolchains (do NOT inject workspace CARGO_HOME/RUSTUP_HOME).
-  variables:
-    CARGO_HOME: $(HOME)/.cargo
-    RUSTUP_HOME: $(HOME)/.rustup
+  # This pipeline is not a PR boundary; `pr: none` above prevents PR-authored
+  # YAML from scheduling the self-hosted Default pool.
+  condition: succeeded()
   pool:
     name: Default
     # Optional pin to this machine once registered:
@@ -59,19 +48,10 @@ jobs:
   - checkout: self
     persistCredentials: 'false'
 
-  - task: Cache@2
-    displayName: 'Rust registry cache'
-    inputs:
-      key: 'cargo-registry | "$(Agent.OS)" | self-hosted | Cargo.lock'
-      restoreKeys: |
-        cargo-registry | "$(Agent.OS)" | self-hosted
-        cargo-registry | "$(Agent.OS)"
-      path: $(CARGO_HOME)/registry
-
   - bash: |
       set -euo pipefail
-      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       mkdir -p "$CARGO_HOME/bin"
 
       # Require rustup (not bare rustc): later steps call `rustup component add`.
@@ -100,44 +80,44 @@ jobs:
     displayName: 'Ensure rustup toolchain'
 
   - script: |
-      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       export PATH="${CARGO_HOME}/bin:${PATH}"
       rustup component add rustfmt clippy llvm-tools-preview
     displayName: 'Install components'
 
   - script: |
-      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       export PATH="${CARGO_HOME}/bin:${PATH}"
       cargo fmt --all -- --check
     displayName: 'Format check'
 
   - script: |
-      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       export PATH="${CARGO_HOME}/bin:${PATH}"
       cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
     displayName: 'Clippy (no-default)'
 
   - script: |
-      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       export PATH="${CARGO_HOME}/bin:${PATH}"
       cargo test --lib --no-default-features --locked
     displayName: 'Test (no-default)'
 
   - script: |
-      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       export PATH="${CARGO_HOME}/bin:${PATH}"
       cargo check --examples --no-default-features --locked
     displayName: 'Check examples (no-default)'
 
   - bash: |
       set -euo pipefail
-      export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-      export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       export PATH="${CARGO_HOME}/bin:${PATH}"
       cargo install cargo-llvm-cov --locked
       # cargo install puts binaries under CARGO_HOME/bin — already on PATH above.
@@ -148,7 +128,7 @@ jobs:
 # ---------------------------------------------------------------------------
 # DISABLED — Microsoft-hosted multi-OS matrix (consumes free parallel minutes).
 # Uncomment this entire job (and optionally keep or disable BuildTest_SelfHosted_Linux)
-# when the org has hosted free minutes again. PR triggers at the top are already active.
+# when the org has hosted free minutes again. Re-enable PR triggers only for trusted pools.
 # When re-enabling hosted jobs, set CARGO_HOME/RUSTUP_HOME on that job only, e.g.:
 #   variables:
 #     CARGO_HOME: $(Pipeline.workspace)/.cargo
