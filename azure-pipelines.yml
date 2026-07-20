@@ -3,8 +3,7 @@
 # See GH#109 for details. GPU/CUDA, Docker, Sentry remain on GitHub Actions.
 #
 # Free-tier posture (2026-07):
-# - ACTIVE: self-hosted Linux agent in the Default pool (ShipOfTheseus / ~/myagent)
-#   on pushes to main only.
+# - ACTIVE: self-hosted Linux agent in the Default pool on pushes to main only.
 #   Does NOT use Microsoft-hosted free minutes.
 # - DISABLED (not deleted): Microsoft-hosted 3-OS vmImage matrix (burns free minutes).
 #   Re-enable that block when Limen-Neural has hosted free minutes again.
@@ -15,9 +14,10 @@
 # not a reliable boundary for protecting the Default self-hosted pool. Use GitHub
 # Actions or an Azure pipeline definition kept outside PR-authored YAML for PRs.
 #
-# Agent must be online or jobs queue: cd ~/myagent && ./run.sh
-# First-time: open a stuck build and "Permit" the pipeline to use pool Default
-# (Checkpoint.Authorization). Org settings → Agent pools → Default → Security.
+# Operator: start the registered self-hosted agent before expecting Azure jobs
+# (otherwise they queue). First-time: open a stuck build and "Permit" the pipeline
+# to use pool Default (Checkpoint.Authorization). Org settings → Agent pools →
+# Default → Security.
 
 trigger:
   branches:
@@ -31,7 +31,7 @@ trigger:
 pr: none
 
 # ---------------------------------------------------------------------------
-# ACTIVE: self-hosted Linux (Default pool). Start agent: cd ~/myagent && ./run.sh
+# ACTIVE: self-hosted Linux (Default pool). Operator starts the agent first.
 # ---------------------------------------------------------------------------
 jobs:
 - job: BuildTest_SelfHosted_Linux
@@ -41,11 +41,11 @@ jobs:
   condition: succeeded()
   pool:
     name: Default
-    # Optional pin to this machine once registered:
-    # demands:
-    # - Agent.Name -equals ShipOfTheseus
+    demands:
+      - Agent.OS -equals Linux
   steps:
   - checkout: self
+    clean: true
     persistCredentials: 'false'
 
   - bash: |
@@ -54,25 +54,23 @@ jobs:
       export RUSTUP_HOME="$HOME/.rustup"
       mkdir -p "$CARGO_HOME/bin"
 
+      # Put install root on PATH before probing (install uses --no-modify-path).
+      echo "##vso[task.prependpath]${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+
       # Require rustup (not bare rustc): later steps call `rustup component add`.
       if ! command -v rustup >/dev/null 2>&1; then
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
           | sh -s -- -y --default-toolchain stable --no-modify-path
       fi
 
-      # Always put the install root on PATH (workspace or home — matches CARGO_HOME).
-      echo "##vso[task.prependpath]${CARGO_HOME}/bin"
-      export PATH="${CARGO_HOME}/bin:${PATH}"
-
       if [ -f "${CARGO_HOME}/env" ]; then
         # shellcheck source=/dev/null
         . "${CARGO_HOME}/env"
       fi
 
-      # Ensure a default toolchain exists under this RUSTUP_HOME (fresh workspaces).
-      if ! rustup show active-toolchain >/dev/null 2>&1; then
-        rustup default stable
-      fi
+      # Prefer stable even when another toolchain is already active on the agent.
+      rustup default stable
 
       rustup --version
       rustc --version
