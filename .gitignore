@@ -24,6 +24,7 @@ lcov.info
 coverage/
 
 # Agent notes
+docs/
 
 # Local Kilo planning scratch
 .kilo/plans/
@@ -52,6 +53,20 @@ configs/safetensors_lineup.toml
 .beads-credential-key
 .cursor/
 
-# IDE/tool dirs
+# IDE/AI tool dirs
 .mimocode/
 .opencode/
+.cursor/
+.hermes/
+.kilo/
+.zed/
+.ai/
+.junie/
+.claude/
+
+# Agent skills & MCP servers
+.beads/
+.swarm/
+
+# Codacy results
+codacy-results.sarif
