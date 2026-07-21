@@ -1,84 +1,203 @@
 # Azure Pipelines cross-platform CPU CI (modelled on Limen-Neural/neuromod).
 # Third-party tasks pinned to versions for reproducibility.
 # See GH#109 for details. GPU/CUDA, Docker, Sentry remain on GitHub Actions.
+#
+# Free-tier posture (2026-07):
+# - ACTIVE: self-hosted Linux agent in the Default pool on pushes to main only.
+#   Does NOT use Microsoft-hosted free minutes.
+# - DISABLED (not deleted): Microsoft-hosted 3-OS vmImage matrix (burns free minutes).
+#   Re-enable that block when Limen-Neural has hosted free minutes again.
+#
+# SECURITY: Self-hosted jobs execute repository-authored code on a shared host.
+# Do not run this pipeline directly for PR validation: Azure evaluates merged
+# PR-authored YAML before scheduling jobs, so a YAML-level fork/same-repo gate is
+# not a reliable boundary for protecting the Default self-hosted pool. Use GitHub
+# Actions or an Azure pipeline definition kept outside PR-authored YAML for PRs.
+#
+# Operator: start the registered self-hosted agent before expecting Azure jobs
+# (otherwise they queue). First-time: open a stuck build and "Permit" the pipeline
+# to use pool Default (Checkpoint.Authorization). Org settings → Agent pools →
+# Default → Security.
 
 trigger:
   branches:
     include:
       - main
-pr:
-  branches:
-    include:
-      - main
-  autoCancel: false
 
-variables:
-  CARGO_HOME: $(Pipeline.workspace)/.cargo
-  RUSTUP_HOME: $(Pipeline.workspace)/.rustup
+# Self-hosted Azure PR validation is disabled here. A fork/same-repo gate inside
+# this PR-authored YAML can be edited by the same PR before Azure schedules the
+# Default self-hosted pool. Keep PR validation on GitHub Actions or in an Azure
+# pipeline definition that PR authors cannot modify.
+pr: none
 
+# ---------------------------------------------------------------------------
+# ACTIVE: self-hosted Linux (Default pool). Operator starts the agent first.
+# ---------------------------------------------------------------------------
 jobs:
-- job: BuildTest
-  strategy:
-    matrix:
-      linux:
-        imageName: 'ubuntu-latest'
-      windows:
-        imageName: 'windows-latest'
-      mac:
-        imageName: 'macos-latest'
+- job: BuildTest_SelfHosted_Linux
+  displayName: 'CPU Tests (self-hosted Linux)'
+  # This pipeline is not a PR boundary; `pr: none` above prevents PR-authored
+  # YAML from scheduling the self-hosted Default pool.
+  condition: succeeded()
   pool:
-    vmImage: $(imageName)
-
+    name: Default
+    demands:
+      - Agent.OS -equals Linux
   steps:
   - checkout: self
+    clean: true
     persistCredentials: 'false'
 
-  - task: Cache@2
-    displayName: 'Rust Cache'
-    inputs:
-      key: 'cargo | "$(Agent.OS)" | Cargo.lock'
-      restoreKeys: |
-        cargo | "$(Agent.OS)"
-      path: $(CARGO_HOME)
-
   - bash: |
-      export CARGO_HOME="$(CARGO_HOME)"
-      export RUSTUP_HOME="$(RUSTUP_HOME)"
+      set -euo pipefail
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
       mkdir -p "$CARGO_HOME/bin"
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-      echo "##vso[task.prependpath]$CARGO_HOME/bin"
-    displayName: 'Install Rust (rustup) - Unix'
-    condition: ne(variables['Agent.OS'], 'Windows_NT')
 
-  - powershell: |
-      $env:CARGO_HOME = "$(CARGO_HOME)"
-      $env:RUSTUP_HOME = "$(RUSTUP_HOME)"
-      New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
-      Invoke-WebRequest -Uri https://win.rustup.rs/ -OutFile rustup-init.exe
-      .\rustup-init.exe -y --default-toolchain stable --no-modify-path
-      Write-Host "##vso[task.prependpath]$env:CARGO_HOME\bin"
-    displayName: 'Install Rust (rustup) - Windows'
-    condition: eq(variables['Agent.OS'], 'Windows_NT')
+      # Put install root on PATH before probing (install uses --no-modify-path).
+      echo "##vso[task.prependpath]${CARGO_HOME}/bin"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
 
-  - script: rustup component add rustfmt clippy llvm-tools-preview
+      # Require rustup (not bare rustc): later steps call `rustup component add`.
+      if ! command -v rustup >/dev/null 2>&1; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --default-toolchain stable --no-modify-path
+      fi
+
+      if [ -f "${CARGO_HOME}/env" ]; then
+        # shellcheck source=/dev/null
+        . "${CARGO_HOME}/env"
+      fi
+
+      # Prefer stable even when another toolchain is already active on the agent.
+      rustup default stable
+
+      rustup --version
+      rustc --version
+      cargo --version
+    displayName: 'Ensure rustup toolchain'
+
+  - script: |
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      rustup component add rustfmt clippy llvm-tools-preview
     displayName: 'Install components'
 
-  - script: cargo fmt --all -- --check
+  - script: |
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo fmt --all -- --check
     displayName: 'Format check'
 
-  - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
+  - script: |
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
     displayName: 'Clippy (no-default)'
 
-  - script: cargo test --lib --no-default-features --locked
+  - script: |
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo test --lib --no-default-features --locked
     displayName: 'Test (no-default)'
 
-  - script: cargo check --examples --no-default-features --locked
+  - script: |
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
+      cargo check --examples --no-default-features --locked
     displayName: 'Check examples (no-default)'
 
   - bash: |
-      export CARGO_HOME="$(CARGO_HOME)"
+      set -euo pipefail
+      export CARGO_HOME="$HOME/.cargo"
+      export RUSTUP_HOME="$HOME/.rustup"
+      export PATH="${CARGO_HOME}/bin:${PATH}"
       cargo install cargo-llvm-cov --locked
+      # cargo install puts binaries under CARGO_HOME/bin — already on PATH above.
       cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
     displayName: 'Coverage (llvm-cov)'
     continueOnError: true
-    condition: eq(variables['imageName'], 'ubuntu-latest')
+
+# ---------------------------------------------------------------------------
+# DISABLED — Microsoft-hosted multi-OS matrix (consumes free parallel minutes).
+# Uncomment this entire job (and optionally keep or disable BuildTest_SelfHosted_Linux)
+# when the org has hosted free minutes again. Re-enable PR triggers only for trusted pools.
+# When re-enabling hosted jobs, set CARGO_HOME/RUSTUP_HOME on that job only, e.g.:
+#   variables:
+#     CARGO_HOME: $(Pipeline.workspace)/.cargo
+#     RUSTUP_HOME: $(Pipeline.workspace)/.rustup
+# ---------------------------------------------------------------------------
+# - job: BuildTest_Hosted_Matrix
+#   displayName: 'CPU Tests (Microsoft-hosted matrix)'
+#   variables:
+#     CARGO_HOME: $(Pipeline.workspace)/.cargo
+#     RUSTUP_HOME: $(Pipeline.workspace)/.rustup
+#   strategy:
+#     matrix:
+#       linux:
+#         imageName: 'ubuntu-latest'
+#       windows:
+#         imageName: 'windows-latest'
+#       mac:
+#         imageName: 'macos-latest'
+#   pool:
+#     vmImage: $(imageName)
+#
+#   steps:
+#   - checkout: self
+#     persistCredentials: 'false'
+#
+#   - task: Cache@2
+#     displayName: 'Rust Cache'
+#     inputs:
+#       key: 'cargo | "$(Agent.OS)" | Cargo.lock'
+#       restoreKeys: |
+#         cargo | "$(Agent.OS)"
+#       path: $(CARGO_HOME)
+#
+#   - bash: |
+#       export CARGO_HOME="$(CARGO_HOME)"
+#       export RUSTUP_HOME="$(RUSTUP_HOME)"
+#       mkdir -p "$CARGO_HOME/bin"
+#       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+#       echo "##vso[task.prependpath]$CARGO_HOME/bin"
+#     displayName: 'Install Rust (rustup) - Unix'
+#     condition: ne(variables['Agent.OS'], 'Windows_NT')
+#
+#   - powershell: |
+#       $env:CARGO_HOME = "$(CARGO_HOME)"
+#       $env:RUSTUP_HOME = "$(RUSTUP_HOME)"
+#       New-Item -ItemType Directory -Force -Path "$env:CARGO_HOME\bin" | Out-Null
+#       Invoke-WebRequest -Uri https://win.rustup.rs/ -OutFile rustup-init.exe
+#       .\rustup-init.exe -y --default-toolchain stable --no-modify-path
+#       Write-Host "##vso[task.prependpath]$env:CARGO_HOME\bin"
+#     displayName: 'Install Rust (rustup) - Windows'
+#     condition: eq(variables['Agent.OS'], 'Windows_NT')
+#
+#   - script: rustup component add rustfmt clippy llvm-tools-preview
+#     displayName: 'Install components'
+#
+#   - script: cargo fmt --all -- --check
+#     displayName: 'Format check'
+#
+#   - script: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
+#     displayName: 'Clippy (no-default)'
+#
+#   - script: cargo test --lib --no-default-features --locked
+#     displayName: 'Test (no-default)'
+#
+#   - script: cargo check --examples --no-default-features --locked
+#     displayName: 'Check examples (no-default)'
+#
+#   - bash: |
+#       export CARGO_HOME="$(CARGO_HOME)"
+#       cargo install cargo-llvm-cov --locked
+#       cargo llvm-cov --lib --no-default-features --locked --lcov --output-path lcov.info
+#     displayName: 'Coverage (llvm-cov)'
+#     continueOnError: true
+#     condition: eq(variables['imageName'], 'ubuntu-latest')
