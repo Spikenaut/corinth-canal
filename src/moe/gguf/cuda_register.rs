@@ -69,13 +69,6 @@ impl RegisteredTensorSliceU16 {
             });
         }
 
-        // SAFETY: `aligned_start` is a page-aligned byte offset within the
-        // mmap (verified by the `aligned_end > mmap.len()` guard above).
-        // The `MmapMut` backing is a private copy-on-write mapping, so the
-        // underlying pages are writable — required by `cuMemHostRegister_v2`
-        // even though it does not modify the memory contents.
-        let register_ptr = unsafe { mmap.as_ptr().add(aligned_start) as *mut c_void };
-        cuda_host_register(register_ptr, register_len, path, tensor_name)?;
         if !absolute_offset.is_multiple_of(std::mem::align_of::<u16>()) {
             return Err(HybridError::ModelLoad {
                 path: path.to_owned(),
@@ -84,6 +77,14 @@ impl RegisteredTensorSliceU16 {
                 ),
             });
         }
+
+        // SAFETY: `aligned_start` is a page-aligned byte offset within the
+        // mmap (verified by the `aligned_end > mmap.len()` guard above).
+        // The `MmapMut` backing is a private copy-on-write mapping, so the
+        // underlying pages are writable — required by `cuMemHostRegister_v2`
+        // even though it does not modify the memory contents.
+        let register_ptr = unsafe { mmap.as_ptr().add(aligned_start) as *mut c_void };
+        cuda_host_register(register_ptr, register_len, path, tensor_name)?;
 
         // SAFETY: `absolute_offset` is within the mmap (covered by the
         // registered region above) and F16 data is at least 2-byte aligned

@@ -44,6 +44,11 @@ impl MappedGgufCheckpoint {
         token_id: usize,
     ) -> Result<Vec<f32>> {
         let info = self.tensor_info(tensor_name, path)?.clone();
+        if info.dims.is_empty() {
+            return Err(HybridError::UnsupportedFormat(format!(
+                "tensor '{tensor_name}' has no dimensions"
+            )));
+        }
         let d0 = info.dims[0];
         let d1 = info.dims.get(1).copied().unwrap_or(0);
 
