@@ -37,7 +37,14 @@ last_proven_run = ""
 path            = "src/moe/checkpoint.rs"
 status          = "reference"
 target_repo     = "rmems-moe"
-owner_notes     = "WIP parser repaired; needs proper test battery."
+owner_notes     = "Façade over src/moe/gguf/; needs proper test battery."
+last_proven_run = ""
+
+[[component]]
+path            = "src/moe/gguf/"
+status          = "reference"
+target_repo     = "rmems-moe"
+owner_notes     = "Split of checkpoint: metadata, map, dequant, cuda_register. Needs format test battery."
 last_proven_run = ""
 
 [[component]]

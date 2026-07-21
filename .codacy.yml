@@ -12,6 +12,8 @@ exclude_paths:
   - "src/latent.rs"
   # Large checkpoint/safetensor parsing — by design
   - "src/moe/checkpoint.rs"
+  # Private gguf/ modules split from checkpoint.rs (GH#118); same intentional complexity
+  - "src/moe/gguf/**"
   - "src/moe/safetensors.rs"
   - "src/moe/safetensors/tests.rs"
   - "src/moe/tests.rs"

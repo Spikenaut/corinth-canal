@@ -107,7 +107,8 @@ Instrumented launch sites:
 | `src/model/temporal.rs` | GPU temporal loop (`prepare_gpu_temporal`, `tick_gpu_temporal`, `forward_gpu_temporal`) |
 | `src/model/telemetry_io.rs` | Shared CSV writer for GPU routing telemetry |
 | `src/moe/mod.rs` | `Router` host with routing-mode dispatch |
-| `src/moe/checkpoint.rs` | GGUF parse, mmap, tensor slicing, dequantization helpers |
+| `src/moe/checkpoint.rs` | Compatibility façade re-exporting `src/moe/gguf/` |
+| `src/moe/gguf/` | GGUF parse, mmap, tensor slicing, dequantization, CUDA host register |
 | `src/moe/adapter.rs` | Model-family adapter resolution and tensor selection |
 | `src/moe/routing.rs` | Router math (gate scores, resampling, normalization, top-k) |
 | `src/moe/safetensors.rs` | Safetensors header inspection and deterministic manifest generation |
