@@ -1106,16 +1106,82 @@ struct MappedShard {
     header_len: u64,
 }
 
+/// Nested language-model config used by multimodal HF packages (Gemma4,
+/// Cohere2Vision, Llama4, …) where MoE fields live under `text_config`.
 #[derive(Debug, serde::Deserialize)]
-struct HfConfig {
-    architectures: Vec<String>,
-    hidden_size: usize,
-    num_hidden_layers: usize,
+struct HfTextConfig {
+    #[serde(default)]
+    hidden_size: Option<usize>,
+    #[serde(default)]
+    num_hidden_layers: Option<usize>,
     #[serde(default)]
     num_experts: Option<usize>,
     #[serde(default)]
+    num_local_experts: Option<usize>,
+    #[serde(default)]
+    n_routed_experts: Option<usize>,
+    #[serde(default)]
     num_experts_per_tok: Option<usize>,
-    vocab_size: usize,
+    #[serde(default)]
+    vocab_size: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HfConfig {
+    architectures: Vec<String>,
+    /// Top-level fields are optional so multimodal configs that only nest
+    /// them under `text_config` still parse.
+    #[serde(default)]
+    hidden_size: Option<usize>,
+    #[serde(default)]
+    num_hidden_layers: Option<usize>,
+    #[serde(default)]
+    num_experts: Option<usize>,
+    /// Granite MoE and Llama4 Scout use this instead of `num_experts`.
+    #[serde(default)]
+    num_local_experts: Option<usize>,
+    /// DeepSeek-V3 / Moonlight use this instead of `num_experts`.
+    #[serde(default)]
+    n_routed_experts: Option<usize>,
+    #[serde(default)]
+    num_experts_per_tok: Option<usize>,
+    #[serde(default)]
+    vocab_size: Option<usize>,
+    #[serde(default)]
+    text_config: Option<HfTextConfig>,
+}
+
+impl HfConfig {
+    fn resolved_hidden_size(&self) -> Option<usize> {
+        self.hidden_size
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.hidden_size))
+    }
+
+    fn resolved_num_layers(&self) -> Option<usize> {
+        self.num_hidden_layers
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_hidden_layers))
+    }
+
+    fn resolved_num_experts(&self) -> usize {
+        self.num_experts
+            .or(self.num_local_experts)
+            .or(self.n_routed_experts)
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_local_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.n_routed_experts))
+            .unwrap_or(1)
+    }
+
+    fn resolved_expert_used_count(&self) -> usize {
+        self.num_experts_per_tok
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_experts_per_tok))
+            .unwrap_or(1)
+    }
+
+    fn resolved_vocab_size(&self) -> Option<usize> {
+        self.vocab_size
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.vocab_size))
+    }
 }
 
 fn build_indexed_shard_map(
@@ -1378,13 +1444,33 @@ impl MappedSafetensorsCheckpoint {
             }
         }
 
+        let hidden_size = config.resolved_hidden_size().ok_or_else(|| {
+            model_load(
+                &root.join("config.json"),
+                "config.json missing hidden_size (top-level or text_config)".into(),
+            )
+        })?;
+        let num_layers = config.resolved_num_layers().ok_or_else(|| {
+            model_load(
+                &root.join("config.json"),
+                "config.json missing num_hidden_layers (top-level or text_config)".into(),
+            )
+        })?;
+        let vocab_size = config.resolved_vocab_size().ok_or_else(|| {
+            model_load(
+                &root.join("config.json"),
+                "config.json missing vocab_size (top-level or text_config)".into(),
+            )
+        })?;
         let metadata = SafetensorsMetadata {
             architecture: config.architectures.first().cloned().unwrap_or_default(),
-            hidden_size: config.hidden_size,
-            num_layers: config.num_hidden_layers,
-            num_experts: config.num_experts.unwrap_or(1),
-            expert_used_count: config.num_experts_per_tok.unwrap_or(1),
-            vocab_size: config.vocab_size,
+            hidden_size,
+            num_layers,
+            // Prefer MoE-specific keys (num_local_experts / n_routed_experts)
+            // before defaulting to 1 (Codex: Granite/Moonlight ST packs).
+            num_experts: config.resolved_num_experts(),
+            expert_used_count: config.resolved_expert_used_count(),
+            vocab_size,
         };
 
         Ok(Self {
