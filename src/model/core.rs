@@ -51,22 +51,21 @@ fn finalize_experts_from_router(config: &mut ModelConfig, router: &Router) -> Re
     if config.num_experts == 0 {
         config.num_experts = router.checkpoint_num_experts();
     }
+    // Explicit top_k above the (possibly caller-capped) expert count is invalid.
     if config.top_k_experts > 0 && config.top_k_experts > config.num_experts {
         return Err(HybridError::InvalidConfig(format!(
             "top_k_experts ({}) > num_experts ({})",
             config.top_k_experts, config.num_experts
         )));
     }
+    // Zero means "infer from checkpoint". Mirror Router::load_with_family_and_mode:
+    // clamp to effective num_experts so a caller-capped expert pool stays consistent
+    // with the already-loaded router (Codex/Gemini reviews on #127).
     if config.top_k_experts == 0 {
-        config.top_k_experts = router.checkpoint_expert_used_count();
-    }
-    // Re-check after zero-fill: checkpoint expert_used_count can exceed a
-    // caller-capped num_experts (Gemini review on #127).
-    if config.top_k_experts > config.num_experts {
-        return Err(HybridError::InvalidConfig(format!(
-            "top_k_experts ({}) > num_experts ({})",
-            config.top_k_experts, config.num_experts
-        )));
+        config.top_k_experts = router
+            .checkpoint_expert_used_count()
+            .max(1)
+            .min(config.num_experts);
     }
     if config.gpu_synapse_tensor_name.trim().is_empty() {
         config.gpu_synapse_tensor_name = router
