@@ -20,15 +20,14 @@ use self::checkpoint::{
     MappedGgufCheckpoint, extract_named_token_embedding_from_checkpoint, probe_and_map_checkpoint,
 };
 // Constants used by adapter/routing helpers in this module tree.
-use self::ggml::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
-// GGUF test fixture helpers (`moe/tests.rs`) pull these via `use super::*`.
-#[cfg(test)]
-#[allow(unused_imports)]
 use self::ggml::{
-    GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGUF_MAGIC, GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL,
-    GGUF_VALUE_TYPE_FLOAT32, GGUF_VALUE_TYPE_FLOAT64, GGUF_VALUE_TYPE_INT8, GGUF_VALUE_TYPE_INT16,
-    GGUF_VALUE_TYPE_INT32, GGUF_VALUE_TYPE_INT64, GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT8,
-    GGUF_VALUE_TYPE_UINT16, GGUF_VALUE_TYPE_UINT32, GGUF_VALUE_TYPE_UINT64, GGUF_VERSION,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
+};
+// GGUF test fixture helpers (`moe/tests.rs`) pull these via `use super::*`.
+// GGUF fixture builders in `tests.rs` pull these via `use super::*`.
+#[cfg(test)]
+use self::ggml::{
+    GGML_TYPE_IQ3_S, GGUF_MAGIC, GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT32, GGUF_VERSION,
 };
 pub use self::ggml::{ggml_type_label, synapse_dequant_path_supported};
 use self::routing::{
@@ -304,8 +303,7 @@ impl Router {
 
     /// Dequantize the named Q8_0 tensor to a flat `Vec<f32>` that can be
     /// passed to [`GpuAccelerator::load_synapse_weights_named`].
-    #[allow(dead_code)]
-    pub(crate) fn dequantized_q8_0_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+    pub fn dequantized_q8_0_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
             .as_ref()
@@ -336,8 +334,7 @@ impl Router {
 
     /// Dequantize the named Q5_K tensor to a flat `Vec<f32>` that can be
     /// passed to [`GpuAccelerator::load_synapse_weights_named`].
-    #[allow(dead_code)]
-    pub(crate) fn dequantized_q5_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+    pub fn dequantized_q5_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
             .as_ref()
@@ -353,8 +350,7 @@ impl Router {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn dequantized_q6_k_synapse_tensor_name(&self) -> Option<&str> {
+    pub fn dequantized_q6_k_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
             if a.synapse_source == SynapseSource::DequantizedQ6K {
                 a.dequant_q6_k_synapse_tensor.as_deref()
@@ -364,8 +360,7 @@ impl Router {
         })
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn dequantized_q6_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+    pub fn dequantized_q6_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
             .as_ref()
@@ -381,8 +376,48 @@ impl Router {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn routing_f32_synapse_tensor_name(&self) -> Option<&str> {
+    /// Tensor name for IQ3_M dequantized synapse loading, if the adapter selected that path.
+    pub fn dequantized_iq3_m_synapse_tensor_name(&self) -> Option<&str> {
+        self.adapter.as_ref().and_then(|a| {
+            if a.synapse_source == SynapseSource::DequantizedIQ3M {
+                a.dequant_iq3_m_synapse_tensor.as_deref()
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Dequantize the named IQ3_M tensor to a flat `Vec<f32>` for GPU synapse load.
+    pub fn dequantized_iq3_m_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+        let checkpoint = self
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: self.model_path.clone(),
+                reason: "checkpoint not loaded".into(),
+            })?;
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => {
+                cp.dequantize_iq3_m_tensor(tensor_name, &self.model_path)
+            }
+            CheckpointBackend::Safetensors(_) => Err(HybridError::UnsupportedFormat(
+                "Safetensors checkpoint does not support IQ3_M dequantization".into(),
+            )),
+        }
+    }
+
+    /// Tensor name for Int4 dequantized Safetensors routing/synapse, if selected.
+    pub fn dequantized_int4_synapse_tensor_name(&self) -> Option<&str> {
+        self.adapter.as_ref().and_then(|a| {
+            if a.synapse_source == SynapseSource::DequantizedInt4 {
+                a.dequant_int4_synapse_tensor.as_deref()
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn routing_f32_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
             if a.synapse_source == SynapseSource::RoutingF32 {
                 a.routing_f32_synapse_tensor.as_deref()
@@ -392,8 +427,7 @@ impl Router {
         })
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn routing_f32_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+    pub fn routing_f32_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
             .as_ref()
@@ -414,11 +448,7 @@ impl Router {
     /// `(src_rows, src_cols)` matching the row-major layout produced by
     /// [`Self::dequantized_q8_0_synapse_weights`] / [`Self::dequantized_q5_k_synapse_weights`]:
     /// `dims[0]` contiguous elements per row, `dims[1]` row count (or one row if 1-D).
-    #[allow(dead_code)]
-    pub(crate) fn synapse_tensor_row_major_shape(
-        &self,
-        tensor_name: &str,
-    ) -> Result<(usize, usize)> {
+    pub fn synapse_tensor_row_major_shape(&self, tensor_name: &str) -> Result<(usize, usize)> {
         let checkpoint = self
             .checkpoint
             .as_ref()

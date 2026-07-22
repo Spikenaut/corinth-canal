@@ -1174,7 +1174,11 @@ impl HfConfig {
 
     fn resolved_expert_used_count(&self) -> usize {
         self.num_experts_per_tok
-            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_experts_per_tok))
+            .or_else(|| {
+                self.text_config
+                    .as_ref()
+                    .and_then(|t| t.num_experts_per_tok)
+            })
             .unwrap_or(1)
     }
 

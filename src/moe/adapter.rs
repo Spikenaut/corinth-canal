@@ -3,7 +3,9 @@
 
 use super::checkpoint::{GgufMetadata, MappedGgufCheckpoint};
 use super::safetensors::{MappedSafetensorsCheckpoint, SafetensorsMetadata};
-use super::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
+use super::{
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
+};
 use crate::error::{HybridError, Result};
 use crate::types::ModelFamily;
 
@@ -13,8 +15,6 @@ pub(super) enum SynapseSource {
     DequantizedQ8_0,
     DequantizedQ5K,
     DequantizedQ6K,
-    /// Reserved: GPU temporal path has no IQ3_M dequant yet; routing-f32 is used.
-    #[allow(dead_code)]
     DequantizedIQ3M,
     RoutingF32,
     DequantizedInt4,
@@ -35,16 +35,9 @@ pub(super) struct ModelAdapter {
     pub(super) real_gpu_synapse_tensor: Option<String>,
     pub(super) dequant_q8_0_synapse_tensor: Option<String>,
     pub(super) dequant_q5_k_synapse_tensor: Option<String>,
-    // Staged for future CUDA synapse paths; only written, never read at runtime.
-    #[allow(dead_code)]
     pub(super) dequant_q6_k_synapse_tensor: Option<String>,
-    // Staged for future IQ3_M CUDA dequant path; only read in tests.
-    #[allow(dead_code)]
     pub(super) dequant_iq3_m_synapse_tensor: Option<String>,
-    #[allow(dead_code)]
     pub(super) routing_f32_synapse_tensor: Option<String>,
-    // Staged for future Int4 CUDA dequant path; only written, never read at runtime.
-    #[allow(dead_code)]
     pub(super) dequant_int4_synapse_tensor: Option<String>,
     pub(super) synapse_source: SynapseSource,
     pub(super) quantization: String,
@@ -173,15 +166,29 @@ pub(super) fn resolve_adapter(
         None
     };
 
-    // GPU temporal loader only wires q8_0 / q5_k / q6_k / routing-f32 paths.
-    // Prefer routing-f32 over advertising DequantizedIQ3M (which fell through
-    // to synthetic zeros). Keep the field for API stability but leave it unset.
-    let dequant_iq3_m_synapse_tensor = None;
+    // Prefer true tensor ggml_type IQ3_M (not checkpoint-wide quant label alone)
+    // so mixed-quant packs do not mis-label Q8/Q5 rows as IQ3_M.
+    let dequant_iq3_m_synapse_tensor = if real_gpu_synapse_tensor.is_none()
+        && dequant_q8_0_synapse_tensor.is_none()
+        && dequant_q5_k_synapse_tensor.is_none()
+        && dequant_q6_k_synapse_tensor.is_none()
+    {
+        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
+            let info = checkpoint.tensor_info(name, path).ok()?;
+            (info.ggml_type == GGML_TYPE_IQ3_M
+                && info.dims.len() == 2
+                && info.dims[0].is_multiple_of(256))
+            .then(|| name.clone())
+        })
+    } else {
+        None
+    };
 
     let routing_f32_synapse_tensor = if real_gpu_synapse_tensor.is_none()
         && dequant_q8_0_synapse_tensor.is_none()
         && dequant_q5_k_synapse_tensor.is_none()
         && dequant_q6_k_synapse_tensor.is_none()
+        && dequant_iq3_m_synapse_tensor.is_none()
     {
         Some(routing_tensor.clone())
     } else {
@@ -196,6 +203,8 @@ pub(super) fn resolve_adapter(
         SynapseSource::DequantizedQ5K
     } else if dequant_q6_k_synapse_tensor.is_some() {
         SynapseSource::DequantizedQ6K
+    } else if dequant_iq3_m_synapse_tensor.is_some() {
+        SynapseSource::DequantizedIQ3M
     } else if routing_f32_synapse_tensor.is_some() {
         SynapseSource::RoutingF32
     } else {
@@ -307,7 +316,7 @@ pub(super) fn resolve_safetensors_adapter(
     let real_gpu_synapse_tensor = None;
     let dequant_int4_synapse_tensor = preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
         let info = checkpoint.tensor_info(name)?;
-        (info.0 == "INT4" || info.0 == "I4" || info.0 == "U4").then(|| name.clone())
+        matches!(info.0, "INT4" | "I4" | "U4").then(|| name.clone())
     });
     let synapse_source = if dequant_int4_synapse_tensor.is_some() {
         SynapseSource::DequantizedInt4
@@ -470,10 +479,7 @@ const FAMILY_ARCHES: &[FamilyArchNames] = &[
         family: ModelFamily::Cohere,
         gguf: &["cohere"],
         // Command A+ uses Cohere2Vision + text_config backbone.
-        safetensors: &[
-            "CohereForCausalLM",
-            "Cohere2VisionForConditionalGeneration",
-        ],
+        safetensors: &["CohereForCausalLM", "Cohere2VisionForConditionalGeneration"],
     },
     FamilyArchNames {
         family: ModelFamily::Grin,

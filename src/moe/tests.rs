@@ -1021,7 +1021,6 @@ fn test_tensor_row_size_iq3_m() {
 
 #[test]
 fn test_synapse_source_label_new_variants() {
-    // Test the new synapse source labels
     use super::adapter::SynapseSource;
     let adapter = super::adapter::ModelAdapter {
         family: ModelFamily::Qwen3Moe,
@@ -1037,7 +1036,7 @@ fn test_synapse_source_label_new_variants() {
         dequant_q8_0_synapse_tensor: None,
         dequant_q5_k_synapse_tensor: None,
         dequant_q6_k_synapse_tensor: None,
-        dequant_iq3_m_synapse_tensor: None,
+        dequant_iq3_m_synapse_tensor: Some("blk.0.attn_q.weight".into()),
         routing_f32_synapse_tensor: None,
         dequant_int4_synapse_tensor: None,
         synapse_source: SynapseSource::DequantizedIQ3M,
@@ -1047,6 +1046,8 @@ fn test_synapse_source_label_new_variants() {
 
     let mut adapter2 = adapter.clone();
     adapter2.synapse_source = SynapseSource::DequantizedInt4;
+    adapter2.dequant_iq3_m_synapse_tensor = None;
+    adapter2.dequant_int4_synapse_tensor = Some("model.layers.0.mlp.gate.weight".into());
     adapter2.quantization = "INT4".into();
     assert_eq!(adapter2.synapse_source_label(), "dequantized-int4");
 }
@@ -1401,7 +1402,7 @@ fn test_safetensors_int4_token_embedding() {
 
 #[test]
 fn test_adapter_resolve_iq3_m_gguf() {
-    // Test that resolve_adapter detects IQ3_M from metadata and sets DequantizedIQ3M
+    // attn_q with true IQ3_M ggml_type selects DequantizedIQ3M synapse path.
     let mut block = vec![0u8; 111];
     block[0] = 0x00;
     block[1] = 0x3C;
@@ -1434,12 +1435,15 @@ fn test_adapter_resolve_iq3_m_gguf() {
     let path = write_temp_file(&checkpoint, "iq3_m_adapter");
     let (metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
 
-    // Manually set IQ3_M in metadata quantization so resolve_adapter detects it
     let adapter =
         super::adapter::resolve_adapter(&metadata, &mapped, None, path.to_str().unwrap()).unwrap();
     assert_eq!(
         adapter.synapse_source,
-        super::adapter::SynapseSource::RoutingF32
+        super::adapter::SynapseSource::DequantizedIQ3M
+    );
+    assert_eq!(
+        adapter.dequant_iq3_m_synapse_tensor.as_deref(),
+        Some("blk.0.attn_q.weight")
     );
 }
 
