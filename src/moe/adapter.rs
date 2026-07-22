@@ -56,6 +56,21 @@ impl ModelAdapter {
             SynapseSource::SyntheticFallback => "synthetic-fallback",
         }
     }
+
+    /// Tensor name selected for the active synapse source (reads every dequant
+    /// field arm so none are dead storage).
+    pub(super) fn active_synapse_tensor_name(&self) -> Option<&str> {
+        match self.synapse_source {
+            SynapseSource::Real => self.real_gpu_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedQ8_0 => self.dequant_q8_0_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedQ5K => self.dequant_q5_k_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedQ6K => self.dequant_q6_k_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedIQ3M => self.dequant_iq3_m_synapse_tensor.as_deref(),
+            SynapseSource::RoutingF32 => self.routing_f32_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedInt4 => self.dequant_int4_synapse_tensor.as_deref(),
+            SynapseSource::SyntheticFallback => self.preferred_gpu_synapse_tensor.as_deref(),
+        }
+    }
 }
 
 pub(super) fn resolve_adapter(
@@ -235,8 +250,9 @@ pub(super) fn resolve_adapter(
 
 /// Pick the first existing routing/gate tensor for a Safetensors MoE pack.
 ///
-/// Family-specific layouts (GPT-OSS router, DeepSeek-V3 dense prefix) are
-/// tried before the default `model.layers.0.mlp.gate.weight`.
+/// Family-specific layouts (GPT-OSS router, DeepSeek dense prefix, MiniMax
+/// block_sparse_moe, Gemma4 language_model router, Step moe.gate) are tried
+/// before the generic `model.layers.*.mlp.{gate,router}.weight` names.
 fn resolve_safetensors_routing_tensor(
     family: ModelFamily,
     checkpoint: &MappedSafetensorsCheckpoint,
@@ -253,11 +269,42 @@ fn resolve_safetensors_routing_tensor(
             candidates.push("model.layers.1.mlp.gate.weight");
             candidates.push("model.layers.0.mlp.gate.weight");
             candidates.push("model.layers.0.mlp.router.weight");
+            candidates.push("model.layers.1.block_sparse_moe.gate.weight");
+            candidates.push("model.layers.0.block_sparse_moe.gate.weight");
+        }
+        ModelFamily::MiniMax => {
+            // MiniMax-M2/M2.7: block_sparse_moe.gate.weight
+            candidates.push("model.layers.0.block_sparse_moe.gate.weight");
+            candidates.push("model.layers.1.block_sparse_moe.gate.weight");
+            candidates.push("model.layers.0.mlp.gate.weight");
+            candidates.push("model.layers.0.mlp.router.weight");
+        }
+        ModelFamily::Gemma4 => {
+            // google/gemma-4-*: language_model.layers.*.router.proj.weight
+            candidates.push("model.language_model.layers.0.router.proj.weight");
+            candidates.push("model.language_model.layers.1.router.proj.weight");
+            candidates.push("model.layers.0.mlp.gate.weight");
+            candidates.push("model.layers.0.mlp.router.weight");
+        }
+        ModelFamily::Step => {
+            // Step-3.5-Flash: model.layers.*.moe.gate.weight (after dense prefix)
+            candidates.push("model.layers.0.moe.gate.weight");
+            candidates.push("model.layers.1.moe.gate.weight");
+            candidates.push("model.layers.2.moe.gate.weight");
+            candidates.push("model.layers.0.mlp.gate.weight");
+            candidates.push("model.layers.0.mlp.router.weight");
+        }
+        ModelFamily::Granite31A800M | ModelFamily::SlimMoe => {
+            candidates.push("model.layers.0.moe.gate.weight");
+            candidates.push("model.layers.0.mlp.gate.weight");
+            candidates.push("model.layers.0.mlp.router.weight");
         }
         _ => {
             candidates.push("model.layers.0.mlp.gate.weight");
             candidates.push("model.layers.0.mlp.router.weight");
             candidates.push("model.layers.1.mlp.gate.weight");
+            candidates.push("model.layers.0.block_sparse_moe.gate.weight");
+            candidates.push("model.layers.0.moe.gate.weight");
         }
     }
     for name in candidates {
@@ -266,7 +313,37 @@ fn resolve_safetensors_routing_tensor(
         }
     }
     Err(HybridError::MissingTensor {
-        name: "model.layers.*.mlp.{gate,router}.weight".to_owned(),
+        name: format!(
+            "routing tensor for {family:?} (tried family-specific gate/router candidates)"
+        ),
+        path: path.to_owned(),
+    })
+}
+
+/// Embedding tensor name for Safetensors packs (Gemma4 uses language_model prefix).
+fn resolve_safetensors_token_embedding(
+    family: ModelFamily,
+    checkpoint: &MappedSafetensorsCheckpoint,
+    path: &str,
+) -> Result<String> {
+    let mut candidates: Vec<&str> = Vec::new();
+    match family {
+        ModelFamily::Gemma4 => {
+            candidates.push("model.language_model.embed_tokens.weight");
+            candidates.push("model.embed_tokens.weight");
+        }
+        _ => {
+            candidates.push("model.embed_tokens.weight");
+            candidates.push("model.language_model.embed_tokens.weight");
+        }
+    }
+    for name in candidates {
+        if checkpoint.tensor_info(name).is_some() {
+            return Ok(name.to_owned());
+        }
+    }
+    Err(HybridError::MissingTensor {
+        name: "model.embed_tokens.weight".to_owned(),
         path: path.to_owned(),
     })
 }
@@ -284,7 +361,7 @@ pub(super) fn resolve_safetensors_adapter(
     let num_experts = metadata.num_experts;
     let expert_used_count = metadata.expert_used_count;
 
-    let token_embedding_tensor = "model.embed_tokens.weight".to_owned();
+    let token_embedding_tensor = resolve_safetensors_token_embedding(family, checkpoint, path)?;
     let routing_tensor = resolve_safetensors_routing_tensor(family, checkpoint, path)?;
 
     // Validate routing tensor is rank-2 and exposes enough experts.

@@ -1401,6 +1401,56 @@ fn test_safetensors_int4_token_embedding() {
 }
 
 #[test]
+fn test_router_crate_private_dequant_helpers_reachable() {
+    // Keep pub(crate) dequant helpers live under --no-default-features (no CUDA
+    // temporal caller) without expanding the public Router surface (Codex).
+    let mut block = vec![0u8; 111];
+    block[0] = 0x00;
+    block[1] = 0x3C;
+    let iq3_payload = block;
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                vec![0u8; EMBEDDING_DIM * 64 * 4],
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![256, 1],
+                GGML_TYPE_IQ3_M,
+                iq3_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+    let path = write_temp_file(&checkpoint, "iq3_m_router_helpers");
+    let model = super::Router::load(path.to_str().unwrap(), 0, 0).unwrap();
+    assert_eq!(
+        model.dequantized_iq3_m_synapse_tensor_name(),
+        Some("blk.0.attn_q.weight")
+    );
+    let weights = model
+        .dequantized_iq3_m_synapse_weights("blk.0.attn_q.weight")
+        .unwrap();
+    assert_eq!(weights.len(), 256);
+    // Inactive paths return None / error cleanly.
+    assert!(model.dequantized_q6_k_synapse_tensor_name().is_none());
+    assert!(model.dequantized_int4_synapse_tensor_name().is_none());
+    assert!(model.routing_f32_synapse_tensor_name().is_none());
+    assert!(model.routing_f32_synapse_weights("nope").is_err());
+    let _ = model.dequantized_q8_0_synapse_weights("blk.0.attn_q.weight");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn test_adapter_resolve_iq3_m_gguf() {
     // attn_q with true IQ3_M ggml_type selects DequantizedIQ3M synapse path.
     let mut block = vec![0u8; 111];
