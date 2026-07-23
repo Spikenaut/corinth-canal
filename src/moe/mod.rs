@@ -465,9 +465,12 @@ impl Router {
         }
     }
 
-    /// `(src_rows, src_cols)` matching the row-major layout produced by
-    /// [`Self::dequantized_q8_0_synapse_weights`] / [`Self::dequantized_q5_k_synapse_weights`]:
-    /// `dims[0]` contiguous elements per row, `dims[1]` row count (or one row if 1-D).
+    /// `(src_rows, src_cols)` for GPU synapse resample.
+    ///
+    /// - **GGUF:** llama.cpp layout — `dims[0]` = contiguous columns per row,
+    ///   `dims[1]` = row count (or one row if 1-D). Matches dequant helpers.
+    /// - **Safetensors/HF:** C-order — `shape[0]` = rows, `shape[1]` = row
+    ///   length (same as [`MappedSafetensorsCheckpoint::extract_token_embedding`]).
     #[cfg(any(feature = "cuda", test))]
     pub(crate) fn synapse_tensor_row_major_shape(
         &self,
@@ -480,10 +483,18 @@ impl Router {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        let dims = match checkpoint {
+        match checkpoint {
             CheckpointBackend::Gguf(cp) => {
                 let info = cp.tensor_info(tensor_name, &self.model_path)?;
-                info.dims.clone()
+                let dims = &info.dims;
+                if dims.is_empty() {
+                    return Err(HybridError::UnsupportedFormat(format!(
+                        "tensor '{tensor_name}' has no dimensions"
+                    )));
+                }
+                let src_cols = dims[0];
+                let src_rows = dims.get(1).copied().unwrap_or(1);
+                Ok((src_rows, src_cols))
             }
             CheckpointBackend::Safetensors(cp) => {
                 let info =
@@ -492,17 +503,17 @@ impl Router {
                             name: tensor_name.to_owned(),
                             path: self.model_path.clone(),
                         })?;
-                info.1.to_vec()
+                let dims = info.1;
+                if dims.is_empty() {
+                    return Err(HybridError::UnsupportedFormat(format!(
+                        "tensor '{tensor_name}' has no dimensions"
+                    )));
+                }
+                let src_rows = dims[0];
+                let src_cols = dims.get(1).copied().unwrap_or(1);
+                Ok((src_rows, src_cols))
             }
-        };
-        if dims.is_empty() {
-            return Err(HybridError::UnsupportedFormat(format!(
-                "tensor '{tensor_name}' has no dimensions"
-            )));
         }
-        let src_cols = dims[0];
-        let src_rows = dims.get(1).copied().unwrap_or(1);
-        Ok((src_rows, src_cols))
     }
 
     fn probe_and_map(

@@ -1268,6 +1268,80 @@ fn test_safetensors_int4_tensor_extraction() {
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
 
+/// HF/Safetensors shape is (rows, cols); GGUF synapse helper must not swap ST dims.
+#[test]
+fn test_safetensors_synapse_shape_uses_hf_row_major() {
+    use super::safetensors::MappedSafetensorsCheckpoint;
+    use std::io::Write;
+
+    let gate = "model.layers.0.mlp.gate.weight";
+    // Rectangular: 8 experts × 16 hidden (not square) — wrong convention would swap to (16, 8).
+    let rows = 8usize;
+    let cols = 16usize;
+    let data = vec![0u8; rows * cols * 4];
+    let header = serde_json::json!({
+        gate: {
+            "dtype": "F32",
+            "shape": [rows, cols],
+            "data_offsets": [0, data.len()]
+        },
+        "model.embed_tokens.weight": {
+            "dtype": "F32",
+            "shape": [32, cols],
+            "data_offsets": [data.len(), data.len() + 32 * cols * 4]
+        },
+        "__metadata__": {}
+    });
+    let header_bytes = serde_json::to_vec(&header).unwrap();
+    let mut file_bytes = Vec::new();
+    file_bytes.extend_from_slice(&(header_bytes.len() as u64).to_le_bytes());
+    file_bytes.extend_from_slice(&header_bytes);
+    file_bytes.extend_from_slice(&data);
+    file_bytes.extend_from_slice(&vec![0u8; 32 * cols * 4]);
+
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "corinth_canal_st_shape_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let mut file = std::fs::File::create(tmp_dir.join("model.safetensors")).unwrap();
+    file.write_all(&file_bytes).unwrap();
+    drop(file);
+    std::fs::write(
+        tmp_dir.join("config.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "architectures": ["OlmoeForCausalLM"],
+            "hidden_size": cols,
+            "num_hidden_layers": 2,
+            "num_experts": rows,
+            "num_experts_per_tok": 2,
+            "vocab_size": 32
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let path = tmp_dir.to_str().unwrap();
+    // Shape helper is on Router after successful ST load.
+    let model = super::Router::load(path, 0, 0).expect("Olmoe ST fixture must load");
+    let shape = model
+        .synapse_tensor_row_major_shape(gate)
+        .expect("ST gate shape must be readable");
+    assert_eq!(
+        shape,
+        (rows, cols),
+        "Safetensors must use HF (rows, cols), not GGUF (cols, rows)"
+    );
+    // Sanity: checkpoint still reports raw HF shape.
+    let cp = MappedSafetensorsCheckpoint::from_directory(path).unwrap();
+    assert_eq!(cp.tensor_info(gate).unwrap().1, &[rows, cols]);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
 #[test]
 fn test_safetensors_i4_signed_tensor_extraction() {
     use super::safetensors::MappedSafetensorsCheckpoint;

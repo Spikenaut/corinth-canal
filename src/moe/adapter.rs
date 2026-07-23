@@ -516,7 +516,8 @@ const FAMILY_ARCHES: &[FamilyArchNames] = &[
     FamilyArchNames {
         family: ModelFamily::Olmoe,
         gguf: &["olmoe"],
-        safetensors: &["OlmoeForCausalLM"],
+        // allenai/Emo_1b14b_1T (emo_1b14b_cloud) ships EmoForCausalLM.
+        safetensors: &["OlmoeForCausalLM", "EmoForCausalLM"],
     },
     FamilyArchNames {
         family: ModelFamily::Qwen3Moe,
@@ -533,8 +534,10 @@ const FAMILY_ARCHES: &[FamilyArchNames] = &[
     FamilyArchNames {
         family: ModelFamily::DeepSeek2,
         gguf: &["deepseek2"],
-        // DeepSeek-V4-Flash reports DeepseekV4ForCausalLM (documented cloud profile).
-        safetensors: &["DeepseekV2ForCausalLM", "DeepseekV4ForCausalLM"],
+        // DeepseekV4ForCausalLM left unmapped: V4 has num_hash_layers / hash_moe
+        // bootstrap gates; probing layers.0/1 as top-k MoE silently misroutes.
+        // Re-add only with hash-aware layer selection (not on this PR).
+        safetensors: &["DeepseekV2ForCausalLM"],
     },
     FamilyArchNames {
         family: ModelFamily::LlamaMoe,
@@ -631,6 +634,8 @@ const FAMILY_ARCHES: &[FamilyArchNames] = &[
         family: ModelFamily::Grok,
         gguf: &["grok"],
         // xai-org/grok-1 ships Grok1* class names, not GrokForCausalLM.
+        // Grok2ForCausalLM (grok_2_fp8_cloud / TevunahAi/grok-2-FP8) left
+        // unmapped until extract_tensor_f32 supports F8_* (same as Skywork).
         safetensors: &[
             "GrokForCausalLM",
             "Grok1ForCausalLM",
@@ -843,11 +848,10 @@ mod tests {
             st("Qwen3_5MoeForConditionalGeneration", None, "t").unwrap(),
             ModelFamily::Qwen3Moe
         );
-        assert_eq!(
-            st("DeepseekV4ForCausalLM", None, "t").unwrap(),
-            ModelFamily::DeepSeek2
-        );
-        // Dense GLM4, Zaya, and FP8 Skywork ST intentionally unsupported.
+        assert_eq!(st("EmoForCausalLM", None, "t").unwrap(), ModelFamily::Olmoe);
+        // V4 hash-MoE, Grok2-FP8, dense GLM4, Zaya, Skywork-FP8: fail closed.
+        assert!(st("DeepseekV4ForCausalLM", None, "t").is_err());
+        assert!(st("Grok2ForCausalLM", None, "t").is_err());
         assert!(st("Glm4ForCausalLM", None, "t").is_err());
         assert!(st("ZayaForCausalLM", None, "t").is_err());
         assert!(st("SkyworkForCausalLM", None, "t").is_err());
