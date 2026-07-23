@@ -812,7 +812,7 @@ fn test_ggml_type_label_covers_lineup_quants() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     for &ty in &[0u32, 12, 20, 21] {
         assert!(!synapse_dequant_path_supported(ty), "ggml_type={ty}");
     }
@@ -850,7 +850,7 @@ fn test_ggml_type_label_covers_all_constants() {
         (GGML_TYPE_Q5_K, "Q5_K"),
         (GGML_TYPE_Q6_K, "Q6_K"),
         (GGML_TYPE_IQ3_S, "IQ3_S"),
-        (GGML_TYPE_IQ3_M, "IQ3_M"),
+        (GGML_TYPE_IQ3_M_BLOCK, "IQ3_M_BLOCK"),
     ];
     for (ty, expected) in cases {
         assert_eq!(ggml_type_label(ty), expected, "ggml_type={ty}");
@@ -865,7 +865,7 @@ fn test_synapse_dequant_path_supported_exercises_all_named_types() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_F32));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
 }
@@ -903,6 +903,7 @@ fn test_ggml_type_label_exercises_all_match_arms() {
         (28, "F64"),
         (29, "IQ1_M"),
         (30, "BF16"),
+        (31, "Q4_0_4_4"),
     ];
     for (ty, expected) in all_cases {
         assert_eq!(ggml_type_label(ty), expected, "ggml_type={ty}");
@@ -917,12 +918,17 @@ fn test_synapse_dequant_path_supported_comprehensive() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     // Unsupported types
     assert!(!synapse_dequant_path_supported(GGML_TYPE_F32));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
     assert!(!synapse_dequant_path_supported(2)); // Q4_0
     assert!(!synapse_dequant_path_supported(15)); // Q8_K
+    // Wire type 31 is Q4_0_4_4, not IQ3_M (Codex / GGUF enum).
+    assert_eq!(ggml_type_label(GGML_TYPE_Q4_0_4_4), "Q4_0_4_4");
+    assert_eq!(ggml_type_label(31), "Q4_0_4_4");
+    assert!(!synapse_dequant_path_supported(31));
+    assert!(!synapse_dequant_path_supported(GGML_TYPE_Q4_0_4_4));
 }
 
 #[test]
@@ -1013,10 +1019,10 @@ fn test_int4_safetensors_extraction() {
 #[test]
 fn test_tensor_row_size_iq3_m() {
     // IQ3_M block size: 111 bytes per 256 elements
-    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M, 256).unwrap(), 111);
-    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M, 512).unwrap(), 222);
+    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M_BLOCK, 256).unwrap(), 111);
+    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M_BLOCK, 512).unwrap(), 222);
     // Width must be divisible by 256
-    assert!(tensor_row_size(GGML_TYPE_IQ3_M, 255).is_err());
+    assert!(tensor_row_size(GGML_TYPE_IQ3_M_BLOCK, 255).is_err());
 }
 
 #[test]
@@ -1076,7 +1082,7 @@ fn test_iq3_m_full_tensor_dequantization() {
             (
                 "blk.0.attn_q.weight",
                 vec![256, 1],
-                GGML_TYPE_IQ3_M,
+                GGML_TYPE_IQ3_M_BLOCK,
                 payload,
             ),
             (
@@ -1142,12 +1148,12 @@ fn test_int4_odd_length_handling() {
 
 #[test]
 fn test_ggml_type_label_iq3_m() {
-    assert_eq!(ggml_type_label(GGML_TYPE_IQ3_M), "IQ3_M");
+    assert_eq!(ggml_type_label(GGML_TYPE_IQ3_M_BLOCK), "IQ3_M_BLOCK");
 }
 
 #[test]
 fn test_synapse_dequant_path_supported_iq3_m() {
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
     assert!(!synapse_dequant_path_supported(9999));
 }
@@ -1493,7 +1499,7 @@ fn test_router_crate_private_dequant_helpers_reachable() {
             (
                 "blk.0.attn_q.weight",
                 vec![256, 1],
-                GGML_TYPE_IQ3_M,
+                GGML_TYPE_IQ3_M_BLOCK,
                 iq3_payload,
             ),
             (
@@ -1526,8 +1532,8 @@ fn test_router_crate_private_dequant_helpers_reachable() {
 }
 
 #[test]
-fn test_adapter_resolve_iq3_m_gguf() {
-    // attn_q with true IQ3_M ggml_type selects DequantizedIQ3M synapse path.
+fn test_adapter_resolve_iq3_m_block_gguf() {
+    // Internal IQ3_M_BLOCK id (synthetic fixtures) still selects DequantizedIQ3M.
     let mut block = vec![0u8; 111];
     block[0] = 0x00;
     block[1] = 0x3C;
@@ -1544,7 +1550,7 @@ fn test_adapter_resolve_iq3_m_gguf() {
             (
                 "blk.0.attn_q.weight",
                 vec![256, 1],
-                GGML_TYPE_IQ3_M,
+                GGML_TYPE_IQ3_M_BLOCK,
                 payload,
             ),
             (
@@ -1573,6 +1579,50 @@ fn test_adapter_resolve_iq3_m_gguf() {
 }
 
 #[test]
+fn test_adapter_does_not_treat_wire_type_31_as_iq3_m() {
+    // GGUF wire type 31 is Q4_0_4_4 — must fall through (usually routing-f32),
+    // never DequantizedIQ3M (Codex).
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                vec![0u8; EMBEDDING_DIM * 64 * 4],
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![256, 1],
+                GGML_TYPE_Q4_0_4_4,
+                vec![0u8; 256],
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "type31_not_iq3m");
+    let (metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let adapter =
+        super::adapter::resolve_adapter(&metadata, &mapped, None, path.to_str().unwrap()).unwrap();
+    assert_ne!(
+        adapter.synapse_source,
+        super::adapter::SynapseSource::DequantizedIQ3M
+    );
+    assert!(adapter.dequant_iq3_m_synapse_tensor.is_none());
+    assert_eq!(
+        adapter.synapse_source,
+        super::adapter::SynapseSource::RoutingF32
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn test_iq3_m_multi_row_dequantization() {
     // Test dequantize_iq3_m_tensor with multiple rows (covers the row loop)
     let mut block = vec![0u8; 111];
@@ -1591,7 +1641,7 @@ fn test_iq3_m_multi_row_dequantization() {
             (
                 "blk.0.attn_q.weight",
                 vec![256, 2],
-                GGML_TYPE_IQ3_M,
+                GGML_TYPE_IQ3_M_BLOCK,
                 payload,
             ),
             (

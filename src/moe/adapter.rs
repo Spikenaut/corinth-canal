@@ -4,7 +4,8 @@
 use super::checkpoint::{GgufMetadata, MappedGgufCheckpoint};
 use super::safetensors::{MappedSafetensorsCheckpoint, SafetensorsMetadata};
 use super::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M_BLOCK, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
+    GGML_TYPE_Q8_0,
 };
 use crate::error::{HybridError, Result};
 use crate::types::ModelFamily;
@@ -181,8 +182,9 @@ pub(super) fn resolve_adapter(
         None
     };
 
-    // Prefer true tensor ggml_type IQ3_M (not checkpoint-wide quant label alone)
-    // so mixed-quant packs do not mis-label Q8/Q5 rows as IQ3_M.
+    // IQ3_M *block* dequant is only for the internal GGML_TYPE_IQ3_M_BLOCK id
+    // (synthetic fixtures). Wire type 31 is Q4_0_4_4 in the GGUF enum — never
+    // select it here (Codex). HF “IQ3_M” GGUFs are mixed-type presets.
     let dequant_iq3_m_synapse_tensor = if real_gpu_synapse_tensor.is_none()
         && dequant_q8_0_synapse_tensor.is_none()
         && dequant_q5_k_synapse_tensor.is_none()
@@ -190,7 +192,7 @@ pub(super) fn resolve_adapter(
     {
         preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
             let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_IQ3_M
+            (info.ggml_type == GGML_TYPE_IQ3_M_BLOCK
                 && info.dims.len() == 2
                 && info.dims[0].is_multiple_of(256))
             .then(|| name.clone())

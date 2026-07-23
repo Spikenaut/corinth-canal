@@ -21,13 +21,15 @@ use self::checkpoint::{
 };
 // Constants used by adapter/routing helpers in this module tree.
 use self::ggml::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M_BLOCK, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
+    GGML_TYPE_Q8_0,
 };
 // GGUF test fixture helpers (`moe/tests.rs`) pull these via `use super::*`.
 // GGUF fixture builders in `tests.rs` pull these via `use super::*`.
 #[cfg(test)]
 use self::ggml::{
-    GGML_TYPE_IQ3_S, GGUF_MAGIC, GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT32, GGUF_VERSION,
+    GGML_TYPE_IQ3_S, GGML_TYPE_Q4_0_4_4, GGUF_MAGIC, GGUF_VALUE_TYPE_STRING,
+    GGUF_VALUE_TYPE_UINT32, GGUF_VERSION,
 };
 pub use self::ggml::{ggml_type_label, synapse_dequant_path_supported};
 use self::routing::{

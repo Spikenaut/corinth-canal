@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Row dequantization helpers and f16 conversion for GGUF tensors.
 
-use super::super::ggml::{GGML_TYPE_IQ3_M, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
+use super::super::ggml::{GGML_TYPE_IQ3_M_BLOCK, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
 use crate::error::{HybridError, Result};
 
 pub(in crate::moe) fn tensor_row_size(ggml_type: u32, width: usize) -> Result<usize> {
@@ -31,10 +31,10 @@ pub(in crate::moe) fn tensor_row_size(ggml_type: u32, width: usize) -> Result<us
             // Q6_K block: d(2) + scales(16) + ql(128) + qh(64) = 210 bytes
             Ok((width / 256) * 210)
         }
-        GGML_TYPE_IQ3_M => {
+        GGML_TYPE_IQ3_M_BLOCK => {
             if !width.is_multiple_of(256) {
                 return Err(HybridError::UnsupportedFormat(format!(
-                    "IQ3_M tensor width {width} is not divisible by 256"
+                    "IQ3_M block tensor width {width} is not divisible by 256"
                 )));
             }
             // IQ3_M block: d(2) + hmask(32) + qs(64) + scales(12) + scales_h(1) = 111 bytes
