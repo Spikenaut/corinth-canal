@@ -312,8 +312,25 @@ fn safetensors_routing_candidates(family: ModelFamily) -> &'static [&'static str
             "model.layers.0.mlp.gate.weight",
             "model.layers.0.mlp.router.weight",
         ],
+        // microsoft/Phi-tiny-MoE (SlimMoE): block_sparse_moe.gate.weight
         ModelFamily::SlimMoe => &[
+            "model.layers.0.block_sparse_moe.gate.weight",
             "model.layers.0.moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // LiquidAI LFM2-MoE: feed_forward.gate (not mlp.gate); MoE layers often mid-stack.
+        ModelFamily::Lfm2Moe => &[
+            "model.layers.0.feed_forward.gate.weight",
+            "model.layers.1.feed_forward.gate.weight",
+            "model.layers.10.feed_forward.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // microsoft/GRIN-MoE: first block_sparse router is layer 1 (no layer-0 gate).
+        ModelFamily::Grin => &[
+            "model.layers.1.block_sparse_moe.gate.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
             "model.layers.0.mlp.gate.weight",
             "model.layers.0.mlp.router.weight",
         ],
@@ -322,8 +339,10 @@ fn safetensors_routing_candidates(family: ModelFamily) -> &'static [&'static str
             "model.layers.0.mlp.router.weight",
             "model.layers.1.mlp.gate.weight",
             "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.1.block_sparse_moe.gate.weight",
             "model.layers.0.moe.gate.weight",
             "model.language_model.layers.0.mlp.gate.weight",
+            "model.layers.0.feed_forward.gate.weight",
         ],
     }
 }
@@ -847,6 +866,10 @@ mod tests {
             c(ModelFamily::Qwen3Moe).contains(&"model.language_model.layers.0.mlp.gate.weight")
         );
         assert!(c(ModelFamily::Cohere).contains(&"model.language_model.layers.0.mlp.gate.weight"));
+        assert!(c(ModelFamily::Lfm2Moe).contains(&"model.layers.0.feed_forward.gate.weight"));
+        assert!(c(ModelFamily::Lfm2Moe).contains(&"model.layers.10.feed_forward.gate.weight"));
+        assert!(c(ModelFamily::Grin).contains(&"model.layers.1.block_sparse_moe.gate.weight"));
+        assert!(c(ModelFamily::SlimMoe).contains(&"model.layers.0.block_sparse_moe.gate.weight"));
     }
 
     #[test]

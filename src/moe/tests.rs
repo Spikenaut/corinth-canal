@@ -1444,6 +1444,7 @@ fn test_router_crate_private_dequant_helpers_reachable() {
     // Inactive paths return None / error cleanly.
     assert!(model.dequantized_q6_k_synapse_tensor_name().is_none());
     assert!(model.dequantized_int4_synapse_tensor_name().is_none());
+    assert!(model.dequantized_int4_synapse_weights("nope").is_err());
     assert!(model.routing_f32_synapse_tensor_name().is_none());
     assert!(model.routing_f32_synapse_weights("nope").is_err());
     let _ = model.dequantized_q8_0_synapse_weights("blk.0.attn_q.weight");

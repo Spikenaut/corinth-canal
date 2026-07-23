@@ -417,6 +417,26 @@ impl Router {
         })
     }
 
+    /// Unpack INT4/I4/U4 Safetensors routing/synapse weights to f32 for GPU load.
+    #[cfg(any(feature = "cuda", test))]
+    pub(crate) fn dequantized_int4_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+        let checkpoint = self
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: self.model_path.clone(),
+                reason: "checkpoint not loaded".into(),
+            })?;
+        match checkpoint {
+            CheckpointBackend::Safetensors(cp) => {
+                cp.extract_tensor_f32(tensor_name, &self.model_path)
+            }
+            CheckpointBackend::Gguf(_) => Err(HybridError::UnsupportedFormat(
+                "GGUF checkpoint does not use Safetensors Int4 synapse path".into(),
+            )),
+        }
+    }
+
     #[cfg(any(feature = "cuda", test))]
     pub(crate) fn routing_f32_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
