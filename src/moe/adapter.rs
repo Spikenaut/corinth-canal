@@ -251,7 +251,8 @@ pub(super) fn resolve_adapter(
 /// Family-specific Safetensors routing/gate tensor names, in probe order.
 ///
 /// Layouts: GPT-OSS router, DeepSeek dense prefix, MiniMax block_sparse_moe,
-/// Gemma4 language_model router, Step moe.gate, then generic mlp gate/router.
+/// Gemma4 language_model router, Step moe.gate (after dense prefix), Granite
+/// block_sparse_moe.router.layer, Qwen/Cohere language_model gates, generic.
 fn safetensors_routing_candidates(family: ModelFamily) -> &'static [&'static str] {
     match family {
         ModelFamily::GptOss => &[
@@ -280,15 +281,38 @@ fn safetensors_routing_candidates(family: ModelFamily) -> &'static [&'static str
             "model.layers.0.mlp.gate.weight",
             "model.layers.0.mlp.router.weight",
         ],
-        // Step-3.5-Flash: model.layers.*.moe.gate.weight (after dense prefix)
+        // Qwen3.6 multimodal MoE: language_model.layers.*.mlp.gate.weight
+        ModelFamily::Qwen3Moe => &[
+            "model.language_model.layers.0.mlp.gate.weight",
+            "model.language_model.layers.1.mlp.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // Command A+ / Cohere2Vision: language_model MoE gates
+        ModelFamily::Cohere => &[
+            "model.language_model.layers.0.mlp.gate.weight",
+            "model.language_model.layers.1.mlp.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // Step-3.5-Flash: moe_layers_enum often starts at layer 3 (dense 0..2).
         ModelFamily::Step => &[
+            "model.layers.3.moe.gate.weight",
             "model.layers.0.moe.gate.weight",
             "model.layers.1.moe.gate.weight",
             "model.layers.2.moe.gate.weight",
             "model.layers.0.mlp.gate.weight",
             "model.layers.0.mlp.router.weight",
         ],
-        ModelFamily::Granite31A800M | ModelFamily::SlimMoe => &[
+        // ibm-granite A800M: block_sparse_moe.router.layer.weight
+        ModelFamily::Granite31A800M => &[
+            "model.layers.0.block_sparse_moe.router.layer.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.0.moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        ModelFamily::SlimMoe => &[
             "model.layers.0.moe.gate.weight",
             "model.layers.0.mlp.gate.weight",
             "model.layers.0.mlp.router.weight",
@@ -299,6 +323,7 @@ fn safetensors_routing_candidates(family: ModelFamily) -> &'static [&'static str
             "model.layers.1.mlp.gate.weight",
             "model.layers.0.block_sparse_moe.gate.weight",
             "model.layers.0.moe.gate.weight",
+            "model.language_model.layers.0.mlp.gate.weight",
         ],
     }
 }
@@ -322,7 +347,7 @@ fn resolve_safetensors_routing_tensor(
     })
 }
 
-/// Embedding tensor name for Safetensors packs (Gemma4 uses language_model prefix).
+/// Embedding tensor name for Safetensors packs (multimodal uses language_model prefix).
 fn resolve_safetensors_token_embedding(
     family: ModelFamily,
     checkpoint: &MappedSafetensorsCheckpoint,
@@ -330,7 +355,8 @@ fn resolve_safetensors_token_embedding(
 ) -> Result<String> {
     let mut candidates: Vec<&str> = Vec::new();
     match family {
-        ModelFamily::Gemma4 => {
+        // Multimodal MoE packs nest the LM under language_model.
+        ModelFamily::Gemma4 | ModelFamily::Qwen3Moe | ModelFamily::Cohere => {
             candidates.push("model.language_model.embed_tokens.weight");
             candidates.push("model.embed_tokens.weight");
         }
@@ -476,7 +502,8 @@ const FAMILY_ARCHES: &[FamilyArchNames] = &[
     FamilyArchNames {
         family: ModelFamily::Qwen3Moe,
         gguf: &["qwen3moe"],
-        safetensors: &["Qwen3MoeForCausalLM"],
+        // Qwen3.6-35B-A3B multimodal MoE ships Qwen3_5MoeForConditionalGeneration.
+        safetensors: &["Qwen3MoeForCausalLM", "Qwen3_5MoeForConditionalGeneration"],
     },
     FamilyArchNames {
         family: ModelFamily::Gemma4,
@@ -487,7 +514,8 @@ const FAMILY_ARCHES: &[FamilyArchNames] = &[
     FamilyArchNames {
         family: ModelFamily::DeepSeek2,
         gguf: &["deepseek2"],
-        safetensors: &["DeepseekV2ForCausalLM"],
+        // DeepSeek-V4-Flash reports DeepseekV4ForCausalLM (documented cloud profile).
+        safetensors: &["DeepseekV2ForCausalLM", "DeepseekV4ForCausalLM"],
     },
     FamilyArchNames {
         family: ModelFamily::LlamaMoe,
@@ -793,9 +821,31 @@ mod tests {
             st("Cohere2VisionForConditionalGeneration", None, "t").unwrap(),
             ModelFamily::Cohere
         );
+        assert_eq!(
+            st("Qwen3_5MoeForConditionalGeneration", None, "t").unwrap(),
+            ModelFamily::Qwen3Moe
+        );
+        assert_eq!(
+            st("DeepseekV4ForCausalLM", None, "t").unwrap(),
+            ModelFamily::DeepSeek2
+        );
         // Dense GLM4 and Zaya ST intentionally unsupported.
         assert!(st("Glm4ForCausalLM", None, "t").is_err());
         assert!(st("ZayaForCausalLM", None, "t").is_err());
+    }
+
+    #[test]
+    fn safetensors_routing_candidates_cover_codex_layouts() {
+        use super::safetensors_routing_candidates as c;
+        assert!(
+            c(ModelFamily::Granite31A800M)
+                .contains(&"model.layers.0.block_sparse_moe.router.layer.weight")
+        );
+        assert!(c(ModelFamily::Step).contains(&"model.layers.3.moe.gate.weight"));
+        assert!(
+            c(ModelFamily::Qwen3Moe).contains(&"model.language_model.layers.0.mlp.gate.weight")
+        );
+        assert!(c(ModelFamily::Cohere).contains(&"model.language_model.layers.0.mlp.gate.weight"));
     }
 
     #[test]

@@ -1129,6 +1129,11 @@ struct HfTextConfig {
     /// Gemma4 multimodal packages use `top_k_experts` instead of `num_experts_per_tok`.
     #[serde(default)]
     top_k_experts: Option<usize>,
+    /// Step-3.5-Flash-style packs (also accepted under nested configs).
+    #[serde(default)]
+    moe_num_experts: Option<usize>,
+    #[serde(default)]
+    moe_top_k: Option<usize>,
     #[serde(default)]
     vocab_size: Option<usize>,
 }
@@ -1159,6 +1164,11 @@ struct HfConfig {
     /// Gemma4 and some MoE packs use this alias for expert fan-out (top-k).
     #[serde(default)]
     top_k_experts: Option<usize>,
+    /// Step-3.5-Flash: `moe_num_experts` / `moe_top_k` instead of num_experts*.
+    #[serde(default)]
+    moe_num_experts: Option<usize>,
+    #[serde(default)]
+    moe_top_k: Option<usize>,
     #[serde(default)]
     vocab_size: Option<usize>,
     #[serde(default)]
@@ -1180,21 +1190,25 @@ impl HfConfig {
         self.num_experts
             .or(self.num_local_experts)
             .or(self.n_routed_experts)
+            .or(self.moe_num_experts)
             .or_else(|| self.text_config.as_ref().and_then(|t| t.num_experts))
             .or_else(|| self.text_config.as_ref().and_then(|t| t.num_local_experts))
             .or_else(|| self.text_config.as_ref().and_then(|t| t.n_routed_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.moe_num_experts))
             .unwrap_or(1)
     }
 
     fn resolved_expert_used_count(&self) -> usize {
         self.num_experts_per_tok
             .or(self.top_k_experts)
+            .or(self.moe_top_k)
             .or_else(|| {
                 self.text_config
                     .as_ref()
                     .and_then(|t| t.num_experts_per_tok)
             })
             .or_else(|| self.text_config.as_ref().and_then(|t| t.top_k_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.moe_top_k))
             .unwrap_or(1)
     }
 

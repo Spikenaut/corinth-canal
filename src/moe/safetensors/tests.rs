@@ -985,6 +985,24 @@ fn hf_config_reads_gemma4_top_k_experts_from_text_config() {
     assert_eq!(cfg.resolved_hidden_size(), Some(3840));
 }
 
+#[test]
+fn hf_config_reads_step_moe_num_experts_and_top_k() {
+    // stepfun-ai/Step-3.5-Flash: moe_num_experts / moe_top_k (not num_experts*).
+    let cfg: HfConfig = serde_json::from_str(
+        r#"{
+            "architectures": ["Step3p5ForCausalLM"],
+            "hidden_size": 2560,
+            "num_hidden_layers": 45,
+            "vocab_size": 128815,
+            "moe_num_experts": 288,
+            "moe_top_k": 8
+        }"#,
+    )
+    .expect("Step-3.5-Flash config should parse");
+    assert_eq!(cfg.resolved_num_experts(), 288);
+    assert_eq!(cfg.resolved_expert_used_count(), 8);
+}
+
 #[cfg(windows)]
 #[test]
 fn windows_same_file_detects_hardlinks_via_file_id() {
