@@ -248,68 +248,70 @@ pub(super) fn resolve_adapter(
     })
 }
 
-/// Pick the first existing routing/gate tensor for a Safetensors MoE pack.
+/// Family-specific Safetensors routing/gate tensor names, in probe order.
 ///
-/// Family-specific layouts (GPT-OSS router, DeepSeek dense prefix, MiniMax
-/// block_sparse_moe, Gemma4 language_model router, Step moe.gate) are tried
-/// before the generic `model.layers.*.mlp.{gate,router}.weight` names.
+/// Layouts: GPT-OSS router, DeepSeek dense prefix, MiniMax block_sparse_moe,
+/// Gemma4 language_model router, Step moe.gate, then generic mlp gate/router.
+fn safetensors_routing_candidates(family: ModelFamily) -> &'static [&'static str] {
+    match family {
+        ModelFamily::GptOss => &[
+            "model.layers.0.mlp.router.weight",
+            "model.layers.0.mlp.gate.weight",
+        ],
+        // DeepSeek-V3 / Moonlight: first_k_dense_replace often makes layer 0 dense.
+        ModelFamily::Moonlight16BA3B | ModelFamily::DeepSeek2 => &[
+            "model.layers.1.mlp.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+            "model.layers.1.block_sparse_moe.gate.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
+        ],
+        // MiniMax-M2/M2.7: block_sparse_moe.gate.weight
+        ModelFamily::MiniMax => &[
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.1.block_sparse_moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // google/gemma-4-*: language_model.layers.*.router.proj.weight
+        ModelFamily::Gemma4 => &[
+            "model.language_model.layers.0.router.proj.weight",
+            "model.language_model.layers.1.router.proj.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // Step-3.5-Flash: model.layers.*.moe.gate.weight (after dense prefix)
+        ModelFamily::Step => &[
+            "model.layers.0.moe.gate.weight",
+            "model.layers.1.moe.gate.weight",
+            "model.layers.2.moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        ModelFamily::Granite31A800M | ModelFamily::SlimMoe => &[
+            "model.layers.0.moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        _ => &[
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+            "model.layers.1.mlp.gate.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.0.moe.gate.weight",
+        ],
+    }
+}
+
+/// Pick the first existing routing/gate tensor for a Safetensors MoE pack.
 fn resolve_safetensors_routing_tensor(
     family: ModelFamily,
     checkpoint: &MappedSafetensorsCheckpoint,
     path: &str,
 ) -> Result<String> {
-    let mut candidates: Vec<&str> = Vec::new();
-    match family {
-        ModelFamily::GptOss => {
-            candidates.push("model.layers.0.mlp.router.weight");
-            candidates.push("model.layers.0.mlp.gate.weight");
-        }
-        ModelFamily::Moonlight16BA3B | ModelFamily::DeepSeek2 => {
-            // DeepSeek-V3 / Moonlight: first_k_dense_replace often makes layer 0 dense.
-            candidates.push("model.layers.1.mlp.gate.weight");
-            candidates.push("model.layers.0.mlp.gate.weight");
-            candidates.push("model.layers.0.mlp.router.weight");
-            candidates.push("model.layers.1.block_sparse_moe.gate.weight");
-            candidates.push("model.layers.0.block_sparse_moe.gate.weight");
-        }
-        ModelFamily::MiniMax => {
-            // MiniMax-M2/M2.7: block_sparse_moe.gate.weight
-            candidates.push("model.layers.0.block_sparse_moe.gate.weight");
-            candidates.push("model.layers.1.block_sparse_moe.gate.weight");
-            candidates.push("model.layers.0.mlp.gate.weight");
-            candidates.push("model.layers.0.mlp.router.weight");
-        }
-        ModelFamily::Gemma4 => {
-            // google/gemma-4-*: language_model.layers.*.router.proj.weight
-            candidates.push("model.language_model.layers.0.router.proj.weight");
-            candidates.push("model.language_model.layers.1.router.proj.weight");
-            candidates.push("model.layers.0.mlp.gate.weight");
-            candidates.push("model.layers.0.mlp.router.weight");
-        }
-        ModelFamily::Step => {
-            // Step-3.5-Flash: model.layers.*.moe.gate.weight (after dense prefix)
-            candidates.push("model.layers.0.moe.gate.weight");
-            candidates.push("model.layers.1.moe.gate.weight");
-            candidates.push("model.layers.2.moe.gate.weight");
-            candidates.push("model.layers.0.mlp.gate.weight");
-            candidates.push("model.layers.0.mlp.router.weight");
-        }
-        ModelFamily::Granite31A800M | ModelFamily::SlimMoe => {
-            candidates.push("model.layers.0.moe.gate.weight");
-            candidates.push("model.layers.0.mlp.gate.weight");
-            candidates.push("model.layers.0.mlp.router.weight");
-        }
-        _ => {
-            candidates.push("model.layers.0.mlp.gate.weight");
-            candidates.push("model.layers.0.mlp.router.weight");
-            candidates.push("model.layers.1.mlp.gate.weight");
-            candidates.push("model.layers.0.block_sparse_moe.gate.weight");
-            candidates.push("model.layers.0.moe.gate.weight");
-        }
-    }
-    for name in candidates {
+    for name in safetensors_routing_candidates(family) {
         if checkpoint.tensor_info(name).is_some() {
-            return Ok(name.to_owned());
+            return Ok((*name).to_owned());
         }
     }
     Err(HybridError::MissingTensor {
