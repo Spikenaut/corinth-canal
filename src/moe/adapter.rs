@@ -597,7 +597,10 @@ const FAMILY_ARCHES: &[FamilyArchNames] = &[
     FamilyArchNames {
         family: ModelFamily::Skyworks,
         gguf: &["skyworks", "skyworkmoe"],
-        safetensors: &["SkyworkMoeForCausalLM", "SkyworkForCausalLM"],
+        // ST left unsupported: documented Skywork-MoE-Base-FP8 ships F8_*
+        // routers, but extract_tensor_f32 has no F8 dequant arm yet (Codex P2).
+        // GGUF path remains; re-add SkyworkForCausalLM once FP8 extraction lands.
+        safetensors: &[],
     },
     FamilyArchNames {
         family: ModelFamily::Trinity,
@@ -794,10 +797,6 @@ mod tests {
         );
         assert_eq!(st("GRIN-MoE", None, "t").unwrap(), ModelFamily::Grin);
         assert_eq!(
-            st("SkyworkForCausalLM", None, "t").unwrap(),
-            ModelFamily::Skyworks
-        );
-        assert_eq!(
             st("AfmoeForCausalLM", None, "t").unwrap(),
             ModelFamily::Trinity
         );
@@ -829,9 +828,11 @@ mod tests {
             st("DeepseekV4ForCausalLM", None, "t").unwrap(),
             ModelFamily::DeepSeek2
         );
-        // Dense GLM4 and Zaya ST intentionally unsupported.
+        // Dense GLM4, Zaya, and FP8 Skywork ST intentionally unsupported.
         assert!(st("Glm4ForCausalLM", None, "t").is_err());
         assert!(st("ZayaForCausalLM", None, "t").is_err());
+        assert!(st("SkyworkForCausalLM", None, "t").is_err());
+        assert!(st("SkyworkMoeForCausalLM", None, "t").is_err());
     }
 
     #[test]
