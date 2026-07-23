@@ -2,8 +2,8 @@
 //! Mapped GGUF checkpoint access, probe/mmap, and tensor extraction.
 
 use super::super::ggml::{
-    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
-    GGML_TYPE_Q8_0,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M_BLOCK, GGML_TYPE_IQ3_S, GGML_TYPE_Q5_K,
+    GGML_TYPE_Q6_K, GGML_TYPE_Q8_0,
 };
 #[cfg(feature = "cuda")]
 use super::cuda_register::RegisteredTensorSliceU16;
@@ -452,9 +452,9 @@ impl MappedGgufCheckpoint {
         path: &str,
     ) -> Result<Vec<f32>> {
         let info = self.tensor_info(name, path)?.clone();
-        if info.ggml_type != GGML_TYPE_IQ3_M {
+        if info.ggml_type != GGML_TYPE_IQ3_M_BLOCK {
             return Err(HybridError::UnsupportedFormat(format!(
-                "tensor '{name}' must be IQ3_M, got ggml_type={}",
+                "tensor '{name}' must be IQ3_M block layout (internal type), got ggml_type={}",
                 info.ggml_type
             )));
         }

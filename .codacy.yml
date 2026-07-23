@@ -14,6 +14,8 @@ exclude_paths:
   - "src/moe/checkpoint.rs"
   # Private gguf/ modules split from checkpoint.rs (GH#118); same intentional complexity
   - "src/moe/gguf/**"
+  # Family/format mapping + ST router probe tables (GH#118); grows with model lineup
+  - "src/moe/adapter.rs"
   - "src/moe/safetensors.rs"
   - "src/moe/safetensors/tests.rs"
   - "src/moe/tests.rs"

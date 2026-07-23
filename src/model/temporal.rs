@@ -145,6 +145,24 @@ impl Model {
             return Ok(());
         }
         if self.load_dequant_synapse(
+            "iq3_m",
+            |r| r.dequantized_iq3_m_synapse_tensor_name(),
+            |r, n| r.dequantized_iq3_m_synapse_weights(n),
+            accelerator,
+            neuron_count,
+        )? {
+            return Ok(());
+        }
+        if self.load_dequant_synapse(
+            "int4",
+            |r| r.dequantized_int4_synapse_tensor_name(),
+            |r, n| r.dequantized_int4_synapse_weights(n),
+            accelerator,
+            neuron_count,
+        )? {
+            return Ok(());
+        }
+        if self.load_dequant_synapse(
             "routing-f32",
             |r| r.routing_f32_synapse_tensor_name(),
             |r, n| r.routing_f32_synapse_weights(n),

@@ -911,6 +911,98 @@ fn groups_experts_across_hugging_face_index_shards() {
     );
 }
 
+#[test]
+fn hf_config_accepts_skywork_singleton_num_experts_array() {
+    // Skywork/Skywork-MoE-Base-FP8 ships num_experts as [16], not a scalar.
+    let cfg: HfConfig = serde_json::from_str(
+        r#"{
+            "architectures": ["SkyworkForCausalLM"],
+            "hidden_size": 2048,
+            "num_hidden_layers": 4,
+            "vocab_size": 32000,
+            "num_experts": [16],
+            "num_experts_per_tok": 2
+        }"#,
+    )
+    .expect("Skywork-style config should parse");
+    assert_eq!(cfg.resolved_num_experts(), 16);
+    assert_eq!(cfg.resolved_expert_used_count(), 2);
+}
+
+#[test]
+fn hf_config_accepts_scalar_num_experts() {
+    let cfg: HfConfig = serde_json::from_str(
+        r#"{
+            "architectures": ["OlmoeForCausalLM"],
+            "hidden_size": 2048,
+            "num_hidden_layers": 16,
+            "vocab_size": 100278,
+            "num_experts": 64,
+            "num_experts_per_tok": 8
+        }"#,
+    )
+    .expect("scalar num_experts should parse");
+    assert_eq!(cfg.resolved_num_experts(), 64);
+    assert_eq!(cfg.resolved_expert_used_count(), 8);
+}
+
+#[test]
+fn hf_config_rejects_multi_element_num_experts_array() {
+    let err = serde_json::from_str::<HfConfig>(
+        r#"{
+            "architectures": ["SkyworkForCausalLM"],
+            "hidden_size": 2048,
+            "num_hidden_layers": 4,
+            "vocab_size": 32000,
+            "num_experts": [8, 16]
+        }"#,
+    )
+    .expect_err("multi-element num_experts array must fail");
+    assert!(
+        err.to_string().contains("exactly one element"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn hf_config_reads_gemma4_top_k_experts_from_text_config() {
+    // google/gemma-4-26B-A4B-it: MoE fields under text_config, fan-out as top_k_experts.
+    let cfg: HfConfig = serde_json::from_str(
+        r#"{
+            "architectures": ["Gemma4ForConditionalGeneration"],
+            "text_config": {
+                "hidden_size": 3840,
+                "num_hidden_layers": 30,
+                "vocab_size": 262144,
+                "num_experts": 128,
+                "top_k_experts": 8
+            }
+        }"#,
+    )
+    .expect("Gemma4 multimodal config should parse");
+    assert_eq!(cfg.resolved_num_experts(), 128);
+    assert_eq!(cfg.resolved_expert_used_count(), 8);
+    assert_eq!(cfg.resolved_hidden_size(), Some(3840));
+}
+
+#[test]
+fn hf_config_reads_step_moe_num_experts_and_top_k() {
+    // stepfun-ai/Step-3.5-Flash: moe_num_experts / moe_top_k (not num_experts*).
+    let cfg: HfConfig = serde_json::from_str(
+        r#"{
+            "architectures": ["Step3p5ForCausalLM"],
+            "hidden_size": 2560,
+            "num_hidden_layers": 45,
+            "vocab_size": 128815,
+            "moe_num_experts": 288,
+            "moe_top_k": 8
+        }"#,
+    )
+    .expect("Step-3.5-Flash config should parse");
+    assert_eq!(cfg.resolved_num_experts(), 288);
+    assert_eq!(cfg.resolved_expert_used_count(), 8);
+}
+
 #[cfg(windows)]
 #[test]
 fn windows_same_file_detects_hardlinks_via_file_id() {

@@ -3,7 +3,10 @@
 
 use super::checkpoint::{GgufMetadata, MappedGgufCheckpoint};
 use super::safetensors::{MappedSafetensorsCheckpoint, SafetensorsMetadata};
-use super::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
+use super::{
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M_BLOCK, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
+    GGML_TYPE_Q8_0,
+};
 use crate::error::{HybridError, Result};
 use crate::types::ModelFamily;
 
@@ -33,16 +36,9 @@ pub(super) struct ModelAdapter {
     pub(super) real_gpu_synapse_tensor: Option<String>,
     pub(super) dequant_q8_0_synapse_tensor: Option<String>,
     pub(super) dequant_q5_k_synapse_tensor: Option<String>,
-    // Staged for future CUDA synapse paths; only written, never read at runtime.
-    #[allow(dead_code)]
     pub(super) dequant_q6_k_synapse_tensor: Option<String>,
-    // Staged for future IQ3_M CUDA dequant path; only read in tests.
-    #[allow(dead_code)]
     pub(super) dequant_iq3_m_synapse_tensor: Option<String>,
-    #[allow(dead_code)]
     pub(super) routing_f32_synapse_tensor: Option<String>,
-    // Staged for future Int4 CUDA dequant path; only written, never read at runtime.
-    #[allow(dead_code)]
     pub(super) dequant_int4_synapse_tensor: Option<String>,
     pub(super) synapse_source: SynapseSource,
     pub(super) quantization: String,
@@ -59,6 +55,21 @@ impl ModelAdapter {
             SynapseSource::RoutingF32 => "routing-f32",
             SynapseSource::DequantizedInt4 => "dequantized-int4",
             SynapseSource::SyntheticFallback => "synthetic-fallback",
+        }
+    }
+
+    /// Tensor name selected for the active synapse source (reads every dequant
+    /// field arm so none are dead storage).
+    pub(super) fn active_synapse_tensor_name(&self) -> Option<&str> {
+        match self.synapse_source {
+            SynapseSource::Real => self.real_gpu_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedQ8_0 => self.dequant_q8_0_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedQ5K => self.dequant_q5_k_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedQ6K => self.dequant_q6_k_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedIQ3M => self.dequant_iq3_m_synapse_tensor.as_deref(),
+            SynapseSource::RoutingF32 => self.routing_f32_synapse_tensor.as_deref(),
+            SynapseSource::DequantizedInt4 => self.dequant_int4_synapse_tensor.as_deref(),
+            SynapseSource::SyntheticFallback => self.preferred_gpu_synapse_tensor.as_deref(),
         }
     }
 }
@@ -171,6 +182,9 @@ pub(super) fn resolve_adapter(
         None
     };
 
+    // IQ3_M *block* dequant is only for the internal GGML_TYPE_IQ3_M_BLOCK id
+    // (synthetic fixtures). Wire type 31 is Q4_0_4_4 in the GGUF enum — never
+    // select it here (Codex). HF “IQ3_M” GGUFs are mixed-type presets.
     let dequant_iq3_m_synapse_tensor = if real_gpu_synapse_tensor.is_none()
         && dequant_q8_0_synapse_tensor.is_none()
         && dequant_q5_k_synapse_tensor.is_none()
@@ -178,11 +192,10 @@ pub(super) fn resolve_adapter(
     {
         preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
             let info = checkpoint.tensor_info(name, path).ok()?;
-            // IQ3_M detection: check quantization metadata + tensor dimensions
-            // (individual tensor ggml_type may vary in mixed-quant models)
-            let is_iq3_m = metadata.quantization().contains("IQ3_M")
-                || metadata.quantization().contains("iq3_m");
-            (is_iq3_m && info.dims.len() == 2 && info.dims[0] % 256 == 0).then(|| name.clone())
+            (info.ggml_type == GGML_TYPE_IQ3_M_BLOCK
+                && info.dims.len() == 2
+                && info.dims[0].is_multiple_of(256))
+            .then(|| name.clone())
         })
     } else {
         None
@@ -237,6 +250,153 @@ pub(super) fn resolve_adapter(
     })
 }
 
+/// Family-specific Safetensors routing/gate tensor names, in probe order.
+///
+/// Layouts: GPT-OSS router, DeepSeek dense prefix, MiniMax block_sparse_moe,
+/// Gemma4 language_model router, Step moe.gate (after dense prefix), Granite
+/// block_sparse_moe.router.layer, Qwen/Cohere language_model gates, generic.
+fn safetensors_routing_candidates(family: ModelFamily) -> &'static [&'static str] {
+    match family {
+        ModelFamily::GptOss => &[
+            "model.layers.0.mlp.router.weight",
+            "model.layers.0.mlp.gate.weight",
+        ],
+        // DeepSeek-V3 / Moonlight: first_k_dense_replace often makes layer 0 dense.
+        ModelFamily::Moonlight16BA3B | ModelFamily::DeepSeek2 => &[
+            "model.layers.1.mlp.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+            "model.layers.1.block_sparse_moe.gate.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
+        ],
+        // MiniMax-M2/M2.7: block_sparse_moe.gate.weight
+        ModelFamily::MiniMax => &[
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.1.block_sparse_moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // google/gemma-4-*: language_model.layers.*.router.proj.weight
+        ModelFamily::Gemma4 => &[
+            "model.language_model.layers.0.router.proj.weight",
+            "model.language_model.layers.1.router.proj.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // Qwen3.6 multimodal MoE: language_model.layers.*.mlp.gate.weight
+        ModelFamily::Qwen3Moe => &[
+            "model.language_model.layers.0.mlp.gate.weight",
+            "model.language_model.layers.1.mlp.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // Command A+ / Cohere2Vision: language_model MoE gates
+        ModelFamily::Cohere => &[
+            "model.language_model.layers.0.mlp.gate.weight",
+            "model.language_model.layers.1.mlp.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // Step-3.5-Flash: moe_layers_enum often starts at layer 3 (dense 0..2).
+        ModelFamily::Step => &[
+            "model.layers.3.moe.gate.weight",
+            "model.layers.0.moe.gate.weight",
+            "model.layers.1.moe.gate.weight",
+            "model.layers.2.moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // ibm-granite A800M: block_sparse_moe.router.layer.weight
+        ModelFamily::Granite31A800M => &[
+            "model.layers.0.block_sparse_moe.router.layer.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.0.moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // microsoft/Phi-tiny-MoE (SlimMoE): block_sparse_moe.gate.weight
+        ModelFamily::SlimMoe => &[
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.0.moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // LiquidAI LFM2-MoE: feed_forward.gate (not mlp.gate); MoE layers often mid-stack.
+        ModelFamily::Lfm2Moe => &[
+            "model.layers.0.feed_forward.gate.weight",
+            "model.layers.1.feed_forward.gate.weight",
+            "model.layers.10.feed_forward.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        // microsoft/GRIN-MoE: first block_sparse router is layer 1 (no layer-0 gate).
+        ModelFamily::Grin => &[
+            "model.layers.1.block_sparse_moe.gate.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+        ],
+        _ => &[
+            "model.layers.0.mlp.gate.weight",
+            "model.layers.0.mlp.router.weight",
+            "model.layers.1.mlp.gate.weight",
+            "model.layers.0.block_sparse_moe.gate.weight",
+            "model.layers.1.block_sparse_moe.gate.weight",
+            "model.layers.0.moe.gate.weight",
+            "model.language_model.layers.0.mlp.gate.weight",
+            "model.layers.0.feed_forward.gate.weight",
+        ],
+    }
+}
+
+/// Pick the first existing routing/gate tensor for a Safetensors MoE pack.
+fn resolve_safetensors_routing_tensor(
+    family: ModelFamily,
+    checkpoint: &MappedSafetensorsCheckpoint,
+    path: &str,
+) -> Result<String> {
+    for name in safetensors_routing_candidates(family) {
+        if checkpoint.tensor_info(name).is_some() {
+            return Ok((*name).to_owned());
+        }
+    }
+    Err(HybridError::MissingTensor {
+        name: format!(
+            "routing tensor for {family:?} (tried family-specific gate/router candidates)"
+        ),
+        path: path.to_owned(),
+    })
+}
+
+/// Embedding tensor name for Safetensors packs (multimodal uses language_model prefix).
+fn resolve_safetensors_token_embedding(
+    family: ModelFamily,
+    checkpoint: &MappedSafetensorsCheckpoint,
+    path: &str,
+) -> Result<String> {
+    let mut candidates: Vec<&str> = Vec::new();
+    match family {
+        // Multimodal MoE packs nest the LM under language_model.
+        ModelFamily::Gemma4 | ModelFamily::Qwen3Moe | ModelFamily::Cohere => {
+            candidates.push("model.language_model.embed_tokens.weight");
+            candidates.push("model.embed_tokens.weight");
+        }
+        _ => {
+            candidates.push("model.embed_tokens.weight");
+            candidates.push("model.language_model.embed_tokens.weight");
+        }
+    }
+    for name in candidates {
+        if checkpoint.tensor_info(name).is_some() {
+            return Ok(name.to_owned());
+        }
+    }
+    Err(HybridError::MissingTensor {
+        name: "model.embed_tokens.weight".to_owned(),
+        path: path.to_owned(),
+    })
+}
+
 pub(super) fn resolve_safetensors_adapter(
     metadata: &SafetensorsMetadata,
     checkpoint: &MappedSafetensorsCheckpoint,
@@ -250,10 +410,10 @@ pub(super) fn resolve_safetensors_adapter(
     let num_experts = metadata.num_experts;
     let expert_used_count = metadata.expert_used_count;
 
-    let token_embedding_tensor = "model.embed_tokens.weight".to_owned();
-    let routing_tensor = "model.layers.0.mlp.gate.weight".to_owned();
+    let token_embedding_tensor = resolve_safetensors_token_embedding(family, checkpoint, path)?;
+    let routing_tensor = resolve_safetensors_routing_tensor(family, checkpoint, path)?;
 
-    // Validate routing tensor exists and is rank-2
+    // Validate routing tensor is rank-2 and exposes enough experts.
     let routing_info =
         checkpoint
             .tensor_info(&routing_tensor)
@@ -274,17 +434,15 @@ pub(super) fn resolve_safetensors_adapter(
         )));
     }
 
-    // Safetensors path: look for gate weight as synapse tensor;
+    // Safetensors path: use the resolved routing tensor as preferred synapse;
     // detect Int4 quantized weights. Note: float dtypes (F16/BF16/F32)
     // remain synthetic fallback because the GPU synapse loader only
     // supports GGUF-registered tensors today.
-    let preferred_gpu_synapse_tensor = checkpoint
-        .tensor_info("model.layers.0.mlp.gate.weight")
-        .map(|_| "model.layers.0.mlp.gate.weight".to_owned());
+    let preferred_gpu_synapse_tensor = Some(routing_tensor.clone());
     let real_gpu_synapse_tensor = None;
     let dequant_int4_synapse_tensor = preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
         let info = checkpoint.tensor_info(name)?;
-        (info.0 == "INT4" || info.0 == "I4" || info.0 == "U4").then(|| name.clone())
+        matches!(info.0, "INT4" | "I4" | "U4").then(|| name.clone())
     });
     let synapse_source = if dequant_int4_synapse_tensor.is_some() {
         SynapseSource::DequantizedInt4
@@ -323,40 +481,204 @@ fn check_family_compatibility(expected: ModelFamily, inferred: ModelFamily) -> b
         )
 }
 
-fn infer_family_safetensors(
+/// Discriminator for architecture-string tables (GGUF vs Safetensors/HF names).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArchFormat {
+    Gguf,
+    Safetensors,
+}
+
+impl ArchFormat {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Gguf => "GGUF",
+            Self::Safetensors => "Safetensors",
+        }
+    }
+}
+
+/// Per-family architecture aliases for GGUF `general.architecture` and
+/// Safetensors/HF `architectures[]` class names.
+///
+/// Adding a family (or an alias) is a single table row — no second match arm.
+/// Empty `safetensors` means that family is GGUF-only for inference today
+/// (override + Moonlight/DeepSeek2 compatibility still apply separately).
+struct FamilyArchNames {
+    family: ModelFamily,
+    gguf: &'static [&'static str],
+    safetensors: &'static [&'static str],
+}
+
+/// Single source of truth for architecture → [`ModelFamily`] maps.
+///
+/// Order is not significant for lookup; keep rows aligned with
+/// [`ModelFamily`] variant order for reviewability. `NemotronLegacy` is a
+/// serde alias of Nemotron and is not listed (same arch strings as Nemotron).
+const FAMILY_ARCHES: &[FamilyArchNames] = &[
+    FamilyArchNames {
+        family: ModelFamily::Olmoe,
+        gguf: &["olmoe"],
+        // allenai/Emo_1b14b_1T (emo_1b14b_cloud) ships EmoForCausalLM.
+        safetensors: &["OlmoeForCausalLM", "EmoForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Qwen3Moe,
+        gguf: &["qwen3moe"],
+        // Qwen3.6-35B-A3B multimodal MoE ships Qwen3_5MoeForConditionalGeneration.
+        safetensors: &["Qwen3MoeForCausalLM", "Qwen3_5MoeForConditionalGeneration"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Gemma4,
+        gguf: &["gemma4"],
+        // Shipped google/gemma-4-* packages use ConditionalGeneration + text_config.
+        safetensors: &["Gemma4ForCausalLM", "Gemma4ForConditionalGeneration"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::DeepSeek2,
+        gguf: &["deepseek2"],
+        // DeepseekV4ForCausalLM left unmapped: V4 has num_hash_layers / hash_moe
+        // bootstrap gates; probing layers.0/1 as top-k MoE silently misroutes.
+        // Re-add only with hash-aware layer selection (not on this PR).
+        safetensors: &["DeepseekV2ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::LlamaMoe,
+        gguf: &["llama"],
+        // Llama 4 Scout / multimodal MoE packs use Llama4ForConditionalGeneration.
+        safetensors: &["LlamaMoeForCausalLM", "Llama4ForConditionalGeneration"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Moonlight16BA3B,
+        // Kimi-VL-A3B GGUF packages are classified under the Moonlight-16B family
+        // (Moonshot AI lineage), not Qwen3/DeepSeek2.
+        gguf: &["moonlight", "kimi", "kimi_vl_a3b", "kimi_vl_a3b_q6_k"],
+        // DeepseekV3 is the HF architecture tag used by Moonlight-16B-A3B ST packs.
+        safetensors: &["MoonlightForCausalLM", "DeepseekV3ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Granite31A800M,
+        gguf: &["granite", "granitemoe"],
+        // Dense GraniteForCausalLM intentionally omitted (MoE A800M only).
+        safetensors: &["GraniteMoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Nemotron,
+        gguf: &["nemotronh"],
+        safetensors: &["NemotronHForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Lfm2Moe,
+        gguf: &["lfm2", "lfm2moe"],
+        safetensors: &["Lfm2MoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::SlimMoe,
+        gguf: &["phimoe", "slimmoe"],
+        safetensors: &["PhiMoEForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Zaya,
+        gguf: &["zaya"],
+        // ST left unsupported: official ZAYA1 uses an MLP router, not
+        // model.layers.0.mlp.gate.weight (Codex P2). GGUF path remains.
+        safetensors: &[],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Glm4,
+        gguf: &["glm4", "glm4moe"],
+        // Dense Glm4ForCausalLM omitted (one-expert false positive). MoE-Lite
+        // is the shipped tag for glm47_flash_cloud (zai-org/GLM-4.7-Flash).
+        safetensors: &["Glm4MoeForCausalLM", "Glm4MoeLiteForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::GptOss,
+        gguf: &["gptoss"],
+        safetensors: &["GptOssForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Step,
+        gguf: &["step", "step3"],
+        // Step-3.5-Flash ships Step3p5ForCausalLM.
+        safetensors: &["Step3ForCausalLM", "Step3p5ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::MiniMax,
+        gguf: &["minimax"],
+        safetensors: &["MiniMaxForCausalLM", "MiniMaxM2ForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Cohere,
+        gguf: &["cohere"],
+        // Command A+ uses Cohere2Vision + text_config backbone.
+        safetensors: &["CohereForCausalLM", "Cohere2VisionForConditionalGeneration"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Grin,
+        gguf: &["grin", "grinmoe"],
+        // microsoft/GRIN-MoE reports "GRIN-MoE" as architectures[0].
+        safetensors: &["GrinMoeForCausalLM", "GRIN-MoE"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Skyworks,
+        gguf: &["skyworks", "skyworkmoe"],
+        // ST left unsupported: documented Skywork-MoE-Base-FP8 ships F8_*
+        // routers, but extract_tensor_f32 has no F8 dequant arm yet (Codex P2).
+        // GGUF path remains; re-add SkyworkForCausalLM once FP8 extraction lands.
+        safetensors: &[],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Trinity,
+        gguf: &["trinity"],
+        // arcee-ai Trinity Nano is AFMoE (AfmoeForCausalLM).
+        safetensors: &["TrinityForCausalLM", "AfmoeForCausalLM"],
+    },
+    FamilyArchNames {
+        family: ModelFamily::Grok,
+        gguf: &["grok"],
+        // xai-org/grok-1 ships Grok1* class names, not GrokForCausalLM.
+        // Grok2ForCausalLM (grok_2_fp8_cloud / TevunahAi/grok-2-FP8) left
+        // unmapped until extract_tensor_f32 supports F8_* (same as Skywork).
+        safetensors: &[
+            "GrokForCausalLM",
+            "Grok1ForCausalLM",
+            "Grok1ModelForCausalLM",
+        ],
+    },
+];
+
+fn map_architecture(architecture: &str, format: ArchFormat) -> Option<ModelFamily> {
+    FAMILY_ARCHES.iter().find_map(|entry| {
+        let names = match format {
+            ArchFormat::Gguf => entry.gguf,
+            ArchFormat::Safetensors => entry.safetensors,
+        };
+        names.contains(&architecture).then_some(entry.family)
+    })
+}
+
+/// Unified family inference for GGUF and Safetensors architecture strings.
+///
+/// Format-specific arch tables live in [`map_architecture`]; override
+/// compatibility and error formatting are shared here.
+fn infer_family_for_format(
     architecture: &str,
     family_override: Option<ModelFamily>,
     path: &str,
+    format: ArchFormat,
 ) -> Result<ModelFamily> {
-    let inferred = match architecture {
-        "OlmoeForCausalLM" => ModelFamily::Olmoe,
-        "Qwen3MoeForCausalLM" => ModelFamily::Qwen3Moe,
-        "Gemma4ForCausalLM" => ModelFamily::Gemma4,
-        "DeepseekV2ForCausalLM" => ModelFamily::DeepSeek2,
-        "LlamaMoeForCausalLM" => ModelFamily::LlamaMoe,
-        "NemotronHForCausalLM" => ModelFamily::Nemotron,
-        "Lfm2MoeForCausalLM" => ModelFamily::Lfm2Moe,
-        "PhiMoEForCausalLM" => ModelFamily::SlimMoe,
-        "GptOssForCausalLM" => ModelFamily::GptOss,
-        "Step3ForCausalLM" => ModelFamily::Step,
-        "MiniMaxForCausalLM" => ModelFamily::MiniMax,
-        "CohereForCausalLM" => ModelFamily::Cohere,
-        "GrinMoeForCausalLM" => ModelFamily::Grin,
-        "SkyworkMoeForCausalLM" => ModelFamily::Skyworks,
-        "TrinityForCausalLM" => ModelFamily::Trinity,
-        "GrokForCausalLM" => ModelFamily::Grok,
-        other => {
-            return Err(HybridError::UnsupportedFormat(format!(
-                "unsupported Safetensors architecture '{other}' in '{path}'"
-            )));
-        }
-    };
+    let inferred = map_architecture(architecture, format).ok_or_else(|| {
+        HybridError::UnsupportedFormat(format!(
+            "unsupported {} architecture '{architecture}' in '{path}'",
+            format.label()
+        ))
+    })?;
 
     if let Some(expected) = family_override {
         if !check_family_compatibility(expected, inferred) {
             return Err(HybridError::InvalidConfig(format!(
-                "model_family override {:?} does not match Safetensors architecture '{architecture}'",
-                expected
+                "model_family override {:?} does not match {} architecture '{architecture}'",
+                expected,
+                format.label()
             )));
         }
         Ok(expected)
@@ -365,50 +687,22 @@ fn infer_family_safetensors(
     }
 }
 
+/// GGUF entry point (kept for call sites and unit tests).
 fn infer_family(
     architecture: &str,
     family_override: Option<ModelFamily>,
     path: &str,
 ) -> Result<ModelFamily> {
-    let inferred = match architecture {
-        "olmoe" => ModelFamily::Olmoe,
-        "qwen3moe" => ModelFamily::Qwen3Moe,
-        "gemma4" => ModelFamily::Gemma4,
-        "deepseek2" => ModelFamily::DeepSeek2,
-        "llama" => ModelFamily::LlamaMoe,
-        "moonlight" => ModelFamily::Moonlight16BA3B,
-        "granite" | "granitemoe" => ModelFamily::Granite31A800M,
-        "nemotronh" => ModelFamily::Nemotron,
-        "lfm2" | "lfm2moe" => ModelFamily::Lfm2Moe,
-        "phimoe" | "slimmoe" => ModelFamily::SlimMoe,
-        "zaya" => ModelFamily::Zaya,
-        "glm4" | "glm4moe" => ModelFamily::Glm4,
-        "gptoss" => ModelFamily::GptOss,
-        "step" | "step3" => ModelFamily::Step,
-        "minimax" => ModelFamily::MiniMax,
-        "cohere" => ModelFamily::Cohere,
-        "grin" | "grinmoe" => ModelFamily::Grin,
-        "skyworks" | "skyworkmoe" => ModelFamily::Skyworks,
-        "trinity" => ModelFamily::Trinity,
-        "grok" => ModelFamily::Grok,
-        other => {
-            return Err(HybridError::UnsupportedFormat(format!(
-                "unsupported GGUF architecture '{other}' in '{path}'"
-            )));
-        }
-    };
+    infer_family_for_format(architecture, family_override, path, ArchFormat::Gguf)
+}
 
-    if let Some(expected) = family_override {
-        if !check_family_compatibility(expected, inferred) {
-            return Err(HybridError::InvalidConfig(format!(
-                "model_family override {:?} does not match GGUF architecture '{architecture}'",
-                expected
-            )));
-        }
-        Ok(expected)
-    } else {
-        Ok(inferred)
-    }
+/// Safetensors entry point (kept for call sites and unit tests).
+fn infer_family_safetensors(
+    architecture: &str,
+    family_override: Option<ModelFamily>,
+    path: &str,
+) -> Result<ModelFamily> {
+    infer_family_for_format(architecture, family_override, path, ArchFormat::Safetensors)
 }
 
 #[cfg(test)]
@@ -490,6 +784,98 @@ mod tests {
             infer_family("grok", None, "test.gguf").unwrap(),
             ModelFamily::Grok
         );
+    }
+
+    #[test]
+    fn infer_family_safetensors_moonlight_and_granite_moe_tags() {
+        assert_eq!(
+            super::infer_family_safetensors("DeepseekV3ForCausalLM", None, "test.safetensors")
+                .unwrap(),
+            ModelFamily::Moonlight16BA3B
+        );
+        assert_eq!(
+            super::infer_family_safetensors("MoonlightForCausalLM", None, "test.safetensors")
+                .unwrap(),
+            ModelFamily::Moonlight16BA3B
+        );
+        assert_eq!(
+            super::infer_family_safetensors("GraniteMoeForCausalLM", None, "test.safetensors")
+                .unwrap(),
+            ModelFamily::Granite31A800M
+        );
+        // Dense Granite is not the MoE A800M family.
+        assert!(
+            super::infer_family_safetensors("GraniteForCausalLM", None, "test.safetensors")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn infer_family_safetensors_shipped_cloud_architecture_aliases() {
+        use super::infer_family_safetensors as st;
+        assert_eq!(
+            st("Step3p5ForCausalLM", None, "t").unwrap(),
+            ModelFamily::Step
+        );
+        assert_eq!(
+            st("MiniMaxM2ForCausalLM", None, "t").unwrap(),
+            ModelFamily::MiniMax
+        );
+        assert_eq!(st("GRIN-MoE", None, "t").unwrap(), ModelFamily::Grin);
+        assert_eq!(
+            st("AfmoeForCausalLM", None, "t").unwrap(),
+            ModelFamily::Trinity
+        );
+        assert_eq!(
+            st("Grok1ForCausalLM", None, "t").unwrap(),
+            ModelFamily::Grok
+        );
+        assert_eq!(
+            st("Glm4MoeLiteForCausalLM", None, "t").unwrap(),
+            ModelFamily::Glm4
+        );
+        assert_eq!(
+            st("Llama4ForConditionalGeneration", None, "t").unwrap(),
+            ModelFamily::LlamaMoe
+        );
+        assert_eq!(
+            st("Gemma4ForConditionalGeneration", None, "t").unwrap(),
+            ModelFamily::Gemma4
+        );
+        assert_eq!(
+            st("Cohere2VisionForConditionalGeneration", None, "t").unwrap(),
+            ModelFamily::Cohere
+        );
+        assert_eq!(
+            st("Qwen3_5MoeForConditionalGeneration", None, "t").unwrap(),
+            ModelFamily::Qwen3Moe
+        );
+        assert_eq!(st("EmoForCausalLM", None, "t").unwrap(), ModelFamily::Olmoe);
+        // V4 hash-MoE, Grok2-FP8, dense GLM4, Zaya, Skywork-FP8: fail closed.
+        assert!(st("DeepseekV4ForCausalLM", None, "t").is_err());
+        assert!(st("Grok2ForCausalLM", None, "t").is_err());
+        assert!(st("Glm4ForCausalLM", None, "t").is_err());
+        assert!(st("ZayaForCausalLM", None, "t").is_err());
+        assert!(st("SkyworkForCausalLM", None, "t").is_err());
+        assert!(st("SkyworkMoeForCausalLM", None, "t").is_err());
+    }
+
+    #[test]
+    fn safetensors_routing_candidates_cover_codex_layouts() {
+        use super::safetensors_routing_candidates as c;
+        assert!(
+            c(ModelFamily::Granite31A800M)
+                .contains(&"model.layers.0.block_sparse_moe.router.layer.weight")
+        );
+        assert!(c(ModelFamily::Step).contains(&"model.layers.3.moe.gate.weight"));
+        assert!(
+            c(ModelFamily::Qwen3Moe).contains(&"model.language_model.layers.0.mlp.gate.weight")
+        );
+        assert!(c(ModelFamily::Cohere).contains(&"model.language_model.layers.0.mlp.gate.weight"));
+        assert!(c(ModelFamily::Lfm2Moe).contains(&"model.layers.0.feed_forward.gate.weight"));
+        assert!(c(ModelFamily::Lfm2Moe).contains(&"model.layers.10.feed_forward.gate.weight"));
+        assert!(c(ModelFamily::Grin).contains(&"model.layers.1.block_sparse_moe.gate.weight"));
+        assert!(c(ModelFamily::SlimMoe).contains(&"model.layers.0.block_sparse_moe.gate.weight"));
     }
 
     #[test]

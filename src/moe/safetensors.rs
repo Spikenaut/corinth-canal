@@ -1106,16 +1106,200 @@ struct MappedShard {
     header_len: u64,
 }
 
+/// Nested language-model config used by multimodal HF packages (Gemma4,
+/// Cohere2Vision, Llama4, …) where MoE fields live under `text_config`.
+#[derive(Debug, serde::Deserialize)]
+struct HfTextConfig {
+    #[serde(default)]
+    hidden_size: Option<usize>,
+    #[serde(default)]
+    num_hidden_layers: Option<usize>,
+    /// Skywork stores this as a single-element array (`[16]`); accept either form.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_usize_scalar_or_singleton_array"
+    )]
+    num_experts: Option<usize>,
+    #[serde(default)]
+    num_local_experts: Option<usize>,
+    #[serde(default)]
+    n_routed_experts: Option<usize>,
+    #[serde(default)]
+    num_experts_per_tok: Option<usize>,
+    /// Gemma4 multimodal packages use `top_k_experts` instead of `num_experts_per_tok`.
+    #[serde(default)]
+    top_k_experts: Option<usize>,
+    /// Step-3.5-Flash-style packs (also accepted under nested configs).
+    #[serde(default)]
+    moe_num_experts: Option<usize>,
+    #[serde(default)]
+    moe_top_k: Option<usize>,
+    #[serde(default)]
+    vocab_size: Option<usize>,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct HfConfig {
     architectures: Vec<String>,
-    hidden_size: usize,
-    num_hidden_layers: usize,
+    /// Top-level fields are optional so multimodal configs that only nest
+    /// them under `text_config` still parse.
     #[serde(default)]
+    hidden_size: Option<usize>,
+    #[serde(default)]
+    num_hidden_layers: Option<usize>,
+    /// Skywork stores this as a single-element array (`[16]`); accept either form.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_usize_scalar_or_singleton_array"
+    )]
     num_experts: Option<usize>,
+    /// Granite MoE and Llama4 Scout use this instead of `num_experts`.
+    #[serde(default)]
+    num_local_experts: Option<usize>,
+    /// DeepSeek-V3 / Moonlight use this instead of `num_experts`.
+    #[serde(default)]
+    n_routed_experts: Option<usize>,
     #[serde(default)]
     num_experts_per_tok: Option<usize>,
-    vocab_size: usize,
+    /// Gemma4 and some MoE packs use this alias for expert fan-out (top-k).
+    #[serde(default)]
+    top_k_experts: Option<usize>,
+    /// Step-3.5-Flash: `moe_num_experts` / `moe_top_k` instead of num_experts*.
+    #[serde(default)]
+    moe_num_experts: Option<usize>,
+    #[serde(default)]
+    moe_top_k: Option<usize>,
+    #[serde(default)]
+    vocab_size: Option<usize>,
+    #[serde(default)]
+    text_config: Option<HfTextConfig>,
+}
+
+impl HfConfig {
+    fn resolved_hidden_size(&self) -> Option<usize> {
+        self.hidden_size
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.hidden_size))
+    }
+
+    fn resolved_num_layers(&self) -> Option<usize> {
+        self.num_hidden_layers
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_hidden_layers))
+    }
+
+    fn resolved_num_experts(&self) -> usize {
+        self.num_experts
+            .or(self.num_local_experts)
+            .or(self.n_routed_experts)
+            .or(self.moe_num_experts)
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.num_local_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.n_routed_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.moe_num_experts))
+            .unwrap_or(1)
+    }
+
+    fn resolved_expert_used_count(&self) -> usize {
+        self.num_experts_per_tok
+            .or(self.top_k_experts)
+            .or(self.moe_top_k)
+            .or_else(|| {
+                self.text_config
+                    .as_ref()
+                    .and_then(|t| t.num_experts_per_tok)
+            })
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.top_k_experts))
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.moe_top_k))
+            .unwrap_or(1)
+    }
+
+    fn resolved_vocab_size(&self) -> Option<usize> {
+        self.vocab_size
+            .or_else(|| self.text_config.as_ref().and_then(|t| t.vocab_size))
+    }
+}
+
+/// Accept `num_experts` as a scalar (`16`) or single-element array (`[16]`).
+///
+/// Skywork-MoE HF configs ship the latter; multi-element arrays are rejected so
+/// heterogeneous layer expert counts stay explicit failures.
+fn deserialize_optional_usize_scalar_or_singleton_array<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<usize>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OptUsizeVisitor;
+
+    impl<'de> Visitor<'de> for OptUsizeVisitor {
+        type Value = Option<usize>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a non-negative integer or a single-element integer array")
+        }
+
+        fn visit_unit<E>(self) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_none<E>(self) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_any(OptUsizeVisitor)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            usize::try_from(value)
+                .map(Some)
+                .map_err(|_| E::custom(format!("num_experts {value} does not fit usize")))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if value < 0 {
+                return Err(E::custom(format!(
+                    "num_experts must be non-negative, got {value}"
+                )));
+            }
+            usize::try_from(value)
+                .map(Some)
+                .map_err(|_| E::custom(format!("num_experts {value} does not fit usize")))
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let first: Option<u64> = seq.next_element()?;
+            let second: Option<u64> = seq.next_element()?;
+            match (first, second) {
+                (None, _) => Ok(None),
+                (Some(v), None) => usize::try_from(v)
+                    .map(Some)
+                    .map_err(|_| de::Error::custom(format!("num_experts {v} does not fit usize"))),
+                (Some(_), Some(_)) => Err(de::Error::custom(
+                    "num_experts array must contain exactly one element (got more)",
+                )),
+            }
+        }
+    }
+
+    deserializer.deserialize_any(OptUsizeVisitor)
 }
 
 fn build_indexed_shard_map(
@@ -1378,13 +1562,33 @@ impl MappedSafetensorsCheckpoint {
             }
         }
 
+        let hidden_size = config.resolved_hidden_size().ok_or_else(|| {
+            model_load(
+                &root.join("config.json"),
+                "config.json missing hidden_size (top-level or text_config)".into(),
+            )
+        })?;
+        let num_layers = config.resolved_num_layers().ok_or_else(|| {
+            model_load(
+                &root.join("config.json"),
+                "config.json missing num_hidden_layers (top-level or text_config)".into(),
+            )
+        })?;
+        let vocab_size = config.resolved_vocab_size().ok_or_else(|| {
+            model_load(
+                &root.join("config.json"),
+                "config.json missing vocab_size (top-level or text_config)".into(),
+            )
+        })?;
         let metadata = SafetensorsMetadata {
             architecture: config.architectures.first().cloned().unwrap_or_default(),
-            hidden_size: config.hidden_size,
-            num_layers: config.num_hidden_layers,
-            num_experts: config.num_experts.unwrap_or(1),
-            expert_used_count: config.num_experts_per_tok.unwrap_or(1),
-            vocab_size: config.vocab_size,
+            hidden_size,
+            num_layers,
+            // Prefer MoE-specific keys (num_local_experts / n_routed_experts)
+            // before defaulting to 1 (Codex: Granite/Moonlight ST packs).
+            num_experts: config.resolved_num_experts(),
+            expert_used_count: config.resolved_expert_used_count(),
+            vocab_size,
         };
 
         Ok(Self {

@@ -20,15 +20,16 @@ use self::checkpoint::{
     MappedGgufCheckpoint, extract_named_token_embedding_from_checkpoint, probe_and_map_checkpoint,
 };
 // Constants used by adapter/routing helpers in this module tree.
-use self::ggml::{GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K, GGML_TYPE_Q8_0};
-// GGUF test fixture helpers (`moe/tests.rs`) pull these via `use super::*`.
-#[cfg(test)]
-#[allow(unused_imports)]
 use self::ggml::{
-    GGML_TYPE_IQ3_M, GGML_TYPE_IQ3_S, GGUF_MAGIC, GGUF_VALUE_TYPE_ARRAY, GGUF_VALUE_TYPE_BOOL,
-    GGUF_VALUE_TYPE_FLOAT32, GGUF_VALUE_TYPE_FLOAT64, GGUF_VALUE_TYPE_INT8, GGUF_VALUE_TYPE_INT16,
-    GGUF_VALUE_TYPE_INT32, GGUF_VALUE_TYPE_INT64, GGUF_VALUE_TYPE_STRING, GGUF_VALUE_TYPE_UINT8,
-    GGUF_VALUE_TYPE_UINT16, GGUF_VALUE_TYPE_UINT32, GGUF_VALUE_TYPE_UINT64, GGUF_VERSION,
+    GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M_BLOCK, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
+    GGML_TYPE_Q8_0,
+};
+// GGUF test fixture helpers (`moe/tests.rs`) pull these via `use super::*`.
+// GGUF fixture builders in `tests.rs` pull these via `use super::*`.
+#[cfg(test)]
+use self::ggml::{
+    GGML_TYPE_IQ3_S, GGML_TYPE_Q4_0_4_4, GGUF_MAGIC, GGUF_VALUE_TYPE_STRING,
+    GGUF_VALUE_TYPE_UINT32, GGUF_VERSION,
 };
 pub use self::ggml::{ggml_type_label, synapse_dequant_path_supported};
 use self::routing::{
@@ -78,6 +79,9 @@ impl RouterMetadata {
     }
 
     fn from_adapter(adapter: &ModelAdapter) -> Self {
+        // Touch active dequant field map so none of the Option tensor names
+        // are dead storage (values still flow through the named accessors).
+        let _active = adapter.active_synapse_tensor_name();
         Self {
             family: adapter.family,
             architecture: adapter.architecture.clone(),
@@ -294,17 +298,15 @@ impl Router {
     /// tensor (e.g. the adapter chose F16 or synthetic fallback instead).
     pub fn dequantized_q8_0_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
-            if a.synapse_source == SynapseSource::DequantizedQ8_0 {
-                a.dequant_q8_0_synapse_tensor.as_deref()
-            } else {
-                None
-            }
+            (a.synapse_source == SynapseSource::DequantizedQ8_0)
+                .then(|| a.active_synapse_tensor_name())
+                .flatten()
         })
     }
 
     /// Dequantize the named Q8_0 tensor to a flat `Vec<f32>` that can be
     /// passed to [`GpuAccelerator::load_synapse_weights_named`].
-    #[allow(dead_code)]
+    #[cfg(any(feature = "cuda", test))]
     pub(crate) fn dequantized_q8_0_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
@@ -326,17 +328,15 @@ impl Router {
     /// tensor (e.g. the adapter chose F16, Q8_0, or synthetic fallback instead).
     pub fn dequantized_q5_k_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
-            if a.synapse_source == SynapseSource::DequantizedQ5K {
-                a.dequant_q5_k_synapse_tensor.as_deref()
-            } else {
-                None
-            }
+            (a.synapse_source == SynapseSource::DequantizedQ5K)
+                .then(|| a.active_synapse_tensor_name())
+                .flatten()
         })
     }
 
     /// Dequantize the named Q5_K tensor to a flat `Vec<f32>` that can be
     /// passed to [`GpuAccelerator::load_synapse_weights_named`].
-    #[allow(dead_code)]
+    #[cfg(any(feature = "cuda", test))]
     pub(crate) fn dequantized_q5_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
@@ -353,18 +353,16 @@ impl Router {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(any(feature = "cuda", test))]
     pub(crate) fn dequantized_q6_k_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
-            if a.synapse_source == SynapseSource::DequantizedQ6K {
-                a.dequant_q6_k_synapse_tensor.as_deref()
-            } else {
-                None
-            }
+            (a.synapse_source == SynapseSource::DequantizedQ6K)
+                .then(|| a.active_synapse_tensor_name())
+                .flatten()
         })
     }
 
-    #[allow(dead_code)]
+    #[cfg(any(feature = "cuda", test))]
     pub(crate) fn dequantized_q6_k_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
@@ -381,18 +379,76 @@ impl Router {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn routing_f32_synapse_tensor_name(&self) -> Option<&str> {
+    /// Tensor name for IQ3_M dequantized synapse loading, if the adapter selected that path.
+    #[cfg(any(feature = "cuda", test))]
+    pub(crate) fn dequantized_iq3_m_synapse_tensor_name(&self) -> Option<&str> {
         self.adapter.as_ref().and_then(|a| {
-            if a.synapse_source == SynapseSource::RoutingF32 {
-                a.routing_f32_synapse_tensor.as_deref()
-            } else {
-                None
-            }
+            (a.synapse_source == SynapseSource::DequantizedIQ3M)
+                .then(|| a.active_synapse_tensor_name())
+                .flatten()
         })
     }
 
-    #[allow(dead_code)]
+    /// Dequantize the named IQ3_M tensor to a flat `Vec<f32>` for GPU synapse load.
+    #[cfg(any(feature = "cuda", test))]
+    pub(crate) fn dequantized_iq3_m_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+        let checkpoint = self
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: self.model_path.clone(),
+                reason: "checkpoint not loaded".into(),
+            })?;
+        match checkpoint {
+            CheckpointBackend::Gguf(cp) => {
+                cp.dequantize_iq3_m_tensor(tensor_name, &self.model_path)
+            }
+            CheckpointBackend::Safetensors(_) => Err(HybridError::UnsupportedFormat(
+                "Safetensors checkpoint does not support IQ3_M dequantization".into(),
+            )),
+        }
+    }
+
+    /// Tensor name for Int4 dequantized Safetensors routing/synapse, if selected.
+    #[cfg(any(feature = "cuda", test))]
+    pub(crate) fn dequantized_int4_synapse_tensor_name(&self) -> Option<&str> {
+        self.adapter.as_ref().and_then(|a| {
+            (a.synapse_source == SynapseSource::DequantizedInt4)
+                .then(|| a.active_synapse_tensor_name())
+                .flatten()
+        })
+    }
+
+    /// Unpack INT4/I4/U4 Safetensors routing/synapse weights to f32 for GPU load.
+    #[cfg(any(feature = "cuda", test))]
+    pub(crate) fn dequantized_int4_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
+        let checkpoint = self
+            .checkpoint
+            .as_ref()
+            .ok_or_else(|| HybridError::ModelLoad {
+                path: self.model_path.clone(),
+                reason: "checkpoint not loaded".into(),
+            })?;
+        match checkpoint {
+            CheckpointBackend::Safetensors(cp) => {
+                cp.extract_tensor_f32(tensor_name, &self.model_path)
+            }
+            CheckpointBackend::Gguf(_) => Err(HybridError::UnsupportedFormat(
+                "GGUF checkpoint does not use Safetensors Int4 synapse path".into(),
+            )),
+        }
+    }
+
+    #[cfg(any(feature = "cuda", test))]
+    pub(crate) fn routing_f32_synapse_tensor_name(&self) -> Option<&str> {
+        self.adapter.as_ref().and_then(|a| {
+            (a.synapse_source == SynapseSource::RoutingF32)
+                .then(|| a.active_synapse_tensor_name())
+                .flatten()
+        })
+    }
+
+    #[cfg(any(feature = "cuda", test))]
     pub(crate) fn routing_f32_synapse_weights(&self, tensor_name: &str) -> Result<Vec<f32>> {
         let checkpoint = self
             .checkpoint
@@ -411,10 +467,13 @@ impl Router {
         }
     }
 
-    /// `(src_rows, src_cols)` matching the row-major layout produced by
-    /// [`Self::dequantized_q8_0_synapse_weights`] / [`Self::dequantized_q5_k_synapse_weights`]:
-    /// `dims[0]` contiguous elements per row, `dims[1]` row count (or one row if 1-D).
-    #[allow(dead_code)]
+    /// `(src_rows, src_cols)` for GPU synapse resample.
+    ///
+    /// - **GGUF:** llama.cpp layout — `dims[0]` = contiguous columns per row,
+    ///   `dims[1]` = row count (or one row if 1-D). Matches dequant helpers.
+    /// - **Safetensors/HF:** C-order — `shape[0]` = rows, `shape[1]` = row
+    ///   length (same as [`MappedSafetensorsCheckpoint::extract_token_embedding`]).
+    #[cfg(any(feature = "cuda", test))]
     pub(crate) fn synapse_tensor_row_major_shape(
         &self,
         tensor_name: &str,
@@ -426,10 +485,18 @@ impl Router {
                 path: self.model_path.clone(),
                 reason: "checkpoint not loaded".into(),
             })?;
-        let dims = match checkpoint {
+        match checkpoint {
             CheckpointBackend::Gguf(cp) => {
                 let info = cp.tensor_info(tensor_name, &self.model_path)?;
-                info.dims.clone()
+                let dims = &info.dims;
+                if dims.is_empty() {
+                    return Err(HybridError::UnsupportedFormat(format!(
+                        "tensor '{tensor_name}' has no dimensions"
+                    )));
+                }
+                let src_cols = dims[0];
+                let src_rows = dims.get(1).copied().unwrap_or(1);
+                Ok((src_rows, src_cols))
             }
             CheckpointBackend::Safetensors(cp) => {
                 let info =
@@ -438,17 +505,17 @@ impl Router {
                             name: tensor_name.to_owned(),
                             path: self.model_path.clone(),
                         })?;
-                info.1.to_vec()
+                let dims = info.1;
+                if dims.is_empty() {
+                    return Err(HybridError::UnsupportedFormat(format!(
+                        "tensor '{tensor_name}' has no dimensions"
+                    )));
+                }
+                let src_rows = dims[0];
+                let src_cols = dims.get(1).copied().unwrap_or(1);
+                Ok((src_rows, src_cols))
             }
-        };
-        if dims.is_empty() {
-            return Err(HybridError::UnsupportedFormat(format!(
-                "tensor '{tensor_name}' has no dimensions"
-            )));
         }
-        let src_cols = dims[0];
-        let src_rows = dims.get(1).copied().unwrap_or(1);
-        Ok((src_rows, src_cols))
     }
 
     fn probe_and_map(

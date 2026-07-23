@@ -812,7 +812,7 @@ fn test_ggml_type_label_covers_lineup_quants() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     for &ty in &[0u32, 12, 20, 21] {
         assert!(!synapse_dequant_path_supported(ty), "ggml_type={ty}");
     }
@@ -850,7 +850,7 @@ fn test_ggml_type_label_covers_all_constants() {
         (GGML_TYPE_Q5_K, "Q5_K"),
         (GGML_TYPE_Q6_K, "Q6_K"),
         (GGML_TYPE_IQ3_S, "IQ3_S"),
-        (GGML_TYPE_IQ3_M, "IQ3_M"),
+        (GGML_TYPE_IQ3_M_BLOCK, "IQ3_M_BLOCK"),
     ];
     for (ty, expected) in cases {
         assert_eq!(ggml_type_label(ty), expected, "ggml_type={ty}");
@@ -865,7 +865,7 @@ fn test_synapse_dequant_path_supported_exercises_all_named_types() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_F32));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
 }
@@ -903,6 +903,7 @@ fn test_ggml_type_label_exercises_all_match_arms() {
         (28, "F64"),
         (29, "IQ1_M"),
         (30, "BF16"),
+        (31, "Q4_0_4_4"),
     ];
     for (ty, expected) in all_cases {
         assert_eq!(ggml_type_label(ty), expected, "ggml_type={ty}");
@@ -917,12 +918,17 @@ fn test_synapse_dequant_path_supported_comprehensive() {
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q8_0));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q5_K));
     assert!(synapse_dequant_path_supported(GGML_TYPE_Q6_K));
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     // Unsupported types
     assert!(!synapse_dequant_path_supported(GGML_TYPE_F32));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
     assert!(!synapse_dequant_path_supported(2)); // Q4_0
     assert!(!synapse_dequant_path_supported(15)); // Q8_K
+    // Wire type 31 is Q4_0_4_4, not IQ3_M (Codex / GGUF enum).
+    assert_eq!(ggml_type_label(GGML_TYPE_Q4_0_4_4), "Q4_0_4_4");
+    assert_eq!(ggml_type_label(31), "Q4_0_4_4");
+    assert!(!synapse_dequant_path_supported(31));
+    assert!(!synapse_dequant_path_supported(GGML_TYPE_Q4_0_4_4));
 }
 
 #[test]
@@ -1013,15 +1019,14 @@ fn test_int4_safetensors_extraction() {
 #[test]
 fn test_tensor_row_size_iq3_m() {
     // IQ3_M block size: 111 bytes per 256 elements
-    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M, 256).unwrap(), 111);
-    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M, 512).unwrap(), 222);
+    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M_BLOCK, 256).unwrap(), 111);
+    assert_eq!(tensor_row_size(GGML_TYPE_IQ3_M_BLOCK, 512).unwrap(), 222);
     // Width must be divisible by 256
-    assert!(tensor_row_size(GGML_TYPE_IQ3_M, 255).is_err());
+    assert!(tensor_row_size(GGML_TYPE_IQ3_M_BLOCK, 255).is_err());
 }
 
 #[test]
 fn test_synapse_source_label_new_variants() {
-    // Test the new synapse source labels
     use super::adapter::SynapseSource;
     let adapter = super::adapter::ModelAdapter {
         family: ModelFamily::Qwen3Moe,
@@ -1037,7 +1042,7 @@ fn test_synapse_source_label_new_variants() {
         dequant_q8_0_synapse_tensor: None,
         dequant_q5_k_synapse_tensor: None,
         dequant_q6_k_synapse_tensor: None,
-        dequant_iq3_m_synapse_tensor: None,
+        dequant_iq3_m_synapse_tensor: Some("blk.0.attn_q.weight".into()),
         routing_f32_synapse_tensor: None,
         dequant_int4_synapse_tensor: None,
         synapse_source: SynapseSource::DequantizedIQ3M,
@@ -1047,6 +1052,8 @@ fn test_synapse_source_label_new_variants() {
 
     let mut adapter2 = adapter.clone();
     adapter2.synapse_source = SynapseSource::DequantizedInt4;
+    adapter2.dequant_iq3_m_synapse_tensor = None;
+    adapter2.dequant_int4_synapse_tensor = Some("model.layers.0.mlp.gate.weight".into());
     adapter2.quantization = "INT4".into();
     assert_eq!(adapter2.synapse_source_label(), "dequantized-int4");
 }
@@ -1075,7 +1082,7 @@ fn test_iq3_m_full_tensor_dequantization() {
             (
                 "blk.0.attn_q.weight",
                 vec![256, 1],
-                GGML_TYPE_IQ3_M,
+                GGML_TYPE_IQ3_M_BLOCK,
                 payload,
             ),
             (
@@ -1141,12 +1148,12 @@ fn test_int4_odd_length_handling() {
 
 #[test]
 fn test_ggml_type_label_iq3_m() {
-    assert_eq!(ggml_type_label(GGML_TYPE_IQ3_M), "IQ3_M");
+    assert_eq!(ggml_type_label(GGML_TYPE_IQ3_M_BLOCK), "IQ3_M_BLOCK");
 }
 
 #[test]
 fn test_synapse_dequant_path_supported_iq3_m() {
-    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M));
+    assert!(synapse_dequant_path_supported(GGML_TYPE_IQ3_M_BLOCK));
     assert!(!synapse_dequant_path_supported(GGML_TYPE_IQ3_S));
     assert!(!synapse_dequant_path_supported(9999));
 }
@@ -1264,6 +1271,80 @@ fn test_safetensors_int4_tensor_extraction() {
     assert_eq!(extracted, vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0, 8.0, 7.0]);
 
     // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+/// HF/Safetensors shape is (rows, cols); GGUF synapse helper must not swap ST dims.
+#[test]
+fn test_safetensors_synapse_shape_uses_hf_row_major() {
+    use super::safetensors::MappedSafetensorsCheckpoint;
+    use std::io::Write;
+
+    let gate = "model.layers.0.mlp.gate.weight";
+    // Rectangular: 8 experts × 16 hidden (not square) — wrong convention would swap to (16, 8).
+    let rows = 8usize;
+    let cols = 16usize;
+    let data = vec![0u8; rows * cols * 4];
+    let header = serde_json::json!({
+        gate: {
+            "dtype": "F32",
+            "shape": [rows, cols],
+            "data_offsets": [0, data.len()]
+        },
+        "model.embed_tokens.weight": {
+            "dtype": "F32",
+            "shape": [32, cols],
+            "data_offsets": [data.len(), data.len() + 32 * cols * 4]
+        },
+        "__metadata__": {}
+    });
+    let header_bytes = serde_json::to_vec(&header).unwrap();
+    let mut file_bytes = Vec::new();
+    file_bytes.extend_from_slice(&(header_bytes.len() as u64).to_le_bytes());
+    file_bytes.extend_from_slice(&header_bytes);
+    file_bytes.extend_from_slice(&data);
+    file_bytes.extend_from_slice(&vec![0u8; 32 * cols * 4]);
+
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "corinth_canal_st_shape_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let mut file = std::fs::File::create(tmp_dir.join("model.safetensors")).unwrap();
+    file.write_all(&file_bytes).unwrap();
+    drop(file);
+    std::fs::write(
+        tmp_dir.join("config.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "architectures": ["OlmoeForCausalLM"],
+            "hidden_size": cols,
+            "num_hidden_layers": 2,
+            "num_experts": rows,
+            "num_experts_per_tok": 2,
+            "vocab_size": 32
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let path = tmp_dir.to_str().unwrap();
+    // Shape helper is on Router after successful ST load.
+    let model = super::Router::load(path, 0, 0).expect("Olmoe ST fixture must load");
+    let shape = model
+        .synapse_tensor_row_major_shape(gate)
+        .expect("ST gate shape must be readable");
+    assert_eq!(
+        shape,
+        (rows, cols),
+        "Safetensors must use HF (rows, cols), not GGUF (cols, rows)"
+    );
+    // Sanity: checkpoint still reports raw HF shape.
+    let cp = MappedSafetensorsCheckpoint::from_directory(path).unwrap();
+    assert_eq!(cp.tensor_info(gate).unwrap().1, &[rows, cols]);
+
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
 
@@ -1400,8 +1481,59 @@ fn test_safetensors_int4_token_embedding() {
 }
 
 #[test]
-fn test_adapter_resolve_iq3_m_gguf() {
-    // Test that resolve_adapter detects IQ3_M from metadata and sets DequantizedIQ3M
+fn test_router_crate_private_dequant_helpers_reachable() {
+    // Keep pub(crate) dequant helpers live under --no-default-features (no CUDA
+    // temporal caller) without expanding the public Router surface (Codex).
+    let mut block = vec![0u8; 111];
+    block[0] = 0x00;
+    block[1] = 0x3C;
+    let iq3_payload = block;
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                vec![0u8; EMBEDDING_DIM * 64 * 4],
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![256, 1],
+                GGML_TYPE_IQ3_M_BLOCK,
+                iq3_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+    let path = write_temp_file(&checkpoint, "iq3_m_router_helpers");
+    let model = super::Router::load(path.to_str().unwrap(), 0, 0).unwrap();
+    assert_eq!(
+        model.dequantized_iq3_m_synapse_tensor_name(),
+        Some("blk.0.attn_q.weight")
+    );
+    let weights = model
+        .dequantized_iq3_m_synapse_weights("blk.0.attn_q.weight")
+        .unwrap();
+    assert_eq!(weights.len(), 256);
+    // Inactive paths return None / error cleanly.
+    assert!(model.dequantized_q6_k_synapse_tensor_name().is_none());
+    assert!(model.dequantized_int4_synapse_tensor_name().is_none());
+    assert!(model.dequantized_int4_synapse_weights("nope").is_err());
+    assert!(model.routing_f32_synapse_tensor_name().is_none());
+    assert!(model.routing_f32_synapse_weights("nope").is_err());
+    let _ = model.dequantized_q8_0_synapse_weights("blk.0.attn_q.weight");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_adapter_resolve_iq3_m_block_gguf() {
+    // Internal IQ3_M_BLOCK id (synthetic fixtures) still selects DequantizedIQ3M.
     let mut block = vec![0u8; 111];
     block[0] = 0x00;
     block[1] = 0x3C;
@@ -1418,7 +1550,7 @@ fn test_adapter_resolve_iq3_m_gguf() {
             (
                 "blk.0.attn_q.weight",
                 vec![256, 1],
-                GGML_TYPE_IQ3_M,
+                GGML_TYPE_IQ3_M_BLOCK,
                 payload,
             ),
             (
@@ -1434,13 +1566,60 @@ fn test_adapter_resolve_iq3_m_gguf() {
     let path = write_temp_file(&checkpoint, "iq3_m_adapter");
     let (metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
 
-    // Manually set IQ3_M in metadata quantization so resolve_adapter detects it
     let adapter =
         super::adapter::resolve_adapter(&metadata, &mapped, None, path.to_str().unwrap()).unwrap();
     assert_eq!(
         adapter.synapse_source,
+        super::adapter::SynapseSource::DequantizedIQ3M
+    );
+    assert_eq!(
+        adapter.dequant_iq3_m_synapse_tensor.as_deref(),
+        Some("blk.0.attn_q.weight")
+    );
+}
+
+#[test]
+fn test_adapter_does_not_treat_wire_type_31_as_iq3_m() {
+    // GGUF wire type 31 is Q4_0_4_4 — must fall through (usually routing-f32),
+    // never DequantizedIQ3M (Codex).
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                vec![0u8; EMBEDDING_DIM * 64 * 4],
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![256, 1],
+                GGML_TYPE_Q4_0_4_4,
+                vec![0u8; 256],
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "type31_not_iq3m");
+    let (metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let adapter =
+        super::adapter::resolve_adapter(&metadata, &mapped, None, path.to_str().unwrap()).unwrap();
+    assert_ne!(
+        adapter.synapse_source,
+        super::adapter::SynapseSource::DequantizedIQ3M
+    );
+    assert!(adapter.dequant_iq3_m_synapse_tensor.is_none());
+    assert_eq!(
+        adapter.synapse_source,
         super::adapter::SynapseSource::RoutingF32
     );
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1462,7 +1641,7 @@ fn test_iq3_m_multi_row_dequantization() {
             (
                 "blk.0.attn_q.weight",
                 vec![256, 2],
-                GGML_TYPE_IQ3_M,
+                GGML_TYPE_IQ3_M_BLOCK,
                 payload,
             ),
             (
