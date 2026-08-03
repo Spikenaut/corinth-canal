@@ -14,23 +14,31 @@
       "Bash(git log:*)",
       "Bash(git diff:*)",
       "Bash(git show:*)",
-      "Bash(git branch:*)",
+      "Bash(git branch -a:*)",
+      "Bash(git branch -vv:*)",
+      "Bash(git branch --list:*)",
+      "Bash(git branch --show-current:*)",
       "Bash(git grep:*)",
       "Bash(git merge-base:*)",
-      "Bash(gh issue:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh issue view:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh run list:*)",
-      "Bash(gh run view:*)",
-      "Bash(bd:*)"
+      "Bash(gh run view:*)"
     ],
     "ask": [
       "Bash(git push:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue close:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue edit:*)",
       "Bash(gh pr create:*)",
       "Bash(gh pr merge:*)",
       "Bash(cargo run:*)",
-      "Bash(cargo publish:*)"
+      "Bash(cargo publish:*)",
+      "Bash(bd:*)"
     ]
   }
 }

@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two build worlds exist and they are not interchangeable:
 
 - **CPU-only** (`--no-default-features`): no `nvcc`, no CUDA. The `cuda` feature is *default-on*, and it gates `pub mod gpu` and `pub mod model` in `src/lib.rs`. So under `--no-default-features` there is **no `Model` type at all** — only telemetry/funnel/projector/moe/latent/experiment. The five GPU examples declare `required-features = ["cuda"]` and silently vanish from CPU builds; the four that remain runnable are `validate_matrix`, `validate_local_saaq`, `summarize_local_saaq`, and `safetensors_manifest` (each documents its argv in its module doc comment).
-- **CUDA** (default features): `build.rs` shells out to `nvcc`, compiles `src/gpu/kernels/*.cu` to `sm_120` fatbins plus the `myelin_shim` C-ABI object, and panics if `nvcc` is missing. `--features gpu-stub` writes empty fatbins instead (that is how CI builds without a toolkit).
+- **CUDA** (default features): `build.rs` shells out to `nvcc`, compiles `src/gpu/kernels/*.cu` to `sm_120` fatbins plus the `myelin_shim` C-ABI object, and panics if `nvcc` is missing. `--features gpu-stub` writes empty fatbins as an optional non-CUDA fallback for local development; CI uses `--no-default-features` (CPU) or the default `cuda` feature on a CUDA runner.
 - The `gguf` and `ci` features in `Cargo.toml` are **declared but referenced nowhere** in `src/`, `examples/`, or `build.rs`. `--features gguf` does not enable GGUF support — GGUF parsing is unconditional.
 
 ```bash
@@ -37,7 +37,7 @@ Coverage mirrors CI with `cargo llvm-cov --lib --no-default-features --locked --
 
 ## Running the research loop
 
-Examples read config exclusively from env (`.env.local`, auto-loaded via `dotenvy`; copy from `.env.example`, which documents every key). Recipes in `justfile`:
+`RunConfig`-based examples read config from env (`.env.local`, auto-loaded via `dotenvy`; copy from `.env.example`, which documents every key). `validate_matrix`, `validate_local_saaq`, `summarize_local_saaq`, `safetensors_manifest`, and `csv_replay` take positional arguments instead. Recipes in `justfile`:
 
 ```bash
 just saaq                          # primary SAAQ latent calibration loop
@@ -55,7 +55,7 @@ just clean-artifacts
 
 The crate is deliberately a **single crate** (see `AGENTS.md`); do not extract modules into `rmems-*` crates. `docs/MODULE_STATUS.md` + `manifests/proven_components.toml` track each module's promotion readiness, `docs/PROMOTION_RULES.md` the rules.
 
-Pipeline (each stage has a CPU implementation and a GPU counterpart):
+Pipeline (telemetry projection and the temporal loop have CPU and GPU counterparts; Projector, Router, and SAAQ calibration currently run on the CPU):
 
 ```text
 TelemetrySnapshot  →  TelemetryEncoder (CPU) / project_snapshot_current (GPU)
@@ -76,11 +76,11 @@ Module boundaries worth knowing before editing:
 | `src/model/core.rs` | `Model` construction, config validation, forward paths |
 | `src/model/temporal.rs` | `prepare_gpu_temporal` / `tick_gpu_temporal` / `forward_gpu_temporal` |
 | `src/model/telemetry_io.rs` | the one CSV writer for GPU routing telemetry |
-| `src/moe/mod.rs` | `Router` host + routing-mode dispatch; everything below it is private |
+| `src/moe/mod.rs` | `Router` host + routing-mode dispatch; `moe` and `moe::safetensors` are public, plus `RoutingMode`, `ggml_type_label`, and `synapse_dequant_path_supported` re-exports; internal helpers live in private `gguf/`, `adapter.rs`, and `routing.rs` |
 | `src/moe/gguf/` | GGUF parse, mmap, dequant, CUDA host-register (split out of `checkpoint.rs`) |
 | `src/moe/checkpoint.rs` | thin compatibility façade re-exporting `gguf/` |
 | `src/moe/adapter.rs` | model-family resolution + synapse/routing tensor selection |
-| `src/moe/safetensors.rs` + `safetensors/` | header-only inspection → deterministic manifests (not a runtime routing path) |
+| `src/moe/safetensors.rs` + `safetensors/` | header inspection + manifest generation, plus `MappedSafetensorsCheckpoint` token-embedding extraction and `safetensors_gate_scores` runtime routing |
 | `src/experiment/schema.rs` | `RunMatrix` / `ExperimentManifest` / `ExperimentSummary` — the TOML matrix + `run_manifest.json` schemas the `validate_*` examples check |
 | `src/types.rs` | `TelemetrySnapshot`, `ModelFamily`, `RoutingMode`, `ProjectionMode`, `CloudModelSpec`, `EMBEDDING_DIM` |
 | `src/tensor/mod.rs`, `src/metric.rs` | tiny shared helpers (`Tensor = Vec<f32>`, dot, MSE); `metric` is `pub(crate)` |
@@ -93,12 +93,12 @@ Module boundaries worth knowing before editing:
 - **Synapse path is chosen from the tensor's actual `ggml_type`, not the filename.** The adapter inspects `blk.0.attn_q.weight`; a file named `...IQ4_NL.gguf` legitimately drives the `dequantized-q8_0` path. Mixed-quant checkpoints are expected. The eight `SynapseSource` variants (`src/moe/adapter.rs`) are `real`, `dequantized-q8_0`, `dequantized-q5_k`, `dequantized-q6_k`, `dequantized-iq3_m`, `dequantized-int4`, `routing-f32`, `synthetic-fallback` — those strings are what lands in `synapse_source()` and the diagnostics JSON. Non-square dequantized tensors are resampled to the neuron grid rather than rejected.
 - **`ModelFamily` has 21 variants** (`src/types.rs`), including `Moonlight16BA3B`, `Granite31A800M`, `Nemotron`/`NemotronLegacy` (serde alias `Nemotron3Nano4B`), `Lfm2Moe`, `SlimMoe`, `GptOss`, `Step`, `MiniMax`, `Cohere`, `Grin`, `Skyworks`, `Trinity`, `Grok`. Read the enum — every prose list is stale: `src/lib.rs`'s doc comment names five, `README.md` names seven.
 - **Do not change CSV schemas** (`latent_telemetry.csv`, the routing telemetry header, canonical telemetry CSV header) unless the task says so. Do not silently change what `src/lib.rs` re-exports.
-- **Sentry/OTel are opt-in and must degrade to fully offline.** Blank `SENTRY_DSN` / `NR_INSERT_KEY` means no client, no network, no run failure. Wrappers attach only safe fields (`repo`, `command`, `git_sha`, `model_slug`, `telemetry_source`, `validation_status`, `error_category`) — never absolute checkpoint or artifact paths.
-- **`configs/` filenames have drifted from the docs.** README/`docs/` still cite `saaq15_moe_lineup.toml`, `saaq15_cloud_lineup.toml`, and `safetensors_lineup.template.toml`; the files on disk are `hybrid_moe_lineup.toml`, `local_gguf_lineup.toml`, `local_safetensors_lineup.template.toml`, `model_adapter_configs.toml`, `saaq_cloud_lineup.toml`, `safetensors_lineup.toml`. Check `configs/` before quoting a path. The drift reaches the `justfile` too: `just saaq-campaign` falls back to the non-existent `configs/saaq15_moe_lineup.toml`, so it only works with `LINEUP_CONFIG` set in `.env.local` or the environment.
+- **Sentry/OTel are opt-in and must degrade to fully offline.** Blank `SENTRY_DSN` / `NR_INSERT_KEY` means no client, no network, no run failure. Wrappers attach only safe fields (`repo`, `command`, `git_sha`, `run_id`, `model_slug`, `telemetry_source`, `validation_status`, `error_category`, `prompt_profile`, `saaq_rule`) — never absolute checkpoint or artifact paths. `run_id` is also set as an OTel span attribute.
+- **`configs/` filenames have drifted from the docs.** README/`docs/` still cite `saaq15_moe_lineup.toml`, `saaq15_cloud_lineup.toml`, and `safetensors_lineup.template.toml`; the files on disk are `hybrid_moe_lineup.toml`, `local_gguf_lineup.toml`, `local_safetensors_lineup.template.toml`, `model_adapter_configs.toml`, and `saaq_cloud_lineup.toml` (`safetensors_lineup.toml` is a gitignored local copy created from the template). Check `configs/` before quoting a path. The drift reaches the `justfile` too: `just saaq-campaign` falls back to the non-existent `configs/saaq15_moe_lineup.toml`, so it only works with `LINEUP_CONFIG` set in `.env.local` or the environment.
 
 ### Model selection precedence (examples only)
 
-`LINEUP_CONFIG` (hard error if unreadable) → `SAFETENSORS_LINEUP_CONFIG` → `CHECKPOINT_PATH` → autodiscovery scan of `$HOME/Downloads/SNN_Quantization` for a hardcoded candidate list. The autodiscovery root is a reference-repo convention only and must never be copied into a promoted crate.
+`RunConfig::from_env` first validates every optional lineup that is set (`CLOUD_LINEUP_CONFIG`, `SAFETENSORS_LINEUP_CONFIG`). It then resolves models with the precedence `LINEUP_CONFIG` (hard error if unreadable) → `SAFETENSORS_LINEUP_CONFIG` → `CHECKPOINT_PATH` → autodiscovery scan of `$HOME/Downloads/SNN_Quantization` for a hardcoded candidate list. Because validation runs before precedence resolution, a stale optional lineup can still abort the run even when a higher-priority config is the one used. The autodiscovery root is a reference-repo convention only and must never be copied into a promoted crate.
 
 Per-run artifacts land under `VALIDATION_OUTPUT_ROOT` (default `./artifacts`): `tick_telemetry.txt`, `latent_telemetry.csv`, `run_manifest.json`, `summary.json`. `run_manifest.json` stamps the *actual* telemetry source (`synthetic`, `synthetic_fallback`, `csv_<stem>`) so degradation is visible instead of silent.
 
@@ -114,8 +114,8 @@ Per-run artifacts land under `VALIDATION_OUTPUT_ROOT` (default `./artifacts`): `
 
 ## Code quality tooling (from `.cursor/rules/`)
 
-- **Codacy**: after editing a file, run `codacy_cli_analyze` (Codacy MCP) with `rootPath` = workspace path and `file` = the edited path, and fix what it reports. After any dependency-manifest change, run it with `tool: "trivy"` and resolve vulnerabilities before continuing. Do not use it to chase duplication, complexity metrics, or coverage. `.codacy.yml` excludes the intentionally-complex core (`src/model/**`, `src/gpu/**`, `src/moe/**`, `src/funnel.rs`, `src/telemetry.rs`, `src/latent.rs`, and the large examples).
-- **Aikido**: run `aikido_full_scan` on generated/modified first-party code with full file content, fix findings, and rescan until clean.
+- **Codacy** (when the Codacy MCP integration is available): after editing a file, run `codacy_cli_analyze` with `rootPath` = workspace path and `file` = the edited path, and fix what it reports. After any dependency-manifest change, run it with `tool: "trivy"` and resolve vulnerabilities before continuing. Do not use it to chase duplication, complexity metrics, or coverage. `.codacy.yml` excludes the intentionally-complex core (`src/model/**`, `src/gpu/**`, `src/moe/**`, `src/funnel.rs`, `src/telemetry.rs`, `src/latent.rs`, and the large examples).
+- **Aikido** (when the Aikido integration is available): run `aikido_full_scan` on generated/modified first-party code with full file content, fix findings, and rescan until clean.
 - **Snyk** SCA/SAST runs via Snyk MCP tools rather than a CI workflow.
 
 ## CI
