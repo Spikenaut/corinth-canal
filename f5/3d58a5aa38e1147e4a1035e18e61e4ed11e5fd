@@ -1,0 +1,30 @@
+.gitignore
+  s_14f0d59070c44e::t_683349b10721b3 73-75
+  s_14f0d59070c44e::t_84fc1119ad657c 64-67
+.claude/settings.json
+  s_14f0d59070c44e::t_86a15f4c082e7e 1-36
+CLAUDE.md
+  s_14f0d59070c44e::t_45803800ab0470 124-125
+  s_14f0d59070c44e::t_e0084ff9ae6cdf 11-13
+  s_14f0d59070c44e::t_3d000219983c0e 93-94
+  s_14f0d59070c44e::t_99584ebc42a4e6 91
+  s_14f0d59070c44e::t_837612f9a7b0ba 97
+  s_14f0d59070c44e::t_ac3a036c9ec660 112-113
+  s_14f0d59070c44e::t_8eb581cb4cb6a5 83-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f53d58a5aa38e1147e4a1035e18e61e4ed11e5fd",
+  "prompts": {},
+  "sessions": {
+    "s_14f0d59070c44e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a4e0841-d54c-471a-af3d-5fa68899cb5e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
