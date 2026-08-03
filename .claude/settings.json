@@ -2,14 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(cargo check:*)",
-      "Bash(cargo test:*)",
-      "Bash(cargo clippy:*)",
-      "Bash(cargo fmt:*)",
       "Bash(cargo tree:*)",
-      "Bash(cargo llvm-cov:*)",
       "Bash(just --list)",
-      "Bash(just setup)",
       "Bash(git status:*)",
       "Bash(git log:*)",
       "Bash(git diff:*)",
@@ -36,8 +30,14 @@
       "Bash(gh issue edit:*)",
       "Bash(gh pr create:*)",
       "Bash(gh pr merge:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo llvm-cov:*)",
       "Bash(cargo run:*)",
       "Bash(cargo publish:*)",
+      "Bash(just setup)",
       "Bash(bd:*)"
     ]
   }
