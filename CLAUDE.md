@@ -37,7 +37,7 @@ Coverage mirrors CI with `cargo llvm-cov --lib --no-default-features --locked --
 
 ## Running the research loop
 
-`RunConfig`-based examples read config from env (`.env.local`, auto-loaded via `dotenvy`; copy from `.env.example`, which documents every key). `validate_matrix`, `validate_local_saaq`, `summarize_local_saaq`, `safetensors_manifest`, and `csv_replay` take positional arguments instead. Recipes in `justfile`:
+`RunConfig`-based examples read config from env (`.env.local`, auto-loaded via `dotenvy`; copy from `.env.example`, which documents every key). `validate_matrix`, `validate_local_saaq`, `summarize_local_saaq`, and `safetensors_manifest` take positional arguments; `csv_replay` requires a positional CSV path and also reads its remaining configuration from env. Recipes in `justfile`:
 
 ```bash
 just saaq                          # primary SAAQ latent calibration loop

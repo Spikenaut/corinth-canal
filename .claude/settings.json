@@ -20,7 +20,11 @@
       "Bash(gh pr list:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh run list:*)",
-      "Bash(gh run view:*)"
+      "Bash(gh run view:*)",
+      "Bash(bd prime)",
+      "Bash(bd ready)",
+      "Bash(bd show:*)",
+      "Bash(bd list:*)"
     ],
     "ask": [
       "Bash(git push:*)",
@@ -38,7 +42,10 @@
       "Bash(cargo run:*)",
       "Bash(cargo publish:*)",
       "Bash(just setup)",
-      "Bash(bd:*)"
+      "Bash(bd create:*)",
+      "Bash(bd close:*)",
+      "Bash(bd update:*)",
+      "Bash(bd remember:*)"
     ]
   }
 }
