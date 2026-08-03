@@ -130,17 +130,13 @@ pub fn parse_family_slug(value: &str) -> Option<ModelFamily> {
     }
 }
 
-/// Same precedence rules as `routing_mode_override_from_env` but reading
-/// from an arbitrary string (used for lineup-config entries). Returns
-/// `None` for unknown values so callers can treat that as a soft validation
-/// error without aborting the whole sweep.
+/// Parse a lineup-config `routing_mode` entry.
+///
+/// Thin alias for [`RoutingMode::from_alias`], which owns the canonical
+/// spelling table. Kept as a named function because `config.rs` and the
+/// lineup loader both call it.
 pub fn parse_routing_mode(value: &str) -> Option<RoutingMode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "dense" | "dense_sim" => Some(RoutingMode::DenseSim),
-        "stub" | "stub_uniform" => Some(RoutingMode::StubUniform),
-        "spiking" | "spiking_sim" => Some(RoutingMode::SpikingSim),
-        _ => None,
-    }
+    RoutingMode::from_alias(value)
 }
 
 pub fn saaq_update_rule_from_env() -> SaaqUpdateRule {
@@ -652,15 +648,15 @@ pub fn input_drive_gain_from_env() -> f32 {
 }
 
 /// Parse `ROUTING_MODE` into a [`RoutingMode`]. Returns `None` when the env
-/// var is unset so callers can keep the config-provided default.
+/// var is unset *or* holds an unrecognised value, so callers keep the
+/// config-provided default in both cases.
+///
+/// Delegates to [`RoutingMode::from_alias`] so the env var and lineup-config
+/// entries accept exactly the same spellings. They diverged previously:
+/// this function accepted only `dense`/`stub`, so `ROUTING_MODE=dense_sim`
+/// was silently dropped and the config default won.
 pub fn routing_mode_override_from_env() -> Option<RoutingMode> {
-    let raw = std::env::var("ROUTING_MODE").ok()?;
-    match raw.to_ascii_lowercase().as_str() {
-        "dense" => Some(RoutingMode::DenseSim),
-        "stub" => Some(RoutingMode::StubUniform),
-        "spiking" | "spiking_sim" => Some(RoutingMode::SpikingSim),
-        _ => None,
-    }
+    RoutingMode::from_alias(&std::env::var("ROUTING_MODE").ok()?)
 }
 
 fn slug_from_path(path: &str) -> String {
