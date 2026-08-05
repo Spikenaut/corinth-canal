@@ -1579,6 +1579,7 @@ fn test_adapter_resolve_iq3_m_block_gguf() {
         Some("blk.0.attn_q.weight")
     );
     assert!(adapter.routing_f32_synapse_tensor.is_none());
+    assert_eq!(adapter.quantization, "IQ3_M");
 }
 
 #[test]
@@ -1627,6 +1628,50 @@ fn test_adapter_resolve_tok_embeddings_fallback() {
         super::adapter::SynapseSource::RoutingF32
     );
     assert!(adapter.dequant_iq3_m_synapse_tensor.is_none());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_adapter_resolve_tok_embeddings_unsupported_type() {
+    // token_embd.weight is absent and tok_embeddings.weight has an unsupported
+    // quantization, so adapter resolution should fail early.
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "tok_embeddings.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_IQ3_S,
+                vec![0u8; 16],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "tok-embeddings-unsupported");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("tok_embeddings.weight")
+    ));
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1705,6 +1750,7 @@ fn test_adapter_resolve_token_embedding_missing() {
         result,
         Err(HybridError::MissingTensor { name, .. }) if name == "token_embd.weight"
     ));
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1738,6 +1784,7 @@ fn test_adapter_resolve_routing_missing() {
         result,
         Err(HybridError::MissingTensor { name, .. }) if name == "ffn_gate_inp.weight"
     ));
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1778,6 +1825,7 @@ fn test_adapter_resolve_routing_wrong_type() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("must be rank-2 F32")
     ));
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1818,6 +1866,7 @@ fn test_adapter_resolve_routing_insufficient_experts() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("only exposes 1 experts")
     ));
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1864,132 +1913,76 @@ fn test_adapter_resolve_quantized_synapse_rank_not_two() {
         adapter.routing_f32_synapse_tensor.as_deref(),
         Some("blk.0.ffn_gate_inp.weight")
     );
+    let _ = std::fs::remove_file(&path);
+}
+
+fn build_standard_adapter_gguf() -> Vec<u8> {
+    build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()],
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                vec![0u8; 16],
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    )
+}
+
+fn assert_topology_key_required(key: &str, fixture_name: &str, expected_fragment: &str) {
+    let checkpoint = build_standard_adapter_gguf();
+    let path = write_temp_file(&checkpoint, fixture_name);
+    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    mapped.set_numeric_for_test(key, None);
+
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains(expected_fragment)
+    ));
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn test_adapter_resolve_gguf_topology_missing_embedding_length() {
-    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
-    let attn_q_payload = vec![0u8; 16];
-
-    let checkpoint = build_test_gguf(
-        vec![
-            (
-                "blk.0.ffn_gate_inp.weight",
-                vec![EMBEDDING_DIM, 64],
-                GGML_TYPE_F32,
-                gate_payload,
-            ),
-            (
-                "blk.0.attn_q.weight",
-                vec![EMBEDDING_DIM, EMBEDDING_DIM],
-                GGML_TYPE_IQ3_S,
-                attn_q_payload,
-            ),
-            (
-                "token_embd.weight",
-                vec![EMBEDDING_DIM, 32],
-                GGML_TYPE_F16,
-                vec![0u8; EMBEDDING_DIM * 32 * 2],
-            ),
-        ],
-        32,
+    assert_topology_key_required(
+        "olmoe.embedding_length",
+        "topology-missing-embedding-length",
+        "embedding_length",
     );
-
-    let path = write_temp_file(&checkpoint, "topology-missing-embedding-length");
-    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
-    mapped.set_numeric_for_test("olmoe.embedding_length", None);
-
-    let result =
-        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
-
-    assert!(matches!(
-        result,
-        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("embedding_length")
-    ));
 }
 
 #[test]
 fn test_adapter_resolve_gguf_topology_missing_block_count() {
-    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
-    let attn_q_payload = vec![0u8; 16];
-
-    let checkpoint = build_test_gguf(
-        vec![
-            (
-                "blk.0.ffn_gate_inp.weight",
-                vec![EMBEDDING_DIM, 64],
-                GGML_TYPE_F32,
-                gate_payload,
-            ),
-            (
-                "blk.0.attn_q.weight",
-                vec![EMBEDDING_DIM, EMBEDDING_DIM],
-                GGML_TYPE_IQ3_S,
-                attn_q_payload,
-            ),
-            (
-                "token_embd.weight",
-                vec![EMBEDDING_DIM, 32],
-                GGML_TYPE_F16,
-                vec![0u8; EMBEDDING_DIM * 32 * 2],
-            ),
-        ],
-        32,
+    assert_topology_key_required(
+        "olmoe.block_count",
+        "topology-missing-block-count",
+        "block_count",
     );
-
-    let path = write_temp_file(&checkpoint, "topology-missing-block-count");
-    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
-    mapped.set_numeric_for_test("olmoe.block_count", None);
-
-    let result =
-        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
-
-    assert!(matches!(
-        result,
-        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("block_count")
-    ));
 }
 
 #[test]
 fn test_adapter_resolve_gguf_topology_missing_expert_count() {
-    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
-    let attn_q_payload = vec![0u8; 16];
-
-    let checkpoint = build_test_gguf(
-        vec![
-            (
-                "blk.0.ffn_gate_inp.weight",
-                vec![EMBEDDING_DIM, 64],
-                GGML_TYPE_F32,
-                gate_payload,
-            ),
-            (
-                "blk.0.attn_q.weight",
-                vec![EMBEDDING_DIM, EMBEDDING_DIM],
-                GGML_TYPE_IQ3_S,
-                attn_q_payload,
-            ),
-            (
-                "token_embd.weight",
-                vec![EMBEDDING_DIM, 32],
-                GGML_TYPE_F16,
-                vec![0u8; EMBEDDING_DIM * 32 * 2],
-            ),
-        ],
-        32,
+    assert_topology_key_required(
+        "olmoe.expert_count",
+        "topology-missing-expert-count",
+        "expert_count",
     );
-
-    let path = write_temp_file(&checkpoint, "topology-missing-expert-count");
-    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
-    mapped.set_numeric_for_test("olmoe.expert_count", None);
-
-    let result =
-        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
-
-    assert!(matches!(
-        result,
-        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("expert_count")
-    ));
 }
 
 #[test]

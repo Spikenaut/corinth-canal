@@ -185,8 +185,8 @@ Run `cargo check --no-default-features && cargo test --no-default-features` loca
 
 - Prefer `git` commands over MCP tools for branch and PR operations in this environment.
 - Keep behavioral changes separate from structural refactors when possible.
-- **Never open a PR whose base is another feature branch.** Always base on `main`. If work must be
-  stacked, retarget every child PR to `main` before merging the parent. GH#126 was based on
+- Avoid opening a PR whose base is another feature branch; base PRs on `main` by default. If work
+  must be stacked, retarget every child PR to `main` before merging the parent. GH#126 was based on
   `refactor/gh118-unify-infer-family`; that branch was squash-merged via GH#125 and deleted, so
   GitHub marked GH#126 "merged" while none of its code reached `main` — the refactor was silently
   lost and had to be reconstructed. After squash-merging any stack, verify the child landed:

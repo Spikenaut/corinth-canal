@@ -74,17 +74,39 @@ impl ModelAdapter {
     }
 }
 
+fn is_token_embedding_supported(info: &GgufTensorInfo) -> bool {
+    !info.dims.is_empty()
+        && matches!(
+            info.ggml_type,
+            GGML_TYPE_F32 | GGML_TYPE_F16 | GGML_TYPE_Q8_0 | GGML_TYPE_Q5_K | GGML_TYPE_Q6_K
+        )
+}
+
 fn resolve_token_embedding_tensor(checkpoint: &MappedGgufCheckpoint, path: &str) -> Result<String> {
     if checkpoint.has_tensor("token_embd.weight") {
-        Ok("token_embd.weight".to_owned())
-    } else if checkpoint.has_tensor("tok_embeddings.weight") {
-        Ok("tok_embeddings.weight".to_owned())
-    } else {
-        Err(HybridError::MissingTensor {
-            name: "token_embd.weight".into(),
-            path: path.to_owned(),
-        })
+        let info = checkpoint.tensor_info("token_embd.weight", path)?;
+        if is_token_embedding_supported(info) {
+            return Ok("token_embd.weight".to_owned());
+        }
+        return Err(HybridError::UnsupportedFormat(format!(
+            "token embedding tensor 'token_embd.weight' in '{path}' has unsupported ggml_type={} dims={:?}",
+            info.ggml_type, info.dims
+        )));
     }
+    if checkpoint.has_tensor("tok_embeddings.weight") {
+        let info = checkpoint.tensor_info("tok_embeddings.weight", path)?;
+        if is_token_embedding_supported(info) {
+            return Ok("tok_embeddings.weight".to_owned());
+        }
+        return Err(HybridError::UnsupportedFormat(format!(
+            "token embedding tensor 'tok_embeddings.weight' in '{path}' has unsupported ggml_type={} dims={:?}",
+            info.ggml_type, info.dims
+        )));
+    }
+    Err(HybridError::MissingTensor {
+        name: "token_embd.weight".into(),
+        path: path.to_owned(),
+    })
 }
 
 fn resolve_routing_tensor(
@@ -116,11 +138,18 @@ fn resolve_routing_tensor(
     Ok(routing_tensor)
 }
 
+struct GgufTopology {
+    hidden_size: usize,
+    num_layers: usize,
+    num_experts: usize,
+    expert_used_count: usize,
+}
+
 fn resolve_gguf_topology(
     metadata: &GgufMetadata,
     architecture: &str,
     path: &str,
-) -> Result<(usize, usize, usize, usize)> {
+) -> Result<GgufTopology> {
     let hidden_size = metadata
         .numeric(&format!("{architecture}.embedding_length"))
         .ok_or_else(|| {
@@ -145,7 +174,12 @@ fn resolve_gguf_topology(
     let expert_used_count = metadata
         .numeric(&format!("{architecture}.expert_used_count"))
         .unwrap_or(1);
-    Ok((hidden_size, num_layers, num_experts, expert_used_count))
+    Ok(GgufTopology {
+        hidden_size,
+        num_layers,
+        num_experts,
+        expert_used_count,
+    })
 }
 
 pub(super) fn resolve_adapter(
@@ -156,11 +190,10 @@ pub(super) fn resolve_adapter(
 ) -> Result<ModelAdapter> {
     let architecture = metadata.architecture().to_owned();
     let family = infer_family(&architecture, family_override, path)?;
-    let (hidden_size, num_layers, num_experts, expert_used_count) =
-        resolve_gguf_topology(metadata, &architecture, path)?;
+    let topology = resolve_gguf_topology(metadata, &architecture, path)?;
     let token_embedding_tensor = resolve_token_embedding_tensor(checkpoint, path)?;
 
-    let routing_tensor = resolve_routing_tensor(checkpoint, num_experts, path)?;
+    let routing_tensor = resolve_routing_tensor(checkpoint, topology.num_experts, path)?;
 
     let preferred_gpu_synapse_tensor = checkpoint
         .has_tensor("blk.0.attn_q.weight")
@@ -169,17 +202,17 @@ pub(super) fn resolve_adapter(
         preferred_gpu_synapse_tensor.as_deref(),
         &routing_tensor,
         checkpoint,
-        hidden_size,
+        topology.hidden_size,
         path,
     );
 
     Ok(ModelAdapter {
         family,
         architecture,
-        hidden_size,
-        num_layers,
-        num_experts,
-        expert_used_count,
+        hidden_size: topology.hidden_size,
+        num_layers: topology.num_layers,
+        num_experts: topology.num_experts,
+        expert_used_count: topology.expert_used_count,
         token_embedding_tensor,
         routing_tensor,
         preferred_gpu_synapse_tensor,
@@ -355,15 +388,17 @@ struct SynapseSelection {
     routing_f32_synapse_tensor: Option<String>,
 }
 
-fn empty_synapse_selection() -> SynapseSelection {
-    SynapseSelection {
-        synapse_source: SynapseSource::SyntheticFallback,
-        real_gpu_synapse_tensor: None,
-        dequant_q8_0_synapse_tensor: None,
-        dequant_q5_k_synapse_tensor: None,
-        dequant_q6_k_synapse_tensor: None,
-        dequant_iq3_m_synapse_tensor: None,
-        routing_f32_synapse_tensor: None,
+impl Default for SynapseSelection {
+    fn default() -> Self {
+        Self {
+            synapse_source: SynapseSource::RoutingF32,
+            real_gpu_synapse_tensor: None,
+            dequant_q8_0_synapse_tensor: None,
+            dequant_q5_k_synapse_tensor: None,
+            dequant_q6_k_synapse_tensor: None,
+            dequant_iq3_m_synapse_tensor: None,
+            routing_f32_synapse_tensor: None,
+        }
     }
 }
 
@@ -376,7 +411,7 @@ fn select_real_synapse(
         SynapseSelection {
             synapse_source: SynapseSource::Real,
             real_gpu_synapse_tensor: Some(name.to_owned()),
-            ..empty_synapse_selection()
+            ..Default::default()
         }
     })
 }
@@ -390,17 +425,17 @@ fn select_quantized_synapse(name: &str, info: &GgufTensorInfo) -> Option<Synapse
         GGML_TYPE_Q8_0 if d0.is_multiple_of(32) => Some(SynapseSelection {
             synapse_source: SynapseSource::DequantizedQ8_0,
             dequant_q8_0_synapse_tensor: Some(name.to_owned()),
-            ..empty_synapse_selection()
+            ..Default::default()
         }),
         GGML_TYPE_Q5_K if d0.is_multiple_of(256) => Some(SynapseSelection {
             synapse_source: SynapseSource::DequantizedQ5K,
             dequant_q5_k_synapse_tensor: Some(name.to_owned()),
-            ..empty_synapse_selection()
+            ..Default::default()
         }),
         GGML_TYPE_Q6_K if d0.is_multiple_of(256) => Some(SynapseSelection {
             synapse_source: SynapseSource::DequantizedQ6K,
             dequant_q6_k_synapse_tensor: Some(name.to_owned()),
-            ..empty_synapse_selection()
+            ..Default::default()
         }),
         // IQ3_M *block* dequant is only for the internal GGML_TYPE_IQ3_M_BLOCK id
         // (synthetic fixtures). Wire type 31 is Q4_0_4_4 in the GGUF enum — never
@@ -408,7 +443,7 @@ fn select_quantized_synapse(name: &str, info: &GgufTensorInfo) -> Option<Synapse
         GGML_TYPE_IQ3_M_BLOCK if d0.is_multiple_of(256) => Some(SynapseSelection {
             synapse_source: SynapseSource::DequantizedIQ3M,
             dequant_iq3_m_synapse_tensor: Some(name.to_owned()),
-            ..empty_synapse_selection()
+            ..Default::default()
         }),
         _ => None,
     }
@@ -440,7 +475,7 @@ fn select_gguf_synapse(
     SynapseSelection {
         synapse_source: SynapseSource::RoutingF32,
         routing_f32_synapse_tensor: Some(routing_tensor.to_owned()),
-        ..empty_synapse_selection()
+        ..Default::default()
     }
 }
 

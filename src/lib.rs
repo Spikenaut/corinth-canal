@@ -42,9 +42,9 @@
 //! `ggml_type` (never the filename); the first match wins:
 //!
 //! 1. real `F16` — requires a square `[hidden_size, hidden_size]` tensor
-//! 2. dequantized `Q8_0` — rows a multiple of 32
-//! 3. dequantized `Q5_K` — rows a multiple of 256
-//! 4. dequantized `Q6_K` — rows a multiple of 256
+//! 2. dequantized `Q8_0` — row width a multiple of 32
+//! 3. dequantized `Q5_K` — row width a multiple of 256
+//! 4. dequantized `Q6_K` — row width a multiple of 256
 //! 5. dequantized `IQ3_M` — internal block type only, not GGUF wire type 31
 //! 6. `routing-f32` — fallback when no preferred tensor matched
 //!
