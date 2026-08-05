@@ -1798,6 +1798,52 @@ fn test_adapter_resolve_token_embedding_zero_vocab() {
 }
 
 #[test]
+fn test_adapter_resolve_token_embedding_q8_0_misaligned_width() {
+    // A Q8_0 token embedding whose row width is not divisible by the 32-element
+    // block size should fail adapter resolution early.
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+    let hidden_size = 2064usize;
+    let vocab_size = 32usize;
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![hidden_size, vocab_size],
+                GGML_TYPE_Q8_0,
+                vec![0u8; hidden_size * vocab_size],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "token-embedding-q8-misaligned");
+    let (_metadata, mut mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    mapped.set_numeric_for_test("olmoe.embedding_length", Some(hidden_size as u64));
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn test_adapter_does_not_treat_wire_type_31_as_iq3_m() {
     // GGUF wire type 31 is Q4_0_4_4 — must fall through (usually routing-f32),
     // never DequantizedIQ3M (Codex).

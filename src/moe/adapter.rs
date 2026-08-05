@@ -78,10 +78,12 @@ fn is_token_embedding_supported(info: &GgufTensorInfo, hidden_size: usize) -> bo
     info.dims.len() == 2
         && info.dims[0] == hidden_size
         && info.dims[1] > 0
-        && matches!(
-            info.ggml_type,
-            GGML_TYPE_F32 | GGML_TYPE_F16 | GGML_TYPE_Q8_0 | GGML_TYPE_Q5_K | GGML_TYPE_Q6_K
-        )
+        && match info.ggml_type {
+            GGML_TYPE_F32 | GGML_TYPE_F16 => true,
+            GGML_TYPE_Q8_0 => info.dims[0].is_multiple_of(32),
+            GGML_TYPE_Q5_K | GGML_TYPE_Q6_K => info.dims[0].is_multiple_of(256),
+            _ => false,
+        }
 }
 
 fn resolve_token_embedding_tensor(
