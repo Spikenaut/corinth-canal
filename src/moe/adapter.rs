@@ -74,32 +74,38 @@ impl ModelAdapter {
     }
 }
 
-fn is_token_embedding_supported(info: &GgufTensorInfo) -> bool {
-    !info.dims.is_empty()
+fn is_token_embedding_supported(info: &GgufTensorInfo, hidden_size: usize) -> bool {
+    info.dims.len() == 2
+        && info.dims[0] == hidden_size
+        && info.dims[1] > 0
         && matches!(
             info.ggml_type,
             GGML_TYPE_F32 | GGML_TYPE_F16 | GGML_TYPE_Q8_0 | GGML_TYPE_Q5_K | GGML_TYPE_Q6_K
         )
 }
 
-fn resolve_token_embedding_tensor(checkpoint: &MappedGgufCheckpoint, path: &str) -> Result<String> {
+fn resolve_token_embedding_tensor(
+    checkpoint: &MappedGgufCheckpoint,
+    hidden_size: usize,
+    path: &str,
+) -> Result<String> {
     if checkpoint.has_tensor("token_embd.weight") {
         let info = checkpoint.tensor_info("token_embd.weight", path)?;
-        if is_token_embedding_supported(info) {
+        if is_token_embedding_supported(info, hidden_size) {
             return Ok("token_embd.weight".to_owned());
         }
         return Err(HybridError::UnsupportedFormat(format!(
-            "token embedding tensor 'token_embd.weight' in '{path}' has unsupported ggml_type={} dims={:?}",
+            "token embedding tensor 'token_embd.weight' in '{path}' has unsupported shape/type: ggml_type={} dims={:?} (expected [hidden_size={hidden_size}, vocab_size>0])",
             info.ggml_type, info.dims
         )));
     }
     if checkpoint.has_tensor("tok_embeddings.weight") {
         let info = checkpoint.tensor_info("tok_embeddings.weight", path)?;
-        if is_token_embedding_supported(info) {
+        if is_token_embedding_supported(info, hidden_size) {
             return Ok("tok_embeddings.weight".to_owned());
         }
         return Err(HybridError::UnsupportedFormat(format!(
-            "token embedding tensor 'tok_embeddings.weight' in '{path}' has unsupported ggml_type={} dims={:?}",
+            "token embedding tensor 'tok_embeddings.weight' in '{path}' has unsupported shape/type: ggml_type={} dims={:?} (expected [hidden_size={hidden_size}, vocab_size>0])",
             info.ggml_type, info.dims
         )));
     }
@@ -191,7 +197,8 @@ pub(super) fn resolve_adapter(
     let architecture = metadata.architecture().to_owned();
     let family = infer_family(&architecture, family_override, path)?;
     let topology = resolve_gguf_topology(metadata, &architecture, path)?;
-    let token_embedding_tensor = resolve_token_embedding_tensor(checkpoint, path)?;
+    let token_embedding_tensor =
+        resolve_token_embedding_tensor(checkpoint, topology.hidden_size, path)?;
 
     let routing_tensor = resolve_routing_tensor(checkpoint, topology.num_experts, path)?;
 

@@ -1675,6 +1675,129 @@ fn test_adapter_resolve_tok_embeddings_unsupported_type() {
 }
 
 #[test]
+fn test_adapter_resolve_token_embedding_invalid_rank() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "token-embedding-invalid-rank");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_adapter_resolve_token_embedding_mismatched_width() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM / 2, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM / 2 * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "token-embedding-mismatched-width");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn test_adapter_resolve_token_embedding_zero_vocab() {
+    let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![EMBEDDING_DIM, 64],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 0],
+                GGML_TYPE_F16,
+                vec![0u8; 0],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "token-embedding-zero-vocab");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn test_adapter_does_not_treat_wire_type_31_as_iq3_m() {
     // GGUF wire type 31 is Q4_0_4_4 — must fall through (usually routing-f32),
     // never DequantizedIQ3M (Codex).
