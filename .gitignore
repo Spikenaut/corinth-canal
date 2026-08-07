@@ -51,7 +51,6 @@ configs/safetensors_lineup.toml
 .dolt/
 *.db
 .beads-credential-key
-.cursor/
 
 # IDE/AI tool dirs
 .mimocode/
@@ -62,11 +61,15 @@ configs/safetensors_lineup.toml
 .zed/
 .ai/
 .junie/
-.claude/
+
+# Claude Code: the directory is tracked so cloud/web agents inherit CLAUDE.md
+# and the shared settings; per-machine permission grants stay local.
+.claude/settings.local.json
 
 # Agent skills & MCP servers
-.beads/
 .swarm/
 
 # Codacy results
 codacy-results.sarif
+# Regenerated locally by the Codacy CLI; deliberately dropped in 6e46895.
+.codacy/cli.sh
