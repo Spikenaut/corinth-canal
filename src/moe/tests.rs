@@ -2039,6 +2039,48 @@ fn test_adapter_resolve_routing_insufficient_experts() {
 }
 
 #[test]
+fn test_adapter_resolve_routing_invalid_orientation() {
+    // Routing tensor has enough experts but neither dimension equals hidden_size.
+    let gate_payload = vec![0u8; 64 * 128 * size_of::<f32>()];
+    let attn_q_payload = vec![0u8; 16];
+
+    let checkpoint = build_test_gguf(
+        vec![
+            (
+                "blk.0.ffn_gate_inp.weight",
+                vec![64, 128],
+                GGML_TYPE_F32,
+                gate_payload,
+            ),
+            (
+                "blk.0.attn_q.weight",
+                vec![EMBEDDING_DIM, EMBEDDING_DIM],
+                GGML_TYPE_IQ3_S,
+                attn_q_payload,
+            ),
+            (
+                "token_embd.weight",
+                vec![EMBEDDING_DIM, 32],
+                GGML_TYPE_F16,
+                vec![0u8; EMBEDDING_DIM * 32 * 2],
+            ),
+        ],
+        32,
+    );
+
+    let path = write_temp_file(&checkpoint, "routing-invalid-orientation");
+    let (_metadata, mapped) = probe_and_map_checkpoint(path.to_str().unwrap()).unwrap();
+    let result =
+        super::adapter::resolve_adapter(mapped.metadata(), &mapped, None, path.to_str().unwrap());
+
+    assert!(matches!(
+        result,
+        Err(HybridError::UnsupportedFormat(msg)) if msg.contains("unsupported orientation")
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn test_adapter_resolve_quantized_synapse_rank_not_two() {
     // attn_q is rank-1, so select_quantized_synapse should return None early.
     let gate_payload = vec![0u8; EMBEDDING_DIM * 64 * size_of::<f32>()];

@@ -119,6 +119,7 @@ fn resolve_token_embedding_tensor(
 
 fn resolve_routing_tensor(
     checkpoint: &MappedGgufCheckpoint,
+    hidden_size: usize,
     num_experts: usize,
     path: &str,
 ) -> Result<String> {
@@ -137,7 +138,14 @@ fn resolve_routing_tensor(
             routing_info.dims, routing_info.ggml_type
         )));
     }
-    let routing_experts = routing_info.dims[0].min(routing_info.dims[1]);
+    let (d0, d1) = (routing_info.dims[0], routing_info.dims[1]);
+    let has_hidden_size_dim = d0 == hidden_size || d1 == hidden_size;
+    if !has_hidden_size_dim {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "routing tensor '{routing_tensor}' in '{path}' has unsupported orientation dims={d0}x{d1}; expected one dimension to equal hidden_size={hidden_size} and the other to be at least {num_experts}"
+        )));
+    }
+    let routing_experts = if d0 == hidden_size { d1 } else { d0 };
     if routing_experts < num_experts {
         return Err(HybridError::UnsupportedFormat(format!(
             "routing tensor '{routing_tensor}' in '{path}' only exposes {routing_experts} experts, expected at least {num_experts}"
@@ -202,7 +210,8 @@ pub(super) fn resolve_adapter(
     let token_embedding_tensor =
         resolve_token_embedding_tensor(checkpoint, topology.hidden_size, path)?;
 
-    let routing_tensor = resolve_routing_tensor(checkpoint, topology.num_experts, path)?;
+    let routing_tensor =
+        resolve_routing_tensor(checkpoint, topology.hidden_size, topology.num_experts, path)?;
 
     let preferred_gpu_synapse_tensor = checkpoint
         .has_tensor("blk.0.attn_q.weight")
