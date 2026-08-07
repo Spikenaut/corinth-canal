@@ -117,6 +117,13 @@ fn resolve_token_embedding_tensor(
     })
 }
 
+/// Resolve the GGUF gate tensor name and reject shapes the runtime cannot index.
+///
+/// Gate scoring (`routing_weight_index`) requires one dimension to equal
+/// `hidden_size` (metadata `embedding_length`, matching the resampled embedding
+/// length in `Router::compute_gate_scores`) and the other to be ≥ `num_experts`.
+/// Do **not** relax this to `min(d0, d1) >= num_experts`: that previously
+/// accepted tensors that then failed on the first gate-score pass.
 fn resolve_routing_tensor(
     checkpoint: &MappedGgufCheckpoint,
     hidden_size: usize,
@@ -139,6 +146,7 @@ fn resolve_routing_tensor(
         )));
     }
     let (d0, d1) = (routing_info.dims[0], routing_info.dims[1]);
+    // Same orientation contract as `routing_weight_index` (routing.rs).
     let has_hidden_size_dim = d0 == hidden_size || d1 == hidden_size;
     if !has_hidden_size_dim {
         return Err(HybridError::UnsupportedFormat(format!(
