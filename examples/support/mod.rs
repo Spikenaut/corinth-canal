@@ -647,16 +647,32 @@ pub fn input_drive_gain_from_env() -> f32 {
     env_f32("INPUT_DRIVE_GAIN", 32.0)
 }
 
-/// Parse `ROUTING_MODE` into a [`RoutingMode`]. Returns `None` when the env
-/// var is unset *or* holds an unrecognised value, so callers keep the
-/// config-provided default in both cases.
+/// Parse `ROUTING_MODE` into a [`RoutingMode`].
+///
+/// - Unset → `None` (callers keep lineup / `ModelConfig` default).
+/// - Present and recognised → `Some(mode)`.
+/// - Present but unrecognised → `None` **with a stderr diagnostic**, so a typo
+///   is not silent (same soft-fallback style as unknown lineup `routing_mode`).
 ///
 /// Delegates to [`RoutingMode::from_alias`] so the env var and lineup-config
 /// entries accept exactly the same spellings. They diverged previously:
 /// this function accepted only `dense`/`stub`, so `ROUTING_MODE=dense_sim`
 /// was silently dropped and the config default won.
 pub fn routing_mode_override_from_env() -> Option<RoutingMode> {
-    RoutingMode::from_alias(&std::env::var("ROUTING_MODE").ok()?)
+    let Ok(raw) = std::env::var("ROUTING_MODE") else {
+        return None;
+    };
+    match RoutingMode::from_alias(&raw) {
+        Some(mode) => Some(mode),
+        None => {
+            eprintln!(
+                "ROUTING_MODE={raw:?} is not a recognised routing mode \
+                 (expected dense|dense_sim|stub|stub_uniform|spiking|spiking_sim); \
+                 using lineup/default"
+            );
+            None
+        }
+    }
 }
 
 fn slug_from_path(path: &str) -> String {

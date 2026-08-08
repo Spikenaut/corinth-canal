@@ -173,6 +173,13 @@ impl RoutingMode {
             _ => None,
         }
     }
+
+    /// Effective mode with operator precedence used by calibration runs:
+    /// `env_override` (`ROUTING_MODE`) > `lineup` (per-model TOML) > `default`
+    /// (`ModelConfig` / `default_spiking_model_config`).
+    pub fn resolve(env_override: Option<Self>, lineup: Option<Self>, default: Self) -> Self {
+        env_override.or(lineup).unwrap_or(default)
+    }
 }
 
 /// Output of one `Model::forward` pass.
@@ -389,5 +396,32 @@ mod tests {
                 "expected None for {value:?}"
             );
         }
+    }
+
+    #[test]
+    fn routing_mode_resolve_precedence_env_over_lineup_over_default() {
+        assert_eq!(
+            RoutingMode::resolve(
+                Some(RoutingMode::DenseSim),
+                Some(RoutingMode::StubUniform),
+                RoutingMode::SpikingSim,
+            ),
+            RoutingMode::DenseSim,
+            "env override must win over lineup"
+        );
+        assert_eq!(
+            RoutingMode::resolve(
+                None,
+                Some(RoutingMode::StubUniform),
+                RoutingMode::SpikingSim
+            ),
+            RoutingMode::StubUniform,
+            "lineup must win when env is unset"
+        );
+        assert_eq!(
+            RoutingMode::resolve(None, None, RoutingMode::SpikingSim),
+            RoutingMode::SpikingSim,
+            "default when both optional sources are absent"
+        );
     }
 }

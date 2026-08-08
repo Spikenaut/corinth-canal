@@ -236,11 +236,11 @@ fn run_validation(
     config.model_family = ctx.model_family_override.or(ctx.spec.family);
     config.gpu_routing_telemetry_path = Some(routing_csv_path.clone());
     // Precedence: ROUTING_MODE env > lineup routing_mode > ModelConfig default.
-    if let Some(rm) = ctx.routing_mode_override {
-        config.routing_mode = rm;
-    } else if let Some(rm) = ctx.spec.routing_mode {
-        config.routing_mode = rm;
-    }
+    config.routing_mode = corinth_canal::moe::RoutingMode::resolve(
+        ctx.routing_mode_override,
+        ctx.spec.routing_mode,
+        config.routing_mode,
+    );
     let saaq_rule = ctx.saaq_rule;
 
     let mut accelerator = GpuAccelerator::new();
