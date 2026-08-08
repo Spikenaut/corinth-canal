@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //! Model-family adapter resolution for the GGUF and Safetensors router host.
 
-use super::checkpoint::{GgufMetadata, MappedGgufCheckpoint};
+use super::checkpoint::{GgufMetadata, GgufTensorInfo, MappedGgufCheckpoint};
 use super::safetensors::{MappedSafetensorsCheckpoint, SafetensorsMetadata};
 use super::{
     GGML_TYPE_F16, GGML_TYPE_F32, GGML_TYPE_IQ3_M_BLOCK, GGML_TYPE_Q5_K, GGML_TYPE_Q6_K,
@@ -74,14 +74,106 @@ impl ModelAdapter {
     }
 }
 
-pub(super) fn resolve_adapter(
-    metadata: &GgufMetadata,
+fn is_token_embedding_supported(info: &GgufTensorInfo, hidden_size: usize) -> bool {
+    info.dims.len() == 2
+        && info.dims[0] == hidden_size
+        && info.dims[1] > 0
+        && match info.ggml_type {
+            GGML_TYPE_F32 | GGML_TYPE_F16 => true,
+            GGML_TYPE_Q8_0 => info.dims[0].is_multiple_of(32),
+            GGML_TYPE_Q5_K | GGML_TYPE_Q6_K => info.dims[0].is_multiple_of(256),
+            _ => false,
+        }
+}
+
+fn resolve_token_embedding_tensor(
     checkpoint: &MappedGgufCheckpoint,
-    family_override: Option<ModelFamily>,
+    hidden_size: usize,
     path: &str,
-) -> Result<ModelAdapter> {
-    let architecture = metadata.architecture().to_owned();
-    let family = infer_family(&architecture, family_override, path)?;
+) -> Result<String> {
+    if checkpoint.has_tensor("token_embd.weight") {
+        let info = checkpoint.tensor_info("token_embd.weight", path)?;
+        if is_token_embedding_supported(info, hidden_size) {
+            return Ok("token_embd.weight".to_owned());
+        }
+        return Err(HybridError::UnsupportedFormat(format!(
+            "token embedding tensor 'token_embd.weight' in '{path}' has unsupported shape/type: ggml_type={} dims={:?} (expected [hidden_size={hidden_size}, vocab_size>0])",
+            info.ggml_type, info.dims
+        )));
+    }
+    if checkpoint.has_tensor("tok_embeddings.weight") {
+        let info = checkpoint.tensor_info("tok_embeddings.weight", path)?;
+        if is_token_embedding_supported(info, hidden_size) {
+            return Ok("tok_embeddings.weight".to_owned());
+        }
+        return Err(HybridError::UnsupportedFormat(format!(
+            "token embedding tensor 'tok_embeddings.weight' in '{path}' has unsupported shape/type: ggml_type={} dims={:?} (expected [hidden_size={hidden_size}, vocab_size>0])",
+            info.ggml_type, info.dims
+        )));
+    }
+    Err(HybridError::MissingTensor {
+        name: "token_embd.weight".into(),
+        path: path.to_owned(),
+    })
+}
+
+/// Resolve the GGUF gate tensor name and reject shapes the runtime cannot index.
+///
+/// Gate scoring (`routing_weight_index`) requires one dimension to equal
+/// `hidden_size` (metadata `embedding_length`, matching the resampled embedding
+/// length in `Router::compute_gate_scores`) and the other to be ≥ `num_experts`.
+/// Do **not** relax this to `min(d0, d1) >= num_experts`: that previously
+/// accepted tensors that then failed on the first gate-score pass.
+fn resolve_routing_tensor(
+    checkpoint: &MappedGgufCheckpoint,
+    hidden_size: usize,
+    num_experts: usize,
+    path: &str,
+) -> Result<String> {
+    let routing_tensor = checkpoint
+        .find_first_tensor_with_suffix("ffn_gate_inp.weight")
+        .or_else(|| checkpoint.find_first_tensor_with_suffix("ffn_gate.weight"))
+        .ok_or_else(|| HybridError::MissingTensor {
+            name: "ffn_gate_inp.weight".into(),
+            path: path.to_owned(),
+        })?
+        .to_owned();
+    let routing_info = checkpoint.tensor_info(&routing_tensor, path)?;
+    if routing_info.ggml_type != GGML_TYPE_F32 || routing_info.dims.len() != 2 {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "routing tensor '{routing_tensor}' must be rank-2 F32 in '{path}', got dims={:?} ggml_type={}",
+            routing_info.dims, routing_info.ggml_type
+        )));
+    }
+    let (d0, d1) = (routing_info.dims[0], routing_info.dims[1]);
+    // Same orientation contract as `routing_weight_index` (routing.rs).
+    let has_hidden_size_dim = d0 == hidden_size || d1 == hidden_size;
+    if !has_hidden_size_dim {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "routing tensor '{routing_tensor}' in '{path}' has unsupported orientation dims={d0}x{d1}; expected one dimension to equal hidden_size={hidden_size} and the other to be at least {num_experts}"
+        )));
+    }
+    let routing_experts = if d0 == hidden_size { d1 } else { d0 };
+    if routing_experts < num_experts {
+        return Err(HybridError::UnsupportedFormat(format!(
+            "routing tensor '{routing_tensor}' in '{path}' only exposes {routing_experts} experts, expected at least {num_experts}"
+        )));
+    }
+    Ok(routing_tensor)
+}
+
+struct GgufTopology {
+    hidden_size: usize,
+    num_layers: usize,
+    num_experts: usize,
+    expert_used_count: usize,
+}
+
+fn resolve_gguf_topology(
+    metadata: &GgufMetadata,
+    architecture: &str,
+    path: &str,
+) -> Result<GgufTopology> {
     let hidden_size = metadata
         .numeric(&format!("{architecture}.embedding_length"))
         .ok_or_else(|| {
@@ -106,145 +198,57 @@ pub(super) fn resolve_adapter(
     let expert_used_count = metadata
         .numeric(&format!("{architecture}.expert_used_count"))
         .unwrap_or(1);
-    let token_embedding_tensor = if checkpoint.has_tensor("token_embd.weight") {
-        "token_embd.weight".to_owned()
-    } else if checkpoint.has_tensor("tok_embeddings.weight") {
-        "tok_embeddings.weight".to_owned()
-    } else {
-        return Err(HybridError::MissingTensor {
-            name: "token_embd.weight".into(),
-            path: path.to_owned(),
-        });
-    };
-
-    let routing_tensor = checkpoint
-        .find_first_tensor_with_suffix("ffn_gate_inp.weight")
-        .or_else(|| checkpoint.find_first_tensor_with_suffix("ffn_gate.weight"))
-        .ok_or_else(|| HybridError::MissingTensor {
-            name: "ffn_gate_inp.weight".into(),
-            path: path.to_owned(),
-        })?
-        .to_owned();
-    let routing_info = checkpoint.tensor_info(&routing_tensor, path)?;
-    if routing_info.ggml_type != GGML_TYPE_F32 || routing_info.dims.len() != 2 {
-        return Err(HybridError::UnsupportedFormat(format!(
-            "routing tensor '{routing_tensor}' must be rank-2 F32 in '{path}', got dims={:?} ggml_type={}",
-            routing_info.dims, routing_info.ggml_type
-        )));
-    }
-    let routing_experts = routing_info.dims[0].min(routing_info.dims[1]);
-    if routing_experts < num_experts {
-        return Err(HybridError::UnsupportedFormat(format!(
-            "routing tensor '{routing_tensor}' in '{path}' only exposes {routing_experts} experts, expected at least {num_experts}"
-        )));
-    }
-
-    let preferred_gpu_synapse_tensor = checkpoint
-        .has_tensor("blk.0.attn_q.weight")
-        .then(|| "blk.0.attn_q.weight".to_owned());
-    let real_gpu_synapse_tensor = preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-        let info = checkpoint.tensor_info(name, path).ok()?;
-        (info.ggml_type == GGML_TYPE_F16 && info.dims == [hidden_size, hidden_size])
-            .then(|| name.clone())
-    });
-    let dequant_q8_0_synapse_tensor = if real_gpu_synapse_tensor.is_none() {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q8_0 && info.dims.len() == 2 && info.dims[0] % 32 == 0)
-                .then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    let dequant_q5_k_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-    {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q5_K && info.dims.len() == 2 && info.dims[0] % 256 == 0)
-                .then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    let dequant_q6_k_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-        && dequant_q5_k_synapse_tensor.is_none()
-    {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_Q6_K && info.dims.len() == 2 && info.dims[0] % 256 == 0)
-                .then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    // IQ3_M *block* dequant is only for the internal GGML_TYPE_IQ3_M_BLOCK id
-    // (synthetic fixtures). Wire type 31 is Q4_0_4_4 in the GGUF enum — never
-    // select it here (Codex). HF “IQ3_M” GGUFs are mixed-type presets.
-    let dequant_iq3_m_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-        && dequant_q5_k_synapse_tensor.is_none()
-        && dequant_q6_k_synapse_tensor.is_none()
-    {
-        preferred_gpu_synapse_tensor.as_ref().and_then(|name| {
-            let info = checkpoint.tensor_info(name, path).ok()?;
-            (info.ggml_type == GGML_TYPE_IQ3_M_BLOCK
-                && info.dims.len() == 2
-                && info.dims[0].is_multiple_of(256))
-            .then(|| name.clone())
-        })
-    } else {
-        None
-    };
-
-    let routing_f32_synapse_tensor = if real_gpu_synapse_tensor.is_none()
-        && dequant_q8_0_synapse_tensor.is_none()
-        && dequant_q5_k_synapse_tensor.is_none()
-        && dequant_q6_k_synapse_tensor.is_none()
-        && dequant_iq3_m_synapse_tensor.is_none()
-    {
-        Some(routing_tensor.clone())
-    } else {
-        None
-    };
-
-    let synapse_source = if real_gpu_synapse_tensor.is_some() {
-        SynapseSource::Real
-    } else if dequant_q8_0_synapse_tensor.is_some() {
-        SynapseSource::DequantizedQ8_0
-    } else if dequant_q5_k_synapse_tensor.is_some() {
-        SynapseSource::DequantizedQ5K
-    } else if dequant_q6_k_synapse_tensor.is_some() {
-        SynapseSource::DequantizedQ6K
-    } else if dequant_iq3_m_synapse_tensor.is_some() {
-        SynapseSource::DequantizedIQ3M
-    } else if routing_f32_synapse_tensor.is_some() {
-        SynapseSource::RoutingF32
-    } else {
-        SynapseSource::SyntheticFallback
-    };
-
-    Ok(ModelAdapter {
-        family,
-        architecture,
+    Ok(GgufTopology {
         hidden_size,
         num_layers,
         num_experts,
         expert_used_count,
+    })
+}
+
+pub(super) fn resolve_adapter(
+    metadata: &GgufMetadata,
+    checkpoint: &MappedGgufCheckpoint,
+    family_override: Option<ModelFamily>,
+    path: &str,
+) -> Result<ModelAdapter> {
+    let architecture = metadata.architecture().to_owned();
+    let family = infer_family(&architecture, family_override, path)?;
+    let topology = resolve_gguf_topology(metadata, &architecture, path)?;
+    let token_embedding_tensor =
+        resolve_token_embedding_tensor(checkpoint, topology.hidden_size, path)?;
+
+    let routing_tensor =
+        resolve_routing_tensor(checkpoint, topology.hidden_size, topology.num_experts, path)?;
+
+    let preferred_gpu_synapse_tensor = checkpoint
+        .has_tensor("blk.0.attn_q.weight")
+        .then(|| "blk.0.attn_q.weight".to_owned());
+    let selection = select_gguf_synapse(
+        preferred_gpu_synapse_tensor.as_deref(),
+        &routing_tensor,
+        checkpoint,
+        topology.hidden_size,
+        path,
+    );
+
+    Ok(ModelAdapter {
+        family,
+        architecture,
+        hidden_size: topology.hidden_size,
+        num_layers: topology.num_layers,
+        num_experts: topology.num_experts,
+        expert_used_count: topology.expert_used_count,
         token_embedding_tensor,
         routing_tensor,
         preferred_gpu_synapse_tensor,
-        synapse_source,
-        real_gpu_synapse_tensor,
-        dequant_q8_0_synapse_tensor,
-        dequant_q5_k_synapse_tensor,
-        dequant_q6_k_synapse_tensor,
-        dequant_iq3_m_synapse_tensor,
-        routing_f32_synapse_tensor,
+        synapse_source: selection.synapse_source,
+        real_gpu_synapse_tensor: selection.real_gpu_synapse_tensor,
+        dequant_q8_0_synapse_tensor: selection.dequant_q8_0_synapse_tensor,
+        dequant_q5_k_synapse_tensor: selection.dequant_q5_k_synapse_tensor,
+        dequant_q6_k_synapse_tensor: selection.dequant_q6_k_synapse_tensor,
+        dequant_iq3_m_synapse_tensor: selection.dequant_iq3_m_synapse_tensor,
+        routing_f32_synapse_tensor: selection.routing_f32_synapse_tensor,
         dequant_int4_synapse_tensor: None,
         quantization: metadata.quantization().to_owned(),
     })
@@ -395,6 +399,110 @@ fn resolve_safetensors_token_embedding(
         name: "model.embed_tokens.weight".to_owned(),
         path: path.to_owned(),
     })
+}
+
+/// Priority-ordered GGUF synapse source selection.
+///
+/// First matching candidate wins; all lower-priority Option fields stay `None`.
+struct SynapseSelection {
+    synapse_source: SynapseSource,
+    real_gpu_synapse_tensor: Option<String>,
+    dequant_q8_0_synapse_tensor: Option<String>,
+    dequant_q5_k_synapse_tensor: Option<String>,
+    dequant_q6_k_synapse_tensor: Option<String>,
+    dequant_iq3_m_synapse_tensor: Option<String>,
+    routing_f32_synapse_tensor: Option<String>,
+}
+
+impl Default for SynapseSelection {
+    fn default() -> Self {
+        Self {
+            synapse_source: SynapseSource::RoutingF32,
+            real_gpu_synapse_tensor: None,
+            dequant_q8_0_synapse_tensor: None,
+            dequant_q5_k_synapse_tensor: None,
+            dequant_q6_k_synapse_tensor: None,
+            dequant_iq3_m_synapse_tensor: None,
+            routing_f32_synapse_tensor: None,
+        }
+    }
+}
+
+fn select_real_synapse(
+    name: &str,
+    info: &GgufTensorInfo,
+    hidden_size: usize,
+) -> Option<SynapseSelection> {
+    (info.ggml_type == GGML_TYPE_F16 && info.dims == [hidden_size, hidden_size]).then(|| {
+        SynapseSelection {
+            synapse_source: SynapseSource::Real,
+            real_gpu_synapse_tensor: Some(name.to_owned()),
+            ..Default::default()
+        }
+    })
+}
+
+fn select_quantized_synapse(name: &str, info: &GgufTensorInfo) -> Option<SynapseSelection> {
+    if info.dims.len() != 2 {
+        return None;
+    }
+    let d0 = info.dims[0];
+    match info.ggml_type {
+        GGML_TYPE_Q8_0 if d0.is_multiple_of(32) => Some(SynapseSelection {
+            synapse_source: SynapseSource::DequantizedQ8_0,
+            dequant_q8_0_synapse_tensor: Some(name.to_owned()),
+            ..Default::default()
+        }),
+        GGML_TYPE_Q5_K if d0.is_multiple_of(256) => Some(SynapseSelection {
+            synapse_source: SynapseSource::DequantizedQ5K,
+            dequant_q5_k_synapse_tensor: Some(name.to_owned()),
+            ..Default::default()
+        }),
+        GGML_TYPE_Q6_K if d0.is_multiple_of(256) => Some(SynapseSelection {
+            synapse_source: SynapseSource::DequantizedQ6K,
+            dequant_q6_k_synapse_tensor: Some(name.to_owned()),
+            ..Default::default()
+        }),
+        // IQ3_M *block* dequant is only for the internal GGML_TYPE_IQ3_M_BLOCK id
+        // (synthetic fixtures). Wire type 31 is Q4_0_4_4 in the GGUF enum — never
+        // select it here (Codex). HF “IQ3_M” GGUFs are mixed-type presets.
+        GGML_TYPE_IQ3_M_BLOCK if d0.is_multiple_of(256) => Some(SynapseSelection {
+            synapse_source: SynapseSource::DequantizedIQ3M,
+            dequant_iq3_m_synapse_tensor: Some(name.to_owned()),
+            ..Default::default()
+        }),
+        _ => None,
+    }
+}
+
+fn select_preferred_synapse(
+    name: &str,
+    info: &GgufTensorInfo,
+    hidden_size: usize,
+) -> Option<SynapseSelection> {
+    select_real_synapse(name, info, hidden_size).or_else(|| select_quantized_synapse(name, info))
+}
+
+fn select_gguf_synapse(
+    preferred: Option<&str>,
+    routing_tensor: &str,
+    checkpoint: &MappedGgufCheckpoint,
+    hidden_size: usize,
+    path: &str,
+) -> SynapseSelection {
+    if let Some(name) = preferred
+        && let Ok(info) = checkpoint.tensor_info(name, path)
+        && let Some(selection) = select_preferred_synapse(name, info, hidden_size)
+    {
+        return selection;
+    }
+
+    // RoutingF32 fallback: reached when no preferred tensor is present or none matched a dequant path.
+    SynapseSelection {
+        synapse_source: SynapseSource::RoutingF32,
+        routing_f32_synapse_tensor: Some(routing_tensor.to_owned()),
+        ..Default::default()
+    }
 }
 
 pub(super) fn resolve_safetensors_adapter(

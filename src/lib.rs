@@ -36,15 +36,26 @@
 //! The routing bridge is GGUF-backed and custom to this repository.
 //! `Router` parses GGUF checkpoints in-repo, resolves a supported model
 //! family, extracts routing tensors and token embeddings, and selects a GPU
-//! synapse source from one of:
+//! synapse source.
 //!
-//! - real `F16`
-//! - dequantized `Q8_0`
-//! - dequantized `Q5_K`
-//! - synthetic fallback
+//! Selection is priority-ordered over the *preferred* tensor's actual
+//! `ggml_type` (never the filename); the first match wins:
 //!
-//! Supported families in code today are `Olmoe`, `Qwen3Moe`, `Gemma4`,
-//! `DeepSeek2`, and `LlamaMoe`.
+//! 1. real `F16` — requires a square `[hidden_size, hidden_size]` tensor
+//! 2. dequantized `Q8_0` — row width a multiple of 32
+//! 3. dequantized `Q5_K` — row width a multiple of 256
+//! 4. dequantized `Q6_K` — row width a multiple of 256
+//! 5. dequantized `IQ3_M` — internal block type only, not GGUF wire type 31
+//! 6. `routing-f32` — fallback when no preferred tensor matched
+//!
+//! `SynapseSource::SyntheticFallback` is therefore unreachable on the GGUF
+//! path: step 6 also covers the "no preferred tensor at all" case. It remains
+//! reachable for the Safetensors backend, which additionally has
+//! `dequantized-int4`.
+//!
+//! Model families are enumerated by the `ModelFamily` enum in `types.rs`
+//! (21 variants as of this writing) — consult the enum rather than any prose
+//! list.
 //!
 //! ## Quick start
 //!
