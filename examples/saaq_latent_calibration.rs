@@ -87,6 +87,9 @@ struct RunContext<'a> {
     run_id: String,
     output_root: PathBuf,
     model_family_override: Option<corinth_canal::ModelFamily>,
+    /// `ROUTING_MODE` env override from `RunConfig`. When set, wins over
+    /// lineup `routing_mode` so archived manifests match the operator intent.
+    routing_mode_override: Option<corinth_canal::moe::RoutingMode>,
     saaq_rule: SaaqUpdateRule,
     /// Already-sanitized run tag (or `None`). Sanitization is performed
     /// once in `main()` so manifest/summary/run_id all see the same value.
@@ -165,6 +168,7 @@ fn run_main(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>
                         run_id,
                         output_root: cfg.output_root.clone(),
                         model_family_override: cfg.model_family_override,
+                        routing_mode_override: cfg.routing_mode_override,
                         saaq_rule: cfg.saaq_rule,
                         run_tag: run_tag_ref,
                     };
@@ -231,10 +235,12 @@ fn run_validation(
     let mut config = default_spiking_model_config(ctx.spec.path.clone(), 1);
     config.model_family = ctx.model_family_override.or(ctx.spec.family);
     config.gpu_routing_telemetry_path = Some(routing_csv_path.clone());
-    // Per-model routing mode override from lineup config (Stage-campaign).
-    if let Some(rm) = ctx.spec.routing_mode {
-        config.routing_mode = rm;
-    }
+    // Precedence: ROUTING_MODE env > lineup routing_mode > ModelConfig default.
+    config.routing_mode = corinth_canal::moe::RoutingMode::resolve(
+        ctx.routing_mode_override,
+        ctx.spec.routing_mode,
+        config.routing_mode,
+    );
     let saaq_rule = ctx.saaq_rule;
 
     let mut accelerator = GpuAccelerator::new();

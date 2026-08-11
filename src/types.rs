@@ -154,6 +154,34 @@ pub enum RoutingMode {
     SpikingSim,
 }
 
+impl RoutingMode {
+    /// Canonical spelling table for human-authored `RoutingMode` values.
+    ///
+    /// This is the single source of truth for both the `ROUTING_MODE`
+    /// environment variable and lineup-config `routing_mode` entries, which
+    /// previously had separate hand-rolled tables that drifted apart. Input
+    /// is trimmed and matched case-insensitively.
+    ///
+    /// Returns `None` for unrecognised values so callers can treat that as a
+    /// soft validation error and keep their configured default, rather than
+    /// aborting a sweep.
+    pub fn from_alias(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "dense" | "dense_sim" => Some(Self::DenseSim),
+            "stub" | "stub_uniform" => Some(Self::StubUniform),
+            "spiking" | "spiking_sim" => Some(Self::SpikingSim),
+            _ => None,
+        }
+    }
+
+    /// Effective mode with operator precedence used by calibration runs:
+    /// `env_override` (`ROUTING_MODE`) > `lineup` (per-model TOML) > `default`
+    /// (`ModelConfig` / `default_spiking_model_config`).
+    pub fn resolve(env_override: Option<Self>, lineup: Option<Self>, default: Self) -> Self {
+        env_override.or(lineup).unwrap_or(default)
+    }
+}
+
 /// Output of one `Model::forward` pass.
 #[derive(Debug, Clone)]
 pub struct ModelOutput {
@@ -230,7 +258,7 @@ impl CloudModelSpec {
 
 #[cfg(test)]
 mod tests {
-    use super::{CloudModelSpec, ModelArchitectureClass, ModelFamily, ModelTarget};
+    use super::{CloudModelSpec, ModelArchitectureClass, ModelFamily, ModelTarget, RoutingMode};
 
     #[test]
     fn model_family_slug_covers_new_variants() {
@@ -325,5 +353,75 @@ mod tests {
         .expect("required_env_vars should default to empty vec for download-on-GPU models");
 
         assert!(spec.required_env_vars.is_empty());
+    }
+
+    /// Contract for both the `ROUTING_MODE` env var and lineup-config
+    /// `routing_mode` entries. These had separate hand-rolled tables that
+    /// drifted: the env path accepted only `dense`/`stub`, so
+    /// `ROUTING_MODE=dense_sim` was silently dropped and the config default
+    /// won — a sweep could report a routing mode it had not actually run in.
+    #[test]
+    fn routing_mode_from_alias_accepts_every_documented_spelling() {
+        for value in ["dense", "dense_sim", "DENSE_SIM", " dense_sim "] {
+            assert_eq!(
+                RoutingMode::from_alias(value),
+                Some(RoutingMode::DenseSim),
+                "expected DenseSim for {value:?}"
+            );
+        }
+        for value in ["stub", "stub_uniform", "STUB_UNIFORM", " stub "] {
+            assert_eq!(
+                RoutingMode::from_alias(value),
+                Some(RoutingMode::StubUniform),
+                "expected StubUniform for {value:?}"
+            );
+        }
+        for value in ["spiking", "spiking_sim", "Spiking_Sim", " spiking "] {
+            assert_eq!(
+                RoutingMode::from_alias(value),
+                Some(RoutingMode::SpikingSim),
+                "expected SpikingSim for {value:?}"
+            );
+        }
+    }
+
+    /// Unknown values stay `None` so callers keep their configured default
+    /// instead of aborting a sweep.
+    #[test]
+    fn routing_mode_from_alias_rejects_unknown_values() {
+        for value in ["", "densesim", "uniform", "spike", "dense-sim"] {
+            assert_eq!(
+                RoutingMode::from_alias(value),
+                None,
+                "expected None for {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn routing_mode_resolve_precedence_env_over_lineup_over_default() {
+        assert_eq!(
+            RoutingMode::resolve(
+                Some(RoutingMode::DenseSim),
+                Some(RoutingMode::StubUniform),
+                RoutingMode::SpikingSim,
+            ),
+            RoutingMode::DenseSim,
+            "env override must win over lineup"
+        );
+        assert_eq!(
+            RoutingMode::resolve(
+                None,
+                Some(RoutingMode::StubUniform),
+                RoutingMode::SpikingSim
+            ),
+            RoutingMode::StubUniform,
+            "lineup must win when env is unset"
+        );
+        assert_eq!(
+            RoutingMode::resolve(None, None, RoutingMode::SpikingSim),
+            RoutingMode::SpikingSim,
+            "default when both optional sources are absent"
+        );
     }
 }
