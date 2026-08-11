@@ -1,6 +1,6 @@
 [package]
 name = "corinth-canal"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Reference SNN-logic quantization bridge for the rmems modular line"
 repository = "https://github.com/rmems/corinth-canal"
