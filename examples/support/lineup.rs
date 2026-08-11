@@ -4,31 +4,7 @@ use std::path::{Path, PathBuf};
 use corinth_canal::{CloudModelSpec, ModelArchitectureClass, ModelFamily, ModelTarget};
 
 fn parse_family_slug(value: &str) -> Option<ModelFamily> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "olmoe" => Some(ModelFamily::Olmoe),
-        "qwen3moe" | "qwen3_moe" | "qwen" => Some(ModelFamily::Qwen3Moe),
-        "gemma4" | "gemma_4" | "gemma" => Some(ModelFamily::Gemma4),
-        "deepseek2" | "deepseek_v2" | "deepseek" => Some(ModelFamily::DeepSeek2),
-        "llama" | "llama_moe" | "llama3_moe" => Some(ModelFamily::LlamaMoe),
-        "moonlight" | "moonlight_moe" | "moonlight_16b_a3b" => Some(ModelFamily::Moonlight16BA3B),
-        "granite" | "granite_3_1" | "granite_3_1_a800m" | "granite31a800m" => {
-            Some(ModelFamily::Granite31A800M)
-        }
-        "nemotron" | "nemotron_3_nano_4b" | "nemotron3nano4b" => Some(ModelFamily::Nemotron),
-        "lfm2" | "lfm2_moe" | "lfm2moe" => Some(ModelFamily::Lfm2Moe),
-        "slim_moe" | "slimmoe" | "phi_moe" | "phimoe" => Some(ModelFamily::SlimMoe),
-        "zaya" | "zaya1" | "zaya1_8b" => Some(ModelFamily::Zaya),
-        "glm4" | "glm_4" | "glm4moe" | "glm" => Some(ModelFamily::Glm4),
-        "gpt_oss" | "gptoss" => Some(ModelFamily::GptOss),
-        "step" | "step3" | "step_3_5" => Some(ModelFamily::Step),
-        "minimax" | "minimax_m2" => Some(ModelFamily::MiniMax),
-        "cohere" | "command_a" => Some(ModelFamily::Cohere),
-        "grin" | "grin_moe" => Some(ModelFamily::Grin),
-        "skyworks" | "skywork" => Some(ModelFamily::Skyworks),
-        "trinity" | "trinity_nano" => Some(ModelFamily::Trinity),
-        "grok" | "grok_1" | "grok_2" => Some(ModelFamily::Grok),
-        _ => None,
-    }
+    ModelFamily::from_alias(value)
 }
 
 /// Parse a `configs/saaq15_cloud_lineup.toml` file and return every entry.

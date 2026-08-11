@@ -2,14 +2,25 @@
 //! Shared helper functions for the example binaries.
 
 pub mod config;
+pub mod embedding;
 pub mod lineup;
 pub mod observability;
+pub mod telemetry_csv;
 
 #[cfg(feature = "cuda")]
 pub use config::RunConfig;
+pub use embedding::{PromptEmbeddingProvider, resolve_prompt_embedding_provider};
 pub use lineup::{
     cloud_execution_guard, cloud_lineup_path_from_env, load_cloud_lineup, load_safetensors_lineup,
     safetensors_lineup_path_from_env,
+};
+// Re-exports for example binaries; each binary only uses a subset, so the
+// unused_imports lint would fire without this allow.
+#[allow(unused_imports)]
+pub use telemetry_csv::{
+    ResolvedTelemetry, TelemetrySource, load_csv_telemetry_rows, resolve_telemetry_source,
+    synthetic_base_snapshot, telemetry_csv_path_from_env, telemetry_snapshot_for_tick,
+    telemetry_source_from_env,
 };
 
 use corinth_canal::{ModelFamily, SaaqUpdateRule, moe::Router, moe::RoutingMode};
@@ -100,34 +111,9 @@ pub fn model_family_override_from_env() -> Option<ModelFamily> {
 }
 
 /// Shared family-slug parser used by `MODEL_FAMILY` and by lineup-config
-/// `family = "..."` entries. Case-insensitive; returns `None` for unknown
-/// slugs so callers can treat that as a soft validation error.
+/// `family = "..."` entries. Thin wrapper over [`ModelFamily::from_alias`].
 pub fn parse_family_slug(value: &str) -> Option<ModelFamily> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "olmoe" => Some(ModelFamily::Olmoe),
-        "qwen3moe" | "qwen3_moe" | "qwen" => Some(ModelFamily::Qwen3Moe),
-        "gemma4" | "gemma_4" | "gemma" => Some(ModelFamily::Gemma4),
-        "deepseek2" | "deepseek_v2" | "deepseek" => Some(ModelFamily::DeepSeek2),
-        "llama" | "llama_moe" | "llama3_moe" => Some(ModelFamily::LlamaMoe),
-        "moonlight" | "moonlight_moe" | "moonlight_16b_a3b" => Some(ModelFamily::Moonlight16BA3B),
-        "granite" | "granite_3_1" | "granite_3_1_a800m" | "granite31a800m" => {
-            Some(ModelFamily::Granite31A800M)
-        }
-        "nemotron" | "nemotron_3_nano_4b" | "nemotron3nano4b" => Some(ModelFamily::Nemotron),
-        "lfm2" | "lfm2_moe" | "lfm2moe" => Some(ModelFamily::Lfm2Moe),
-        "slim_moe" | "slimmoe" | "phi_moe" | "phimoe" => Some(ModelFamily::SlimMoe),
-        "zaya" | "zaya1" | "zaya1_8b" => Some(ModelFamily::Zaya),
-        "glm4" | "glm_4" | "glm4moe" | "glm" => Some(ModelFamily::Glm4),
-        "gpt_oss" | "gptoss" => Some(ModelFamily::GptOss),
-        "step" | "step3" | "step_3_5" => Some(ModelFamily::Step),
-        "minimax" | "minimax_m2" => Some(ModelFamily::MiniMax),
-        "cohere" | "command_a" => Some(ModelFamily::Cohere),
-        "grin" | "grin_moe" => Some(ModelFamily::Grin),
-        "skyworks" | "skywork" => Some(ModelFamily::Skyworks),
-        "trinity" | "trinity_nano" => Some(ModelFamily::Trinity),
-        "grok" | "grok_1" | "grok_2" => Some(ModelFamily::Grok),
-        _ => None,
-    }
+    ModelFamily::from_alias(value)
 }
 
 /// Parse a lineup-config `routing_mode` entry.
@@ -147,24 +133,6 @@ pub fn saaq_update_rule_from_env() -> SaaqUpdateRule {
     {
         "legacy" | "legacy_v1_0" | "v1_0" | "saaq_v1_0" => SaaqUpdateRule::LegacyV1_0,
         _ => SaaqUpdateRule::SaaqV1_5SqrtRate,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptEmbeddingProvider {
-    Ollama,
-    SyntheticFallback,
-}
-
-fn resolve_prompt_embedding_provider(value: Option<&str>) -> PromptEmbeddingProvider {
-    match value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase())
-        .as_deref()
-    {
-        None | Some("ollama") => PromptEmbeddingProvider::Ollama,
-        _ => PromptEmbeddingProvider::SyntheticFallback,
     }
 }
 
@@ -380,259 +348,6 @@ pub fn repeat_count_from_env() -> usize {
     env_usize("REPEAT_COUNT", 1).max(1)
 }
 
-/// Source of per-tick telemetry snapshots feeding the validation runner.
-///
-/// Default is [`TelemetrySource::Synthetic`] so a fresh clone never silently
-/// depends on a machine-specific CSV path. CSV replay is opt-in via
-/// `TELEMETRY_SOURCE=csv` for RE4/Cyberpunk corpus generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TelemetrySource {
-    Synthetic,
-    Csv,
-}
-
-/// Telemetry state resolved once per process and reused by every tick.
-///
-/// `source_label` is what lands in the directory path and manifest: one of
-/// `synthetic`, `synthetic_fallback`, or `csv_<stem>` (e.g. `csv_re4` for
-/// `telemetry.csv`). `rows` is only populated on a successful CSV load.
-#[derive(Debug, Clone)]
-pub struct ResolvedTelemetry {
-    pub source: TelemetrySource,
-    pub source_label: String,
-    pub csv_path: Option<PathBuf>,
-    pub rows: Option<Vec<corinth_canal::TelemetrySnapshot>>,
-}
-
-impl ResolvedTelemetry {
-    #[cfg(feature = "cuda")]
-    pub fn row_count(&self) -> Option<usize> {
-        self.rows.as_ref().map(|rows| rows.len())
-    }
-}
-
-pub fn telemetry_source_from_env() -> TelemetrySource {
-    match std::env::var("TELEMETRY_SOURCE")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .trim()
-    {
-        "csv" => TelemetrySource::Csv,
-        // Empty string and any unrecognised value fall back to Synthetic
-        // contributors never get surprised by a missing CSV path.
-        _ => TelemetrySource::Synthetic,
-    }
-}
-
-pub fn telemetry_csv_path_from_env() -> PathBuf {
-    if let Ok(value) = std::env::var("TELEMETRY_CSV_PATH") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    // Fallback to a repo-relative placeholder or just a generic name.
-    // The runner will handle the "file not found" case by falling back
-    // to synthetic telemetry.
-    PathBuf::from("telemetry.csv")
-}
-
-const TELEMETRY_CSV_HEADER: &str =
-    "timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w";
-
-/// Parse a canonical telemetry CSV exported by `gaming-telemetry` into a
-/// vector of [`corinth_canal::TelemetrySnapshot`] ready for replay.
-///
-/// Fails fast on header mismatch; silently skips malformed data rows (counted
-/// in the returned log line via stderr) so a few dropped samples don't abort
-/// a 2000-row sweep.
-pub fn load_csv_telemetry_rows(
-    path: &Path,
-) -> Result<Vec<corinth_canal::TelemetrySnapshot>, Box<dyn std::error::Error>> {
-    let contents = std::fs::read_to_string(path).map_err(|error| {
-        Error::other(format!(
-            "telemetry CSV '{}' could not be read: {error}",
-            path.display()
-        ))
-    })?;
-
-    let mut lines = contents.lines();
-    let header = lines
-        .next()
-        .ok_or_else(|| Error::other(format!("telemetry CSV '{}' is empty", path.display())))?
-        .trim();
-    if header != TELEMETRY_CSV_HEADER {
-        return Err(Error::other(format!(
-            "telemetry CSV '{}' header mismatch: expected '{TELEMETRY_CSV_HEADER}', got '{header}'",
-            path.display()
-        ))
-        .into());
-    }
-
-    let mut rows = Vec::new();
-    let mut skipped = 0usize;
-    for (idx, raw_line) in lines.enumerate() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let fields: Vec<&str> = line.split(',').collect();
-        if fields.len() != 5 {
-            skipped += 1;
-            continue;
-        }
-        let parsed = (
-            fields[0].parse::<u64>().ok(),
-            parse_finite_f32(fields[1]),
-            parse_finite_f32(fields[2]),
-            parse_finite_f32(fields[3]),
-            parse_finite_f32(fields[4]),
-        );
-        let (
-            Some(timestamp_ms),
-            Some(gpu_temp_c),
-            Some(gpu_power_w),
-            Some(cpu_tctl_c),
-            Some(cpu_package_power_w),
-        ) = parsed
-        else {
-            skipped += 1;
-            let _ = idx;
-            continue;
-        };
-        rows.push(corinth_canal::TelemetrySnapshot {
-            timestamp_ms,
-            gpu_temp_c,
-            gpu_power_w,
-            cpu_tctl_c,
-            cpu_package_power_w,
-        });
-    }
-
-    if skipped > 0 {
-        eprintln!(
-            "load_csv_telemetry_rows: skipped {skipped} malformed row(s) in '{}'",
-            path.display()
-        );
-    }
-
-    Ok(rows)
-}
-
-/// Resolve the process-wide telemetry source once.
-///
-/// For `Csv`, loads and validates the CSV file up front; if the file is
-/// missing, malformed, or empty, emits a single warning to stderr and
-/// degrades to `Synthetic`, stamping `source_label = "synthetic_fallback"`
-/// so the manifest faithfully records what actually happened.
-pub fn resolve_telemetry_source() -> ResolvedTelemetry {
-    match telemetry_source_from_env() {
-        TelemetrySource::Synthetic => ResolvedTelemetry {
-            source: TelemetrySource::Synthetic,
-            source_label: "synthetic".to_string(),
-            csv_path: None,
-            rows: None,
-        },
-        TelemetrySource::Csv => {
-            let csv_path = telemetry_csv_path_from_env();
-            match load_csv_telemetry_rows(&csv_path) {
-                Ok(rows) if !rows.is_empty() => {
-                    let label = csv_source_label(&csv_path);
-                    ResolvedTelemetry {
-                        source: TelemetrySource::Csv,
-                        source_label: label,
-                        csv_path: Some(csv_path),
-                        rows: Some(rows),
-                    }
-                }
-                Ok(_) => {
-                    eprintln!(
-                        "resolve_telemetry_source: CSV '{}' is empty; falling back to synthetic",
-                        csv_path.display()
-                    );
-                    ResolvedTelemetry {
-                        source: TelemetrySource::Synthetic,
-                        source_label: "synthetic_fallback".to_string(),
-                        csv_path: Some(csv_path),
-                        rows: None,
-                    }
-                }
-                Err(error) => {
-                    eprintln!(
-                        "resolve_telemetry_source: CSV '{}' failed to load: {error}; falling back to synthetic",
-                        csv_path.display()
-                    );
-                    ResolvedTelemetry {
-                        source: TelemetrySource::Synthetic,
-                        source_label: "synthetic_fallback".to_string(),
-                        csv_path: Some(csv_path),
-                        rows: None,
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Convert a CSV path into a directory-safe source slug. The stem
-/// `telemetry` is treated as the canonical RE4 corpus and renders as
-/// `csv_re4`; any other stem becomes `csv_<stem>`.
-fn csv_source_label(path: &Path) -> String {
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("unknown")
-        .to_ascii_lowercase();
-    if stem == "telemetry" {
-        "csv_re4".to_string()
-    } else {
-        let sanitized = stem.replace([' ', '.'], "_");
-        format!("csv_{sanitized}")
-    }
-}
-
-/// Produce the telemetry snapshot for a given tick. For CSV replay this
-/// wraps around when `tick >= rows.len()`; the caller is responsible for
-/// warning when `TICKS > row_count` (see `saaq_latent_calibration`).
-///
-/// `timestamp_ms` is always rewritten to `tick + 1` so the resulting latent
-/// CSV joins 1-to-1 against `tick_telemetry.txt` on tick index regardless
-/// of the underlying CSV's absolute timestamps.
-pub fn telemetry_snapshot_for_tick(
-    tick: usize,
-    resolved: &ResolvedTelemetry,
-) -> corinth_canal::TelemetrySnapshot {
-    let mut snap = match (resolved.source, resolved.rows.as_ref()) {
-        (TelemetrySource::Csv, Some(rows)) if !rows.is_empty() => {
-            let idx = tick % rows.len();
-            rows[idx].clone()
-        }
-        _ => synthetic_base_snapshot(tick),
-    };
-    snap.timestamp_ms = (tick as u64) + 1;
-    snap
-}
-
-fn parse_finite_f32(value: &str) -> Option<f32> {
-    let parsed = value.parse::<f32>().ok()?;
-    if parsed.is_finite() {
-        Some(parsed)
-    } else {
-        None
-    }
-}
-
-pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot {
-    let phase = tick as f32 * 0.041;
-    corinth_canal::TelemetrySnapshot {
-        gpu_temp_c: 68.0 + phase.sin() * 2.8,
-        gpu_power_w: 232.0 + phase.cos() * 11.5,
-        cpu_tctl_c: 73.0 + (phase * 0.9).sin() * 2.2,
-        cpu_package_power_w: 116.0 + (phase * 1.1).cos() * 7.4,
-        timestamp_ms: tick as u64,
-    }
-}
-
 /// Scale factor applied to the prompt embedding before GPU temporal upload.
 ///
 /// L2-normalised 2048-dim embeddings have per-element magnitude ≈ 0.022.
@@ -782,171 +497,4 @@ pub(super) fn env_flag(key: &str, default_value: bool) -> bool {
             )
         })
         .unwrap_or(default_value)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn write_temp_csv(name: &str, contents: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "corinth_canal_support_{}_{}.csv",
-            name,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&path, contents).unwrap();
-        path
-    }
-
-    #[test]
-    fn load_csv_accepts_canonical_header_and_parses_rows() {
-        let csv = "timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w\n\
-                   1000,60.5,250.0,70.0,120.0\n\
-                   2000,61.0,252.5,70.5,121.5\n";
-        let path = write_temp_csv("canonical", csv);
-        let rows = load_csv_telemetry_rows(&path).unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].timestamp_ms, 1000);
-        assert!((rows[0].gpu_temp_c - 60.5).abs() < 1e-6);
-        assert_eq!(rows[1].timestamp_ms, 2000);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn load_csv_rejects_bad_header() {
-        let csv = "t,gpu,gpuw,cpu,cpuw\n1000,60,250,70,120\n";
-        let path = write_temp_csv("bad_header", csv);
-        let err = load_csv_telemetry_rows(&path).unwrap_err();
-        assert!(err.to_string().contains("header mismatch"));
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn load_csv_skips_malformed_rows() {
-        let csv = "timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w\n\
-                   1000,60.5,250.0,70.0,120.0\n\
-                   malformed,row\n\
-                   2000,NaN,250.0,70.0,120.0\n\
-                   3000,61.0,252.5,70.5,121.5\n";
-        let path = write_temp_csv("skip_bad", csv);
-        let rows = load_csv_telemetry_rows(&path).unwrap();
-        assert_eq!(rows.len(), 2, "expected only the two fully-valid rows");
-        assert_eq!(rows[0].timestamp_ms, 1000);
-        assert_eq!(rows[1].timestamp_ms, 3000);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn telemetry_snapshot_for_tick_wraps_around_csv_rows() {
-        let rows = vec![
-            corinth_canal::TelemetrySnapshot {
-                timestamp_ms: 111,
-                gpu_temp_c: 10.0,
-                gpu_power_w: 100.0,
-                cpu_tctl_c: 20.0,
-                cpu_package_power_w: 200.0,
-            },
-            corinth_canal::TelemetrySnapshot {
-                timestamp_ms: 222,
-                gpu_temp_c: 30.0,
-                gpu_power_w: 300.0,
-                cpu_tctl_c: 40.0,
-                cpu_package_power_w: 400.0,
-            },
-        ];
-        let resolved = ResolvedTelemetry {
-            source: TelemetrySource::Csv,
-            source_label: "csv_re4".to_string(),
-            csv_path: Some(PathBuf::from("/tmp/telemetry.csv")),
-            rows: Some(rows),
-        };
-
-        // tick=0 uses row[0], tick=3 wraps back to row[1] (3 % 2 == 1).
-        let snap0 = telemetry_snapshot_for_tick(0, &resolved);
-        let snap3 = telemetry_snapshot_for_tick(3, &resolved);
-
-        assert!((snap0.gpu_temp_c - 10.0).abs() < 1e-6);
-        assert!((snap3.gpu_temp_c - 30.0).abs() < 1e-6);
-        // timestamps are rewritten to (tick + 1) for 1-to-1 join with tick txt.
-        assert_eq!(snap0.timestamp_ms, 1);
-        assert_eq!(snap3.timestamp_ms, 4);
-    }
-
-    #[test]
-    fn telemetry_snapshot_for_tick_uses_synthetic_on_fallback() {
-        let resolved = ResolvedTelemetry {
-            source: TelemetrySource::Synthetic,
-            source_label: "synthetic_fallback".to_string(),
-            csv_path: Some(PathBuf::from("/nonexistent/telemetry.csv")),
-            rows: None,
-        };
-        let snap = telemetry_snapshot_for_tick(5, &resolved);
-        // Synthetic path writes its own timestamp, then we overwrite to tick+1.
-        assert_eq!(snap.timestamp_ms, 6);
-        // And the synthetic sinusoid produces non-zero, finite values.
-        assert!(snap.gpu_temp_c.is_finite() && snap.gpu_temp_c > 0.0);
-    }
-
-    #[test]
-    fn parse_family_slug_accepts_granite_aliases() {
-        assert_eq!(
-            parse_family_slug("granite"),
-            Some(ModelFamily::Granite31A800M)
-        );
-        assert_eq!(
-            parse_family_slug("granite_3_1"),
-            Some(ModelFamily::Granite31A800M)
-        );
-        assert_eq!(
-            parse_family_slug("granite_3_1_a800m"),
-            Some(ModelFamily::Granite31A800M)
-        );
-        assert_eq!(
-            parse_family_slug("granite31a800m"),
-            Some(ModelFamily::Granite31A800M)
-        );
-    }
-
-    #[test]
-    fn prompt_embedding_provider_defaults_to_ollama() {
-        assert_eq!(
-            resolve_prompt_embedding_provider(None),
-            PromptEmbeddingProvider::Ollama
-        );
-    }
-
-    #[test]
-    fn prompt_embedding_provider_accepts_ollama_case_insensitively() {
-        assert_eq!(
-            resolve_prompt_embedding_provider(Some("  OLLAMA  ")),
-            PromptEmbeddingProvider::Ollama
-        );
-    }
-
-    #[test]
-    fn prompt_embedding_provider_rejects_legacy_llama_cpp() {
-        assert_eq!(
-            resolve_prompt_embedding_provider(Some("llama_cpp")),
-            PromptEmbeddingProvider::SyntheticFallback
-        );
-    }
-
-    #[test]
-    fn parse_family_slug_accepts_moonlight_aliases() {
-        assert_eq!(
-            parse_family_slug("moonlight"),
-            Some(ModelFamily::Moonlight16BA3B)
-        );
-        assert_eq!(
-            parse_family_slug("moonlight_moe"),
-            Some(ModelFamily::Moonlight16BA3B)
-        );
-        assert_eq!(
-            parse_family_slug("MOONLIGHT"),
-            Some(ModelFamily::Moonlight16BA3B)
-        );
-    }
 }

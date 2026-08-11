@@ -62,6 +62,50 @@ impl ModelFamily {
             Self::Grok => "grok",
         }
     }
+
+    /// Canonical spelling table for human-authored `ModelFamily` values.
+    ///
+    /// This is the single source of truth for both the `MODEL_FAMILY`
+    /// environment variable and lineup-config `family` entries, which
+    /// previously had separate hand-rolled tables that drifted apart. Input
+    /// is trimmed and matched case-insensitively.
+    ///
+    /// Returns `None` for unrecognised values so callers can treat that as a
+    /// soft validation error (leave family for probe inference, or keep the
+    /// configured default) rather than aborting a sweep.
+    ///
+    /// **`NemotronLegacy`:** not selected by any human alias. Operator and
+    /// lineup strings `nemotron` / `nemotron_3_nano_4b` / `nemotron3nano4b`
+    /// resolve to [`Self::Nemotron`]. `NemotronLegacy` remains a serde-only
+    /// variant for historical checkpoint metadata (`Nemotron3Nano4B` alias)
+    /// and still reports slug `"nemotron"` via [`Self::slug`].
+    pub fn from_alias(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "olmoe" => Some(Self::Olmoe),
+            "qwen3moe" | "qwen3_moe" | "qwen" => Some(Self::Qwen3Moe),
+            "gemma4" | "gemma_4" | "gemma" => Some(Self::Gemma4),
+            "deepseek2" | "deepseek_v2" | "deepseek" => Some(Self::DeepSeek2),
+            "llama" | "llama_moe" | "llama3_moe" => Some(Self::LlamaMoe),
+            "moonlight" | "moonlight_moe" | "moonlight_16b_a3b" => Some(Self::Moonlight16BA3B),
+            "granite" | "granite_3_1" | "granite_3_1_a800m" | "granite31a800m" => {
+                Some(Self::Granite31A800M)
+            }
+            "nemotron" | "nemotron_3_nano_4b" | "nemotron3nano4b" => Some(Self::Nemotron),
+            "lfm2" | "lfm2_moe" | "lfm2moe" => Some(Self::Lfm2Moe),
+            "slim_moe" | "slimmoe" | "phi_moe" | "phimoe" => Some(Self::SlimMoe),
+            "zaya" | "zaya1" | "zaya1_8b" => Some(Self::Zaya),
+            "glm4" | "glm_4" | "glm4moe" | "glm" => Some(Self::Glm4),
+            "gpt_oss" | "gptoss" => Some(Self::GptOss),
+            "step" | "step3" | "step_3_5" => Some(Self::Step),
+            "minimax" | "minimax_m2" => Some(Self::MiniMax),
+            "cohere" | "command_a" => Some(Self::Cohere),
+            "grin" | "grin_moe" => Some(Self::Grin),
+            "skyworks" | "skywork" => Some(Self::Skyworks),
+            "trinity" | "trinity_nano" => Some(Self::Trinity),
+            "grok" | "grok_1" | "grok_2" => Some(Self::Grok),
+            _ => None,
+        }
+    }
 }
 
 /// Minimal local telemetry payload used to seed deterministic spike patterns.
@@ -423,5 +467,122 @@ mod tests {
             RoutingMode::SpikingSim,
             "default when both optional sources are absent"
         );
+    }
+
+    /// Contract for both the `MODEL_FAMILY` env var and lineup-config
+    /// `family` entries. Tables lived in both `examples/support/mod.rs` and
+    /// `lineup.rs` and could drift independently.
+    #[test]
+    fn model_family_from_alias_accepts_every_documented_spelling() {
+        let cases: &[(&ModelFamily, &[&str])] = &[
+            (&ModelFamily::Olmoe, &["olmoe", "OLMOE", " olmoe "]),
+            (
+                &ModelFamily::Qwen3Moe,
+                &["qwen3moe", "qwen3_moe", "qwen", " QWEN "],
+            ),
+            (
+                &ModelFamily::Gemma4,
+                &["gemma4", "gemma_4", "gemma", " Gemma4 "],
+            ),
+            (
+                &ModelFamily::DeepSeek2,
+                &["deepseek2", "deepseek_v2", "deepseek", " DEEPSEEK "],
+            ),
+            (
+                &ModelFamily::LlamaMoe,
+                &["llama", "llama_moe", "llama3_moe", " LLAMA "],
+            ),
+            (
+                &ModelFamily::Moonlight16BA3B,
+                &[
+                    "moonlight",
+                    "moonlight_moe",
+                    "moonlight_16b_a3b",
+                    "MOONLIGHT",
+                ],
+            ),
+            (
+                &ModelFamily::Granite31A800M,
+                &[
+                    "granite",
+                    "granite_3_1",
+                    "granite_3_1_a800m",
+                    "granite31a800m",
+                    " GRANITE ",
+                ],
+            ),
+            (
+                &ModelFamily::Nemotron,
+                &[
+                    "nemotron",
+                    "nemotron_3_nano_4b",
+                    "nemotron3nano4b",
+                    " NEMOTRON ",
+                ],
+            ),
+            (
+                &ModelFamily::Lfm2Moe,
+                &["lfm2", "lfm2_moe", "lfm2moe", " LFM2 "],
+            ),
+            (
+                &ModelFamily::SlimMoe,
+                &["slim_moe", "slimmoe", "phi_moe", "phimoe", " SLIMMOE "],
+            ),
+            (&ModelFamily::Zaya, &["zaya", "zaya1", "zaya1_8b", " ZAYA "]),
+            (
+                &ModelFamily::Glm4,
+                &["glm4", "glm_4", "glm4moe", "glm", " GLM "],
+            ),
+            (&ModelFamily::GptOss, &["gpt_oss", "gptoss", " GPTOSS "]),
+            (&ModelFamily::Step, &["step", "step3", "step_3_5", " STEP "]),
+            (
+                &ModelFamily::MiniMax,
+                &["minimax", "minimax_m2", " MINIMAX "],
+            ),
+            (&ModelFamily::Cohere, &["cohere", "command_a", " COHERE "]),
+            (&ModelFamily::Grin, &["grin", "grin_moe", " GRIN "]),
+            (
+                &ModelFamily::Skyworks,
+                &["skyworks", "skywork", " SKYWORK "],
+            ),
+            (
+                &ModelFamily::Trinity,
+                &["trinity", "trinity_nano", " TRINITY "],
+            ),
+            (&ModelFamily::Grok, &["grok", "grok_1", "grok_2", " GROK "]),
+        ];
+        for &(family, aliases) in cases {
+            for value in aliases {
+                assert_eq!(
+                    ModelFamily::from_alias(value),
+                    Some(*family),
+                    "expected {family:?} for {value:?}"
+                );
+            }
+        }
+        // NemotronLegacy is serde-only; no human alias selects it.
+        assert_eq!(
+            ModelFamily::from_alias("nemotron"),
+            Some(ModelFamily::Nemotron),
+            "nemotron must not resolve to NemotronLegacy"
+        );
+    }
+
+    #[test]
+    fn model_family_from_alias_rejects_unknown_values() {
+        for value in [
+            "",
+            "unknown_family",
+            "moe",
+            "olmo",
+            "nemotron_legacy",
+            "nemotronlegacy",
+        ] {
+            assert_eq!(
+                ModelFamily::from_alias(value),
+                None,
+                "expected None for {value:?}"
+            );
+        }
     }
 }
