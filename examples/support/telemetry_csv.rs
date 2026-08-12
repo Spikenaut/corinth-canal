@@ -54,10 +54,38 @@ pub fn load_csv_telemetry_rows(
             path.display()
         ))
     })?;
-
     let mut lines = contents.lines();
-    let header = lines
-        .next()
+    validate_telemetry_csv_header(path, lines.next())?;
+    let (rows, skipped) = collect_telemetry_csv_rows(lines);
+    if skipped > 0 {
+        eprintln!(
+            "load_csv_telemetry_rows: skipped {skipped} malformed row(s) in '{}'",
+            path.display()
+        );
+    }
+    Ok(rows)
+}
+
+fn collect_telemetry_csv_rows<'a>(
+    lines: impl Iterator<Item = &'a str>,
+) -> (Vec<corinth_canal::TelemetrySnapshot>, usize) {
+    let mut rows = Vec::new();
+    let mut skipped = 0usize;
+    for raw_line in lines {
+        match parse_telemetry_csv_data_line(raw_line) {
+            ParseDataLine::Empty => {}
+            ParseDataLine::Ok(snap) => rows.push(snap),
+            ParseDataLine::Malformed => skipped += 1,
+        }
+    }
+    (rows, skipped)
+}
+
+fn validate_telemetry_csv_header(
+    path: &Path,
+    header_line: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let header = header_line
         .ok_or_else(|| Error::other(format!("telemetry CSV '{}' is empty", path.display())))?
         .trim();
     if header != TELEMETRY_CSV_HEADER {
@@ -67,55 +95,46 @@ pub fn load_csv_telemetry_rows(
         ))
         .into());
     }
+    Ok(())
+}
 
-    let mut rows = Vec::new();
-    let mut skipped = 0usize;
-    for (idx, raw_line) in lines.enumerate() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let fields: Vec<&str> = line.split(',').collect();
-        if fields.len() != 5 {
-            skipped += 1;
-            continue;
-        }
-        let parsed = (
-            fields[0].parse::<u64>().ok(),
-            parse_finite_f32(fields[1]),
-            parse_finite_f32(fields[2]),
-            parse_finite_f32(fields[3]),
-            parse_finite_f32(fields[4]),
-        );
-        let (
-            Some(timestamp_ms),
-            Some(gpu_temp_c),
-            Some(gpu_power_w),
-            Some(cpu_tctl_c),
-            Some(cpu_package_power_w),
-        ) = parsed
-        else {
-            skipped += 1;
-            let _ = idx;
-            continue;
-        };
-        rows.push(corinth_canal::TelemetrySnapshot {
-            timestamp_ms,
-            gpu_temp_c,
-            gpu_power_w,
-            cpu_tctl_c,
-            cpu_package_power_w,
-        });
+enum ParseDataLine {
+    Empty,
+    Ok(corinth_canal::TelemetrySnapshot),
+    Malformed,
+}
+
+fn parse_telemetry_csv_data_line(raw_line: &str) -> ParseDataLine {
+    let line = raw_line.trim();
+    if line.is_empty() {
+        return ParseDataLine::Empty;
     }
-
-    if skipped > 0 {
-        eprintln!(
-            "load_csv_telemetry_rows: skipped {skipped} malformed row(s) in '{}'",
-            path.display()
-        );
+    let fields: Vec<&str> = line.split(',').collect();
+    if fields.len() != 5 {
+        return ParseDataLine::Malformed;
     }
-
-    Ok(rows)
+    let Some(timestamp_ms) = fields[0].parse::<u64>().ok() else {
+        return ParseDataLine::Malformed;
+    };
+    let Some(gpu_temp_c) = parse_finite_f32(fields[1]) else {
+        return ParseDataLine::Malformed;
+    };
+    let Some(gpu_power_w) = parse_finite_f32(fields[2]) else {
+        return ParseDataLine::Malformed;
+    };
+    let Some(cpu_tctl_c) = parse_finite_f32(fields[3]) else {
+        return ParseDataLine::Malformed;
+    };
+    let Some(cpu_package_power_w) = parse_finite_f32(fields[4]) else {
+        return ParseDataLine::Malformed;
+    };
+    ParseDataLine::Ok(corinth_canal::TelemetrySnapshot {
+        timestamp_ms,
+        gpu_temp_c,
+        gpu_power_w,
+        cpu_tctl_c,
+        cpu_package_power_w,
+    })
 }
 
 /// Resolve telemetry from an already-selected source and CSV path.
@@ -234,8 +253,19 @@ pub fn synthetic_base_snapshot(tick: usize) -> corinth_canal::TelemetrySnapshot 
 mod tests {
     use super::*;
 
+    /// Cargo sets `CARGO_TARGET_TMPDIR` for test sandboxes; avoid shared
+    /// `std::env::temp_dir()` (Semgrep: multi-user temp dir).
+    fn test_scratch_dir() -> PathBuf {
+        if let Some(dir) = std::env::var_os("CARGO_TARGET_TMPDIR") {
+            return PathBuf::from(dir);
+        }
+        let dir = PathBuf::from("target").join("tmp-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     fn write_temp_csv(name: &str, contents: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
+        let path = test_scratch_dir().join(format!(
             "corinth_canal_support_{}_{}.csv",
             name,
             std::time::SystemTime::now()
@@ -372,7 +402,7 @@ mod tests {
 
     #[test]
     fn resolve_telemetry_from_csv_missing_falls_back() {
-        let path = std::env::temp_dir().join(format!(
+        let path = test_scratch_dir().join(format!(
             "corinth_canal_missing_{}.csv",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
