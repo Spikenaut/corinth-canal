@@ -73,3 +73,5 @@ configs/safetensors_lineup.toml
 codacy-results.sarif
 # Regenerated locally by the Codacy CLI; deliberately dropped in 6e46895.
 .codacy/cli.sh
+# Codacy local CLI generated configs
+.codacy/codacy.config*.json
