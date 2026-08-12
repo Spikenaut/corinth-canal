@@ -36,32 +36,6 @@ impl ResolvedTelemetry {
     }
 }
 
-pub fn telemetry_source_from_env() -> TelemetrySource {
-    match std::env::var("TELEMETRY_SOURCE")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .trim()
-    {
-        "csv" => TelemetrySource::Csv,
-        // Empty string and any unrecognised value fall back to Synthetic
-        // contributors never get surprised by a missing CSV path.
-        _ => TelemetrySource::Synthetic,
-    }
-}
-
-pub fn telemetry_csv_path_from_env() -> PathBuf {
-    if let Ok(value) = std::env::var("TELEMETRY_CSV_PATH") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    // Fallback to a repo-relative placeholder or just a generic name.
-    // The runner will handle the "file not found" case by falling back
-    // to synthetic telemetry.
-    PathBuf::from("telemetry.csv")
-}
-
 const TELEMETRY_CSV_HEADER: &str =
     "timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w";
 
@@ -144,58 +118,56 @@ pub fn load_csv_telemetry_rows(
     Ok(rows)
 }
 
-/// Resolve the process-wide telemetry source once.
+/// Resolve telemetry from an already-selected source and CSV path.
 ///
-/// For `Csv`, loads and validates the CSV file up front; if the file is
-/// missing, malformed, or empty, emits a single warning to stderr and
-/// degrades to `Synthetic`, stamping `source_label = "synthetic_fallback"`
-/// so the manifest faithfully records what actually happened.
-pub fn resolve_telemetry_source() -> ResolvedTelemetry {
-    match telemetry_source_from_env() {
+/// Env/path resolution stays in `examples/support/mod.rs` (machine-local
+/// config boundary). For `Csv`, loads and validates the CSV up front; if the
+/// file is missing, malformed, or empty, emits a single warning to stderr and
+/// degrades to `Synthetic`, stamping `source_label = "synthetic_fallback"` so
+/// the manifest faithfully records what actually happened.
+pub fn resolve_telemetry_from(source: TelemetrySource, csv_path: PathBuf) -> ResolvedTelemetry {
+    match source {
         TelemetrySource::Synthetic => ResolvedTelemetry {
             source: TelemetrySource::Synthetic,
             source_label: "synthetic".to_string(),
             csv_path: None,
             rows: None,
         },
-        TelemetrySource::Csv => {
-            let csv_path = telemetry_csv_path_from_env();
-            match load_csv_telemetry_rows(&csv_path) {
-                Ok(rows) if !rows.is_empty() => {
-                    let label = csv_source_label(&csv_path);
-                    ResolvedTelemetry {
-                        source: TelemetrySource::Csv,
-                        source_label: label,
-                        csv_path: Some(csv_path),
-                        rows: Some(rows),
-                    }
-                }
-                Ok(_) => {
-                    eprintln!(
-                        "resolve_telemetry_source: CSV '{}' is empty; falling back to synthetic",
-                        csv_path.display()
-                    );
-                    ResolvedTelemetry {
-                        source: TelemetrySource::Synthetic,
-                        source_label: "synthetic_fallback".to_string(),
-                        csv_path: Some(csv_path),
-                        rows: None,
-                    }
-                }
-                Err(error) => {
-                    eprintln!(
-                        "resolve_telemetry_source: CSV '{}' failed to load: {error}; falling back to synthetic",
-                        csv_path.display()
-                    );
-                    ResolvedTelemetry {
-                        source: TelemetrySource::Synthetic,
-                        source_label: "synthetic_fallback".to_string(),
-                        csv_path: Some(csv_path),
-                        rows: None,
-                    }
+        TelemetrySource::Csv => match load_csv_telemetry_rows(&csv_path) {
+            Ok(rows) if !rows.is_empty() => {
+                let label = csv_source_label(&csv_path);
+                ResolvedTelemetry {
+                    source: TelemetrySource::Csv,
+                    source_label: label,
+                    csv_path: Some(csv_path),
+                    rows: Some(rows),
                 }
             }
-        }
+            Ok(_) => {
+                eprintln!(
+                    "resolve_telemetry_from: CSV '{}' is empty; falling back to synthetic",
+                    csv_path.display()
+                );
+                ResolvedTelemetry {
+                    source: TelemetrySource::Synthetic,
+                    source_label: "synthetic_fallback".to_string(),
+                    csv_path: Some(csv_path),
+                    rows: None,
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "resolve_telemetry_from: CSV '{}' failed to load: {error}; falling back to synthetic",
+                    csv_path.display()
+                );
+                ResolvedTelemetry {
+                    source: TelemetrySource::Synthetic,
+                    source_label: "synthetic_fallback".to_string(),
+                    csv_path: Some(csv_path),
+                    rows: None,
+                }
+            }
+        },
     }
 }
 
@@ -362,5 +334,55 @@ mod tests {
         assert_eq!(snap.timestamp_ms, 6);
         // And the synthetic sinusoid produces non-zero, finite values.
         assert!(snap.gpu_temp_c.is_finite() && snap.gpu_temp_c > 0.0);
+    }
+
+    #[test]
+    fn resolve_telemetry_from_synthetic_ignores_path() {
+        let resolved =
+            resolve_telemetry_from(TelemetrySource::Synthetic, PathBuf::from("telemetry.csv"));
+        assert_eq!(resolved.source, TelemetrySource::Synthetic);
+        assert_eq!(resolved.source_label, "synthetic");
+        assert!(resolved.csv_path.is_none());
+        assert!(resolved.rows.is_none());
+    }
+
+    #[test]
+    fn resolve_telemetry_from_csv_loads_valid_file() {
+        let csv = "timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w\n\
+                   1000,60.5,250.0,70.0,120.0\n";
+        let path = write_temp_csv("resolve_ok", csv);
+        let resolved = resolve_telemetry_from(TelemetrySource::Csv, path.clone());
+        assert_eq!(resolved.source, TelemetrySource::Csv);
+        assert!(resolved.rows.as_ref().is_some_and(|r| r.len() == 1));
+        assert_eq!(resolved.csv_path.as_ref(), Some(&path));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_telemetry_from_csv_empty_falls_back() {
+        let csv = "timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w\n";
+        let path = write_temp_csv("resolve_empty", csv);
+        let resolved = resolve_telemetry_from(TelemetrySource::Csv, path.clone());
+        assert_eq!(resolved.source, TelemetrySource::Synthetic);
+        assert_eq!(resolved.source_label, "synthetic_fallback");
+        assert_eq!(resolved.csv_path.as_ref(), Some(&path));
+        assert!(resolved.rows.is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_telemetry_from_csv_missing_falls_back() {
+        let path = std::env::temp_dir().join(format!(
+            "corinth_canal_missing_{}.csv",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let resolved = resolve_telemetry_from(TelemetrySource::Csv, path.clone());
+        assert_eq!(resolved.source, TelemetrySource::Synthetic);
+        assert_eq!(resolved.source_label, "synthetic_fallback");
+        assert_eq!(resolved.csv_path.as_ref(), Some(&path));
+        assert!(resolved.rows.is_none());
     }
 }

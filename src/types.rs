@@ -585,4 +585,40 @@ mod tests {
             );
         }
     }
+
+    /// Every human-selectable variant must round-trip through its slug, so a
+    /// new variant cannot ship without a `from_alias` arm.
+    #[test]
+    fn model_family_slug_round_trips_through_from_alias() {
+        for family in [
+            ModelFamily::Olmoe,
+            ModelFamily::Qwen3Moe,
+            ModelFamily::Gemma4,
+            ModelFamily::DeepSeek2,
+            ModelFamily::LlamaMoe,
+            ModelFamily::Moonlight16BA3B,
+            ModelFamily::Granite31A800M,
+            ModelFamily::Nemotron,
+            // NemotronLegacy intentionally omitted: serde-only, slug collides.
+            ModelFamily::Lfm2Moe,
+            ModelFamily::SlimMoe,
+            ModelFamily::Zaya,
+            ModelFamily::Glm4,
+            ModelFamily::GptOss,
+            ModelFamily::Step,
+            ModelFamily::MiniMax,
+            ModelFamily::Cohere,
+            ModelFamily::Grin,
+            ModelFamily::Skyworks,
+            ModelFamily::Trinity,
+            ModelFamily::Grok,
+        ] {
+            assert_eq!(
+                ModelFamily::from_alias(family.slug()),
+                Some(family),
+                "slug {:?} must round-trip for {family:?}",
+                family.slug()
+            );
+        }
+    }
 }

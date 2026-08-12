@@ -18,9 +18,8 @@ pub use lineup::{
 // unused_imports lint would fire without this allow.
 #[allow(unused_imports)]
 pub use telemetry_csv::{
-    ResolvedTelemetry, TelemetrySource, load_csv_telemetry_rows, resolve_telemetry_source,
-    synthetic_base_snapshot, telemetry_csv_path_from_env, telemetry_snapshot_for_tick,
-    telemetry_source_from_env,
+    ResolvedTelemetry, TelemetrySource, load_csv_telemetry_rows, resolve_telemetry_from,
+    synthetic_base_snapshot, telemetry_snapshot_for_tick,
 };
 
 use corinth_canal::{ModelFamily, SaaqUpdateRule, moe::Router, moe::RoutingMode};
@@ -346,6 +345,40 @@ pub fn ticks_from_env(default_ticks: usize) -> usize {
 
 pub fn repeat_count_from_env() -> usize {
     env_usize("REPEAT_COUNT", 1).max(1)
+}
+
+/// Machine-local `TELEMETRY_SOURCE` resolution (config boundary).
+///
+/// Empty / unrecognised values fall back to [`TelemetrySource::Synthetic`] so a
+/// fresh clone never depends on a missing CSV path.
+pub fn telemetry_source_from_env() -> TelemetrySource {
+    match std::env::var("TELEMETRY_SOURCE")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .trim()
+    {
+        "csv" => TelemetrySource::Csv,
+        _ => TelemetrySource::Synthetic,
+    }
+}
+
+/// Machine-local `TELEMETRY_CSV_PATH` resolution (config boundary).
+///
+/// Defaults to a repo-relative `telemetry.csv` placeholder when unset.
+pub fn telemetry_csv_path_from_env() -> PathBuf {
+    if let Ok(value) = std::env::var("TELEMETRY_CSV_PATH") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    PathBuf::from("telemetry.csv")
+}
+
+/// Process-wide telemetry source: env/path resolution here, CSV load/fallback
+/// in [`resolve_telemetry_from`].
+pub fn resolve_telemetry_source() -> ResolvedTelemetry {
+    resolve_telemetry_from(telemetry_source_from_env(), telemetry_csv_path_from_env())
 }
 
 /// Scale factor applied to the prompt embedding before GPU temporal upload.

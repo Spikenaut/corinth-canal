@@ -23,6 +23,8 @@ exclude_paths:
   # Examples with shared support modules
   - "examples/saaq_latent_calibration.rs"
   - "examples/support/mod.rs"
+  - "examples/support/telemetry_csv.rs"
+  - "examples/support/embedding.rs"
   - "examples/support/observability.rs"
   # Tooling/config noise
   - ".kilo/**"
