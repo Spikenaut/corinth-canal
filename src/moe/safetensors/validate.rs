@@ -6,9 +6,7 @@ use super::manifest::{
     parse_unreferenced_shards_metadata,
 };
 use super::model_load;
-use super::paths::{
-    canonical_existing_or_parent, parent_or_current, paths_refer_to_same_file,
-};
+use super::paths::{canonical_existing_or_parent, parent_or_current, paths_refer_to_same_file};
 use crate::error::Result;
 use std::collections::BTreeSet;
 use std::fs;
@@ -86,12 +84,10 @@ pub(super) fn expected_tensor_byte_size(
         })
     })?;
 
-    // Int4 is a packed format: 2 elements per byte
+    // Int4 is a packed format: 2 elements per byte.
+    // `div_ceil(2)` cannot overflow a `usize` element count.
     if dtype == "INT4" || dtype == "I4" || dtype == "U4" {
-        return elements
-            .div_ceil(2)
-            .checked_mul(1)
-            .ok_or_else(|| model_load(path, format!("tensor '{tensor_name}' byte size overflow")));
+        return Ok(elements.div_ceil(2));
     }
 
     let element_size = dtype_size_bytes(dtype).ok_or_else(|| {
