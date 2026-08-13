@@ -16,6 +16,7 @@ Status legend: `reference` · `stabilizing` · `proven` · `frozen`
 | `src/moe/gguf/` | reference | `rmems-moe` | Internal split of former monolithic checkpoint: parse, mmap access, dequant, CUDA host register. |
 | `src/moe/adapter.rs` | stabilizing | `rmems-moe` | Five-family adapter resolution is implemented; needs broader validation coverage. |
 | `src/moe/routing.rs` | stabilizing | `rmems-moe` | Stateless routing math. Low-risk promotion candidate. |
+| `src/moe/safetensors/` | reference | `Limen-Neural/safetensors-parser` (inspect half) | Directory split (#147): extractable inspect/manifest modules vs corinth-specific `config`/`map` mmap load. Enables #116 copy-out. |
 | `src/projector.rs` | stabilizing | `rmems-projector` | `ProjectionMode` surface is stable; `SpikingTernary` remains the live research path. |
 | `src/funnel.rs` | reference | `rmems-funnel` | CPU GIF hidden layer is still shared with the broader runtime and validation path. |
 | `src/telemetry.rs` | stabilizing | `rmems-telemetry` | Telemetry encoding surface is small and stable. `TelemetrySnapshot` carries physical telemetry channels and timestamps. |

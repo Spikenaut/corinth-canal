@@ -111,7 +111,7 @@ Instrumented launch sites:
 | `src/moe/gguf/` | GGUF parse, mmap, tensor slicing, dequantization, CUDA host register |
 | `src/moe/adapter.rs` | Model-family adapter resolution and tensor selection |
 | `src/moe/routing.rs` | Router math (gate scores, resampling, normalization, top-k) |
-| `src/moe/safetensors.rs` | Safetensors header inspection and deterministic manifest generation |
+| `src/moe/safetensors/` | Safetensors façade: inspection/manifest (`discovery`/`json`/`paths`/`manifest`/`validate`) + HF config + mmap load (`config`/`map`) |
 | `src/projector.rs` | `ProjectionMode` spike-to-embedding projection |
 | `src/funnel.rs` | Telemetry funnel, signed split banks, GIF hidden layer |
 | `src/telemetry.rs` | `TelemetryEncoder` and `TelemetrySnapshot` bridge |
@@ -144,16 +144,14 @@ path when `blk.0.attn_q.weight` is stored as `Q8_0` inside the GGUF.
   - dequantized `Q5_K`
   - synthetic fallback
 
-`moe::safetensors`:
+`moe::safetensors` (directory split for #116 extract boundary):
 
-- reads only Safetensors headers, not tensor payload bytes
-- accepts a `.safetensors` file, a Hugging Face `.safetensors.index.json`, or a
-  directory containing either an index or direct shards
-- records tensor names, dtypes, shapes, byte sizes, data offsets, and shard paths
-  relative to the inspected root
-- labels recognizable MoE router and expert candidates from tensor names and
-  simple rank-2 router-shape heuristics
-- emits deterministic JSON for experiment setup without creating a project
+- **Inspection half** (`manifest`/`validate`/`json`/`paths`/`discovery`): reads
+  only Safetensors headers, not tensor payload bytes; accepts a file, HF index,
+  or directory of shards; labels MoE router/expert candidates; emits deterministic
+  JSON manifests
+- **Load half** (`config`/`map`): HF `config.json` parse + mmap'd
+  `MappedSafetensorsCheckpoint` for router bridge tensor extraction
 
 When the selected tensor is dequantized and not already square, the GPU
 temporal path resamples it to the neuron grid instead of rejecting the
