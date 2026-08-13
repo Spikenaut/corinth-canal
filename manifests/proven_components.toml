@@ -62,6 +62,13 @@ owner_notes     = "Stateless math; low-risk promotion candidate."
 last_proven_run = ""
 
 [[component]]
+path            = "src/moe/safetensors/"
+status          = "reference"
+target_repo     = "Limen-Neural/safetensors-parser"
+owner_notes     = "Inspect half (manifest/validate/json/paths/discovery) is extractable for #116; config/map stay corinth-specific."
+last_proven_run = ""
+
+[[component]]
 path            = "src/projector.rs"
 status          = "stabilizing"
 target_repo     = "rmems-projector"
