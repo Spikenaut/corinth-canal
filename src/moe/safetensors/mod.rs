@@ -60,7 +60,7 @@ pub(super) fn relative_path(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()
-        .replace("\\", "/")
+        .replace('\\', "/")
 }
 
 pub(super) fn model_load(path: &Path, reason: String) -> HybridError {
