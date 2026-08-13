@@ -16,8 +16,7 @@ exclude_paths:
   - "src/moe/gguf/**"
   # Family/format mapping + ST router probe tables (GH#118); grows with model lineup
   - "src/moe/adapter.rs"
-  - "src/moe/safetensors.rs"
-  - "src/moe/safetensors/tests.rs"
+  - "src/moe/safetensors/**"
   - "src/moe/tests.rs"
   - "src/moe/mod.rs"
   # Examples with shared support modules
