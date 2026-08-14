@@ -76,6 +76,110 @@ fn emit_validation_finish(
     );
 }
 
+/// Paths written for one validation run (manifest, summary, telemetry CSVs).
+struct RunArtifactPaths {
+    run_dir: PathBuf,
+    tick_path: PathBuf,
+    latent_path: PathBuf,
+    manifest_path: PathBuf,
+    summary_path: PathBuf,
+    routing_csv_path: PathBuf,
+}
+
+/// Shared terminal epilogue for `run_validation` failure/success paths.
+///
+/// Does **not** borrow `Model`: the tick loop needs `&mut model`, so `model`
+/// is passed into [`Finalizer::finish`] only.
+struct Finalizer<'a> {
+    observer: &'a CommandObserver,
+    ctx: &'a RunContext<'a>,
+    config: &'a corinth_canal::model::ModelConfig,
+    paths: &'a RunArtifactPaths,
+    prompt_embedding_source: &'a str,
+    saaq_rule: SaaqUpdateRule,
+    started: Instant,
+}
+
+impl Finalizer<'_> {
+    fn finish(
+        &self,
+        model: &Model,
+        metrics: &ExperimentMetrics,
+        pending: &mut Vec<PendingIndexRow>,
+        status: &'static str,
+        error: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        write_manifest_and_summary(
+            self.ctx,
+            self.config,
+            model,
+            &self.paths.run_dir,
+            &self.paths.manifest_path,
+            &self.paths.summary_path,
+            &self.paths.tick_path,
+            &self.paths.latent_path,
+            self.prompt_embedding_source,
+            self.saaq_rule,
+            status,
+            error.map(str::to_owned),
+            metrics,
+            collect_generated_files(
+                &self.paths.manifest_path,
+                &self.paths.summary_path,
+                &[
+                    &self.paths.tick_path,
+                    &self.paths.latent_path,
+                    &self.paths.routing_csv_path,
+                ],
+            ),
+        )?;
+        pending.push(pending_row_from_state(
+            self.ctx,
+            model,
+            &self.paths.run_dir,
+            &self.paths.latent_path,
+            &self.paths.summary_path,
+            metrics,
+            status,
+        ));
+        emit_validation_finish(self.observer, self.ctx, self.started, status, error);
+        Ok(())
+    }
+
+    fn write_status(
+        &self,
+        model: &Model,
+        metrics: &ExperimentMetrics,
+        status: &'static str,
+        error: Option<String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        write_manifest_and_summary(
+            self.ctx,
+            self.config,
+            model,
+            &self.paths.run_dir,
+            &self.paths.manifest_path,
+            &self.paths.summary_path,
+            &self.paths.tick_path,
+            &self.paths.latent_path,
+            self.prompt_embedding_source,
+            self.saaq_rule,
+            status,
+            error,
+            metrics,
+            collect_generated_files(
+                &self.paths.manifest_path,
+                &self.paths.summary_path,
+                &[
+                    &self.paths.tick_path,
+                    &self.paths.latent_path,
+                    &self.paths.routing_csv_path,
+                ],
+            ),
+        )
+    }
+}
+
 struct RunContext<'a> {
     spec: &'a ValidationModelSpec,
     prompt_profile: &'a str,
@@ -271,10 +375,14 @@ fn run_validation(
         return Err(Error::other(error).into());
     }
 
-    let tick_path = run_dir.join("tick_telemetry.txt");
-    let latent_path = run_dir.join("latent_telemetry.csv");
-    let manifest_path = run_dir.join("run_manifest.json");
-    let summary_path = run_dir.join("summary.json");
+    let paths = RunArtifactPaths {
+        tick_path: run_dir.join("tick_telemetry.txt"),
+        latent_path: run_dir.join("latent_telemetry.csv"),
+        manifest_path: run_dir.join("run_manifest.json"),
+        summary_path: run_dir.join("summary.json"),
+        run_dir,
+        routing_csv_path,
+    };
 
     // Metrics accumulator. Populated during the tick loop; stamped into
     // summary.json at every terminal status (completed / *_failed).
@@ -286,110 +394,52 @@ fn run_validation(
             Ok(result) => result,
             Err(error) => {
                 let error_message = error.to_string();
-                write_manifest_and_summary(
-                    ctx,
-                    &config,
-                    &model,
-                    &run_dir,
-                    &manifest_path,
-                    &summary_path,
-                    &tick_path,
-                    &latent_path,
-                    "unavailable",
-                    saaq_rule,
-                    "prompt_embedding_failed",
-                    Some(error_message.clone()),
-                    &metrics,
-                    collect_generated_files(
-                        &manifest_path,
-                        &summary_path,
-                        &[&tick_path, &latent_path, &routing_csv_path],
-                    ),
-                )?;
-                pending.push(pending_row_from_state(
-                    ctx,
-                    &model,
-                    &run_dir,
-                    &latent_path,
-                    &summary_path,
-                    &metrics,
-                    "prompt_embedding_failed",
-                ));
-                emit_validation_finish(
+                let finalizer = Finalizer {
                     observer,
                     ctx,
-                    validation_started,
+                    config: &config,
+                    paths: &paths,
+                    prompt_embedding_source: "unavailable",
+                    saaq_rule,
+                    started: validation_started,
+                };
+                finalizer.finish(
+                    &model,
+                    &metrics,
+                    pending,
                     "prompt_embedding_failed",
                     Some(&error_message),
-                );
+                )?;
                 return Err(error);
             }
         };
 
-    write_manifest_and_summary(
+    let finalizer = Finalizer {
+        observer,
         ctx,
-        &config,
-        &model,
-        &run_dir,
-        &manifest_path,
-        &summary_path,
-        &tick_path,
-        &latent_path,
-        &prompt_embedding_source,
+        config: &config,
+        paths: &paths,
+        prompt_embedding_source: &prompt_embedding_source,
         saaq_rule,
-        "preflight",
-        None,
-        &metrics,
-        collect_generated_files(
-            &manifest_path,
-            &summary_path,
-            &[&tick_path, &latent_path, &routing_csv_path],
-        ),
-    )?;
+        started: validation_started,
+    };
+
+    finalizer.write_status(&model, &metrics, "preflight", None)?;
 
     if let Err(error) = model.prepare_gpu_temporal(&mut accelerator) {
         let error_message = error.to_string();
-        write_manifest_and_summary(
-            ctx,
-            &config,
+        finalizer.finish(
             &model,
-            &run_dir,
-            &manifest_path,
-            &summary_path,
-            &tick_path,
-            &latent_path,
-            &prompt_embedding_source,
-            saaq_rule,
-            "gpu_setup_failed",
-            Some(error_message.clone()),
             &metrics,
-            collect_generated_files(
-                &manifest_path,
-                &summary_path,
-                &[&tick_path, &latent_path, &routing_csv_path],
-            ),
-        )?;
-        pending.push(pending_row_from_state(
-            ctx,
-            &model,
-            &run_dir,
-            &latent_path,
-            &summary_path,
-            &metrics,
-            "gpu_setup_failed",
-        ));
-        emit_validation_finish(
-            observer,
-            ctx,
-            validation_started,
+            pending,
             "gpu_setup_failed",
             Some(&error_message),
-        );
+        )?;
         return Err(Box::new(error));
     }
 
-    let mut tick_writer = BufWriter::new(File::create(&tick_path)?);
-    let mut latent_exporter = SnnLatentCsvExporter::create(&latent_path)?;
+    let mut tick_writer = BufWriter::new(File::create(&paths.tick_path)?);
+    let mut latent_exporter = SnnLatentCsvExporter::create(&paths.latent_path)?;
     let mut calibrator = SnnDualLatentCalibrator::new(saaq_rule);
     let drive_gain = input_drive_gain_from_env();
     println!(
@@ -489,84 +539,25 @@ fn run_validation(
         let _ = tick_writer.flush();
         drop(latent_exporter);
         drop(tick_writer);
-        write_manifest_and_summary(
-            ctx,
-            &config,
+        finalizer.finish(
             &model,
-            &run_dir,
-            &manifest_path,
-            &summary_path,
-            &tick_path,
-            &latent_path,
-            &prompt_embedding_source,
-            saaq_rule,
-            "tick_failed",
-            Some(error_message.clone()),
             &metrics,
-            collect_generated_files(
-                &manifest_path,
-                &summary_path,
-                &[&tick_path, &latent_path, &routing_csv_path],
-            ),
-        )?;
-        pending.push(pending_row_from_state(
-            ctx,
-            &model,
-            &run_dir,
-            &latent_path,
-            &summary_path,
-            &metrics,
-            "tick_failed",
-        ));
-        emit_validation_finish(
-            observer,
-            ctx,
-            validation_started,
+            pending,
             "tick_failed",
             Some(&error_message),
-        );
+        )?;
         return Err(error);
     }
 
-    write_manifest_and_summary(
-        ctx,
-        &config,
-        &model,
-        &run_dir,
-        &manifest_path,
-        &summary_path,
-        &tick_path,
-        &latent_path,
-        &prompt_embedding_source,
-        saaq_rule,
-        "completed",
-        None,
-        &metrics,
-        collect_generated_files(
-            &manifest_path,
-            &summary_path,
-            &[&tick_path, &latent_path, &routing_csv_path],
-        ),
-    )?;
-    pending.push(pending_row_from_state(
-        ctx,
-        &model,
-        &run_dir,
-        &latent_path,
-        &summary_path,
-        &metrics,
-        "completed",
-    ));
+    finalizer.finish(&model, &metrics, pending, "completed", None)?;
 
     println!(
         "validation_complete model_slug={} repeat={}/{} run_dir={}",
         ctx.spec.slug,
         ctx.repeat_idx + 1,
         ctx.repeat_count,
-        run_dir.display()
+        paths.run_dir.display()
     );
-
-    emit_validation_finish(observer, ctx, validation_started, "completed", None);
 
     drop(model);
     drop(accelerator);
