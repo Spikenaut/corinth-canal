@@ -37,7 +37,7 @@ last_proven_run = ""
 path            = "src/moe/checkpoint.rs"
 status          = "reference"
 target_repo     = "rmems-moe"
-owner_notes     = "Façade over src/moe/gguf/; needs proper test battery. Parse layer separately migrating to an rmems/engram-parser dependency (#115, blocked by #144); unlike safetensors that is a dep, not a copy."
+owner_notes     = "Façade over src/moe/gguf/; needs proper test battery. Parse layer separately migrating to an rmems/engram-parser dependency (#115, blocked by #144 / rmems/engram-parser#45); unlike safetensors that is a dep, not a copy."
 last_proven_run = ""
 
 [[component]]
