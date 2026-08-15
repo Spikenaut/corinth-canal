@@ -3,8 +3,11 @@
 //! tensor loading for the router bridge.
 //!
 //! Submodules:
-//! - extractable (for #116): `discovery`, `json`, `paths`, `manifest`, `validate`
-//! - corinth-specific: `config` (HF config), `map` (mmap load / token extract)
+//! - extractable (#116 → `rmems/engram-parser`, feature `safetensors`;
+//!   one-way copy, no dependency in either direction): `discovery`, `json`,
+//!   `paths`, `manifest`, `validate`
+//! - corinth-specific, never extracted: `config` (HF config), `map`
+//!   (mmap load / token extract)
 //!
 //! The `inspect_*` functions read only Safetensors headers and optional
 //! Hugging Face shard index metadata.  The `MappedSafetensorsCheckpoint`
