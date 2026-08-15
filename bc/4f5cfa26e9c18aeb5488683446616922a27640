@@ -1,0 +1,19 @@
+manifests/proven_components.toml
+  s_361d9ab62ab34e::t_86941e62339dbf 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bc4f5cfa26e9c18aeb5488683446616922a27640",
+  "prompts": {},
+  "sessions": {
+    "s_361d9ab62ab34e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ce0b9d69-6c57-449b-8540-bb992666e824",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
