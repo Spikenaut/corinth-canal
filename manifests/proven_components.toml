@@ -37,14 +37,14 @@ last_proven_run = ""
 path            = "src/moe/checkpoint.rs"
 status          = "reference"
 target_repo     = "rmems-moe"
-owner_notes     = "Façade over src/moe/gguf/; needs proper test battery."
+owner_notes     = "Façade over src/moe/gguf/; needs proper test battery. Parse layer separately migrating to an rmems/engram-parser dependency (#115, blocked by #144); unlike safetensors that is a dep, not a copy."
 last_proven_run = ""
 
 [[component]]
 path            = "src/moe/gguf/"
 status          = "reference"
 target_repo     = "rmems-moe"
-owner_notes     = "Split of checkpoint: metadata, map, dequant, cuda_register. Needs format test battery."
+owner_notes     = "Split of checkpoint: metadata, map, dequant, cuda_register. Needs format test battery. Only the parse half is in scope for the engram-parser dependency in #115; dequant and CUDA stay here."
 last_proven_run = ""
 
 [[component]]
@@ -64,8 +64,8 @@ last_proven_run = ""
 [[component]]
 path            = "src/moe/safetensors/"
 status          = "reference"
-target_repo     = "Limen-Neural/safetensors-parser"
-owner_notes     = "Inspect half (manifest/validate/json/paths/discovery) is extractable for #116; config/map stay corinth-specific."
+target_repo     = "rmems/engram-parser"
+owner_notes     = "Inspect half (manifest/validate/json/paths/discovery) copies into engram-parser behind its `safetensors` feature (#116, rmems/engram-parser#10); supersedes the dedicated safetensors-parser crate plan. config/map stay corinth-specific. One-way copy, no dependency in either direction; status stays reference."
 last_proven_run = ""
 
 [[component]]
