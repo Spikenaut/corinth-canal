@@ -59,7 +59,7 @@ LLM-models-onboarding branch.*
 
 - [ ] Model added to the appropriate lineup config:
   - Local GGUF → `configs/saaq15_moe_lineup.toml`
-  - Local safetensors → `configs/safetensors_lineup.template.toml` copied locally to `configs/safetensors_lineup.toml`
+  - Local safetensors → `configs/local_safetensors_lineup.template.toml` copied locally to `configs/safetensors_lineup.toml`
   - Cloud → `configs/saaq15_cloud_lineup.toml`
 - [ ] Slug follows directory-safe naming convention.
 - [ ] Family slug matches the GGUF architecture or the closest known family.
