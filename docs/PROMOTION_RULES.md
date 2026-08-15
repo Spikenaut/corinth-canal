@@ -49,3 +49,30 @@ After promotion, `corinth-canal` keeps the reference copy unchanged. Any
 bugfix that needs to apply to both the reference and the modular crate
 must be mirrored by hand — the modular crate is the source of truth once
 the component is **frozen**.
+
+## One-way extractions (no reverse dependency)
+
+The ladder above assumes a module eventually promotes into a target crate that
+`corinth-canal` may then depend on, with the modular crate becoming the source
+of truth. Two module families deliberately depart from that, in opposite
+directions:
+
+- **`src/moe/safetensors/` (inspect half) → `rmems/engram-parser`, feature
+  `safetensors`.** This is a **one-way copy from inspiration**, not a
+  promotion. `corinth-canal` will **never** take an `engram-parser` dependency
+  for safetensors: it keeps this reference copy, keeps `config`/`map`, and
+  keeps using them in the Router / `CheckpointBackend` experiment paths.
+  `engram-parser` likewise takes **no** dependency on `corinth-canal`. The
+  module therefore stays at **reference** even after the copy lands
+  downstream — "frozen" would assert a source-of-truth handoff that is not
+  happening, and the two copies are expected to diverge. Tracking: #116,
+  rmems/engram-parser#10.
+- **`src/moe/gguf/` (parse half) → `rmems/engram-parser`, as a real
+  dependency.** Here corinth *does* intend to consume the modular crate, once
+  it grows an mmap-backed reader and K-quant dequant (#115, blocked by #144 /
+  rmems/engram-parser#45). Dequant and CUDA host-register stay here regardless.
+
+**Rule of thumb:** a status in `docs/MODULE_STATUS.md` describes *this repo's*
+readiness to hand code off. It does not by itself imply corinth will consume
+the result, and `Target crate` names the destination of the code, not a future
+`Cargo.toml` entry.
