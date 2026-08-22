@@ -514,7 +514,6 @@ mod tests {
         }
     }
 
-    #[test]
     /// Contract for the `PROJECTION_MODE` env var. PascalCase variant names
     /// (`RateSum`) must parse: that is the spelling operators used when the
     /// env var was ignored (GH#162).
