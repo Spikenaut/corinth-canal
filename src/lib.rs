@@ -74,6 +74,11 @@
 //! # }
 //! ```
 
+// rustc 1.98 promoted `chunks_exact_to_as_chunks` to warn. Existing GGML /
+// Safetensors block parsers use `chunks_exact` on fixed wire sizes; converting
+// them is a separate refactor and must not ride along with GH#162.
+#![allow(clippy::chunks_exact_to_as_chunks)]
+
 pub mod error;
 pub mod experiment;
 pub mod funnel;
