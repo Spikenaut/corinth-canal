@@ -187,7 +187,13 @@ secrets or absolute paths are stored.
 - `RateSum`
 - `TemporalHistogram`
 - `MembraneSnapshot`
-- `SpikingTernary`
+- `SpikingTernary` (default when `PROJECTION_MODE` is unset)
+
+Operators select a mode via `PROJECTION_MODE` (same env surface as
+`ROUTING_MODE`). The calibration runner stamps the resolved label onto
+`run_manifest.json` / `summary.json` as `projection_mode`
+(`rate_sum`, `temporal_histogram`, `membrane_snapshot`,
+`spiking_ternary`). An unrecognised value fails fast.
 
 ### Routing modes
 
@@ -257,6 +263,10 @@ of:
 
 This makes fallback behavior explicit in artifacts instead of hiding it behind a
 successful run.
+
+The same runner stamps `routing_mode` and `projection_mode` so a later
+reproduce does not have to guess which projector or router path produced
+the latent series.
 
 ## Observability
 

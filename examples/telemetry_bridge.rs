@@ -30,15 +30,20 @@ fn run(observer: &CommandObserver) -> corinth_canal::Result<()> {
     let routing_mode = run_cfg
         .routing_mode_override
         .unwrap_or(RoutingMode::SpikingSim);
+    let projection_mode = run_cfg
+        .projection_mode_override
+        .unwrap_or(corinth_canal::projector::ProjectionMode::SpikingTernary);
 
     let mut cfg = default_spiking_model_config(run_cfg.checkpoint_path.clone(), 20);
     cfg.routing_mode = routing_mode;
+    cfg.projection_mode = projection_mode;
 
     let mut model = Model::new(cfg)?;
     println!(
-        "router_loaded={} routing_mode={:?}",
+        "router_loaded={} routing_mode={:?} projection_mode={:?}",
         model.router_loaded(),
-        model.config().routing_mode
+        model.config().routing_mode,
+        model.config().projection_mode
     );
     let mut total_loss = 0.0_f32;
 

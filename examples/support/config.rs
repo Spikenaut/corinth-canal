@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use corinth_canal::{ModelFamily, SaaqUpdateRule, moe::RoutingMode};
+use corinth_canal::{ModelFamily, SaaqUpdateRule, moe::RoutingMode, projector::ProjectionMode};
 use serde::Deserialize;
 
 use super::lineup::SafetensorsModelEntry;
@@ -23,10 +23,11 @@ use super::{
     cloud_lineup_path_from_env, default_spiking_model_config, discover_validation_models, env_flag,
     input_drive_gain_from_env, load_cloud_lineup, load_safetensors_lineup,
     model_family_override_from_env, parse_family_slug, parse_routing_mode,
-    pooled_prompt_embedding_from_ollama, prompt_embedding_for_validation, prompt_profile_slug,
-    prompt_text_for_profile, repeat_count_from_env, resolve_telemetry_source,
-    routing_mode_override_from_env, saaq_update_rule_from_env, safetensors_lineup_path_from_env,
-    telemetry_snapshot_for_tick, ticks_from_env,
+    pooled_prompt_embedding_from_ollama, projection_mode_override_from_env,
+    prompt_embedding_for_validation, prompt_profile_slug, prompt_text_for_profile,
+    repeat_count_from_env, resolve_telemetry_source, routing_mode_override_from_env,
+    saaq_update_rule_from_env, safetensors_lineup_path_from_env, telemetry_snapshot_for_tick,
+    ticks_from_env,
 };
 
 /// Default output root for per-run artifacts when `VALIDATION_OUTPUT_ROOT`
@@ -58,6 +59,10 @@ pub struct RunConfig {
     pub validation_models: Vec<ValidationModelSpec>,
     pub checkpoint_path: String,
     pub routing_mode_override: Option<RoutingMode>,
+    /// `PROJECTION_MODE` env override. When set, wins over the
+    /// `SpikingTernary` default in `default_spiking_model_config`.
+    /// Unrecognised values fail fast rather than falling back.
+    pub projection_mode_override: Option<ProjectionMode>,
     /// Free-form run tag from `RUN_TAG`. Empty / unset maps to `None` so
     /// callers can just do `if let Some(tag) = cfg.run_tag { ... }`.
     pub run_tag: Option<String>,
@@ -100,6 +105,7 @@ impl RunConfig {
             validation_models,
             checkpoint_path,
             routing_mode_override: routing_mode_override_from_env(),
+            projection_mode_override: projection_mode_override_from_env(),
             run_tag: run_tag_from_env(),
             strict_repeat_check: strict_repeat_check_from_env(),
         };
@@ -135,6 +141,7 @@ impl RunConfig {
             }
             let _ = &run_config.checkpoint_path;
             let _ = &run_config.routing_mode_override;
+            let _ = &run_config.projection_mode_override;
             let _ = &run_config.run_tag;
             let _ = run_config.strict_repeat_check;
 

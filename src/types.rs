@@ -189,6 +189,75 @@ pub enum ProjectionMode {
     SpikingTernary,
 }
 
+impl ProjectionMode {
+    /// Canonical spelling table for human-authored `ProjectionMode` values.
+    ///
+    /// This is the single source of truth for the `PROJECTION_MODE`
+    /// environment variable. Input is trimmed and matched case-insensitively.
+    /// PascalCase variant names (`RateSum`) are accepted because that is
+    /// the spelling operators used when the env var was first ignored
+    /// (GH#162, 2026-08-22).
+    ///
+    /// Returns `None` for unrecognised values so callers can fail fast
+    /// instead of silently falling back to [`Self::SpikingTernary`].
+    pub fn from_alias(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ratesum" | "rate_sum" | "rate-sum" => Some(Self::RateSum),
+            "temporalhistogram" | "temporal_histogram" | "temporal-histogram" => {
+                Some(Self::TemporalHistogram)
+            }
+            "membranesnapshot" | "membrane_snapshot" | "membrane-snapshot" => {
+                Some(Self::MembraneSnapshot)
+            }
+            "spikingternary" | "spiking_ternary" | "spiking-ternary" => Some(Self::SpikingTernary),
+            _ => None,
+        }
+    }
+
+    /// Stable stamp used in `run_manifest.json` / `summary.json`.
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::RateSum => "rate_sum",
+            Self::TemporalHistogram => "temporal_histogram",
+            Self::MembraneSnapshot => "membrane_snapshot",
+            Self::SpikingTernary => "spiking_ternary",
+        }
+    }
+
+    /// Parse an optional `PROJECTION_MODE` env value.
+    ///
+    /// * `None` or whitespace-only → `Ok(None)` so callers keep the
+    ///   [`Self::SpikingTernary`] default.
+    /// * Recognised alias → `Ok(Some(mode))`.
+    /// * Anything else → `Err`, so the operator path can fail fast instead
+    ///   of silently falling back (the 2026-08-22 `PROJECTION_MODE=RateSum`
+    ///   miss happened because the env var was ignored entirely).
+    pub fn parse_env_override(value: Option<&str>) -> Result<Option<Self>, String> {
+        let Some(raw) = value else {
+            return Ok(None);
+        };
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Self::from_alias(trimmed).map(Some).ok_or_else(|| {
+            format!(
+                "PROJECTION_MODE={raw:?} is not a recognised projection mode \
+                 (expected RateSum|rate_sum|TemporalHistogram|temporal_histogram|\
+                 MembraneSnapshot|membrane_snapshot|SpikingTernary|spiking_ternary)"
+            )
+        })
+    }
+
+    /// Effective mode with operator precedence used by calibration runs:
+    /// `env_override` (`PROJECTION_MODE`) > `lineup` > `default`
+    /// (`ModelConfig` / `default_spiking_model_config`, which is
+    /// [`Self::SpikingTernary`]).
+    pub fn resolve(env_override: Option<Self>, lineup: Option<Self>, default: Self) -> Self {
+        env_override.or(lineup).unwrap_or(default)
+    }
+}
+
 /// Execution mode used by the Router router.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RoutingMode {
@@ -302,7 +371,10 @@ impl CloudModelSpec {
 
 #[cfg(test)]
 mod tests {
-    use super::{CloudModelSpec, ModelArchitectureClass, ModelFamily, ModelTarget, RoutingMode};
+    use super::{
+        CloudModelSpec, ModelArchitectureClass, ModelFamily, ModelTarget, ProjectionMode,
+        RoutingMode,
+    };
 
     #[test]
     fn model_family_slug_covers_new_variants() {
@@ -440,6 +512,143 @@ mod tests {
                 "expected None for {value:?}"
             );
         }
+    }
+
+    #[test]
+    /// Contract for the `PROJECTION_MODE` env var. PascalCase variant names
+    /// (`RateSum`) must parse: that is the spelling operators used when the
+    /// env var was ignored (GH#162).
+    #[test]
+    fn projection_mode_from_alias_accepts_every_documented_spelling() {
+        for value in ["RateSum", "rate_sum", "rate-sum", "RATESUM", " ratesum "] {
+            assert_eq!(
+                ProjectionMode::from_alias(value),
+                Some(ProjectionMode::RateSum),
+                "expected RateSum for {value:?}"
+            );
+        }
+        for value in [
+            "TemporalHistogram",
+            "temporal_histogram",
+            "temporal-histogram",
+            "TEMPORALHISTOGRAM",
+            " temporal_histogram ",
+        ] {
+            assert_eq!(
+                ProjectionMode::from_alias(value),
+                Some(ProjectionMode::TemporalHistogram),
+                "expected TemporalHistogram for {value:?}"
+            );
+        }
+        for value in [
+            "MembraneSnapshot",
+            "membrane_snapshot",
+            "membrane-snapshot",
+            "MEMBRANESNAPSHOT",
+            " membrane_snapshot ",
+        ] {
+            assert_eq!(
+                ProjectionMode::from_alias(value),
+                Some(ProjectionMode::MembraneSnapshot),
+                "expected MembraneSnapshot for {value:?}"
+            );
+        }
+        for value in [
+            "SpikingTernary",
+            "spiking_ternary",
+            "spiking-ternary",
+            "SPIKINGTERNARY",
+            " spiking_ternary ",
+        ] {
+            assert_eq!(
+                ProjectionMode::from_alias(value),
+                Some(ProjectionMode::SpikingTernary),
+                "expected SpikingTernary for {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn projection_mode_default_is_spiking_ternary() {
+        assert_eq!(ProjectionMode::default(), ProjectionMode::SpikingTernary);
+        assert_eq!(ProjectionMode::parse_env_override(None).unwrap(), None);
+        assert_eq!(ProjectionMode::parse_env_override(Some("")).unwrap(), None);
+        assert_eq!(
+            ProjectionMode::parse_env_override(Some("   ")).unwrap(),
+            None
+        );
+        assert_eq!(
+            ProjectionMode::resolve(None, None, ProjectionMode::SpikingTernary),
+            ProjectionMode::SpikingTernary,
+            "unset env and lineup must keep the SpikingTernary default"
+        );
+    }
+
+    /// Unrecognised values stay `None` / `Err` so the operator path can
+    /// fail fast instead of silently falling back to `SpikingTernary`.
+    #[test]
+    fn projection_mode_invalid_value_fails_fast() {
+        for value in ["not_a_mode", "spike", "ternary", "Rate", "dense", "Spiking"] {
+            assert_eq!(
+                ProjectionMode::from_alias(value),
+                None,
+                "expected None for {value:?}"
+            );
+            let err = ProjectionMode::parse_env_override(Some(value))
+                .expect_err("invalid PROJECTION_MODE must fail fast");
+            assert!(
+                err.contains("not a recognised projection mode"),
+                "error should name the env var contract, got {err:?}"
+            );
+        }
+        assert_eq!(
+            ProjectionMode::parse_env_override(Some("RateSum")).unwrap(),
+            Some(ProjectionMode::RateSum)
+        );
+    }
+
+    #[test]
+    fn projection_mode_label_round_trips_through_from_alias() {
+        for mode in [
+            ProjectionMode::RateSum,
+            ProjectionMode::TemporalHistogram,
+            ProjectionMode::MembraneSnapshot,
+            ProjectionMode::SpikingTernary,
+        ] {
+            assert_eq!(
+                ProjectionMode::from_alias(mode.as_label()),
+                Some(mode),
+                "stamp {:?} must round-trip for {mode:?}",
+                mode.as_label()
+            );
+        }
+    }
+
+    #[test]
+    fn projection_mode_resolve_precedence_env_over_lineup_over_default() {
+        assert_eq!(
+            ProjectionMode::resolve(
+                Some(ProjectionMode::RateSum),
+                Some(ProjectionMode::MembraneSnapshot),
+                ProjectionMode::SpikingTernary,
+            ),
+            ProjectionMode::RateSum,
+            "env override must win over lineup"
+        );
+        assert_eq!(
+            ProjectionMode::resolve(
+                None,
+                Some(ProjectionMode::TemporalHistogram),
+                ProjectionMode::SpikingTernary
+            ),
+            ProjectionMode::TemporalHistogram,
+            "lineup must win when env is unset"
+        );
+        assert_eq!(
+            ProjectionMode::resolve(None, None, ProjectionMode::SpikingTernary),
+            ProjectionMode::SpikingTernary,
+            "default when both optional sources are absent"
+        );
     }
 
     #[test]
