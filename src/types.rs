@@ -243,10 +243,32 @@ impl ProjectionMode {
         Self::from_alias(trimmed).map(Some).ok_or_else(|| {
             format!(
                 "PROJECTION_MODE={raw:?} is not a recognised projection mode \
-                 (expected RateSum|rate_sum|TemporalHistogram|temporal_histogram|\
-                 MembraneSnapshot|membrane_snapshot|SpikingTernary|spiking_ternary)"
+                 (expected RateSum|rate_sum|rate-sum|\
+                 TemporalHistogram|temporal_histogram|temporal-histogram|\
+                 MembraneSnapshot|membrane_snapshot|membrane-snapshot|\
+                 SpikingTernary|spiking_ternary|spiking-ternary)"
             )
         })
+    }
+
+    /// Fail-fast wrapper over a raw [`std::env::var`] lookup.
+    ///
+    /// `NotPresent` keeps the unset semantics (`Ok(None)`), but `NotUnicode`
+    /// is reported as an error rather than flattened into "unset". Collapsing
+    /// it with `.ok()` would stamp the `SpikingTernary` default onto artifacts
+    /// for a malformed value — the exact silent-fallback failure GH#162 is
+    /// about.
+    pub fn parse_env_result(
+        value: Result<String, std::env::VarError>,
+    ) -> Result<Option<Self>, String> {
+        match value {
+            Ok(raw) => Self::parse_env_override(Some(raw.as_str())),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(std::env::VarError::NotUnicode(raw)) => Err(format!(
+                "PROJECTION_MODE={raw:?} is not valid Unicode; refusing to fall back to \
+                 the SpikingTernary default (GH#162)"
+            )),
+        }
     }
 
     /// Effective mode with operator precedence used by calibration runs:
@@ -603,6 +625,39 @@ mod tests {
         assert_eq!(
             ProjectionMode::parse_env_override(Some("RateSum")).unwrap(),
             Some(ProjectionMode::RateSum)
+        );
+    }
+
+    /// `NotPresent` means unset, but a non-Unicode `PROJECTION_MODE` must not
+    /// be flattened into the unset path — that would stamp `SpikingTernary`
+    /// onto artifacts for a value the operator did set.
+    #[test]
+    fn projection_mode_env_result_separates_unset_from_malformed() {
+        assert_eq!(
+            ProjectionMode::parse_env_result(Err(std::env::VarError::NotPresent)).unwrap(),
+            None
+        );
+        assert_eq!(
+            ProjectionMode::parse_env_result(Ok("rate-sum".to_string())).unwrap(),
+            Some(ProjectionMode::RateSum)
+        );
+        assert!(
+            ProjectionMode::parse_env_result(Ok("not_a_mode".to_string())).is_err(),
+            "unrecognised values must still fail fast"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn projection_mode_env_result_rejects_non_unicode() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let raw = std::ffi::OsString::from_vec(vec![0x52, 0x61, 0x74, 0x65, 0x80]);
+        let err = ProjectionMode::parse_env_result(Err(std::env::VarError::NotUnicode(raw)))
+            .expect_err("non-Unicode PROJECTION_MODE must fail fast");
+        assert!(
+            err.contains("not valid Unicode"),
+            "error should name the Unicode contract, got {err:?}"
         );
     }
 

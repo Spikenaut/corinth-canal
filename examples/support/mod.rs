@@ -432,8 +432,9 @@ pub fn routing_mode_override_from_env() -> Option<RoutingMode> {
 /// - Present but unrecognised → **fail-fast** (`exit 1`). A typo must not
 ///   silently fall back to `SpikingTernary`; that is how
 ///   `PROJECTION_MODE=RateSum` was ignored on 2026-08-22 (GH#162).
+/// - Present but not valid Unicode → **fail-fast** for the same reason.
 pub fn projection_mode_override_from_env() -> Option<ProjectionMode> {
-    match ProjectionMode::parse_env_override(std::env::var("PROJECTION_MODE").ok().as_deref()) {
+    match ProjectionMode::parse_env_result(std::env::var("PROJECTION_MODE")) {
         Ok(mode) => mode,
         Err(err) => {
             eprintln!("{err}");
