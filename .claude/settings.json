@@ -24,7 +24,8 @@
       "Bash(bd prime)",
       "Bash(bd ready)",
       "Bash(bd show:*)",
-      "Bash(bd list:*)"
+      "Bash(bd list:*)",
+      "mcp__github__pull_request_read"
     ],
     "ask": [
       "Bash(git push:*)",
