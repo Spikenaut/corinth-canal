@@ -77,6 +77,9 @@
 // rustc 1.98 promoted `chunks_exact_to_as_chunks` to warn. Existing GGML /
 // Safetensors block parsers use `chunks_exact` on fixed wire sizes; converting
 // them is a separate refactor and must not ride along with GH#162.
+// `unknown_lints` keeps the clippy gate usable on pre-1.98 toolchains, where
+// the lint name does not exist yet and `-D warnings` would turn it into an error.
+#![allow(unknown_lints)]
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
 pub mod error;
