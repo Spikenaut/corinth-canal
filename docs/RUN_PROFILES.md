@@ -62,10 +62,13 @@ The latent telemetry CSV includes both SAAQ trajectories via
 - `PROJECTION_MODE` selects the projector the same way `ROUTING_MODE`
   selects the router. Unset / blank keeps `SpikingTernary`. Accepted
   values: `RateSum`, `TemporalHistogram`, `MembraneSnapshot`,
-  `SpikingTernary` (also `rate_sum`, `temporal_histogram`,
-  `membrane_snapshot`, `spiking_ternary`). An unrecognised value fails
-  fast. `run_manifest.json` and `summary.json` stamp `projection_mode`
-  so a run is reproducible from the manifest.
+  `SpikingTernary` (also snake_case and kebab-case forms such as
+  `rate_sum` / `rate-sum`, `temporal_histogram` / `temporal-histogram`,
+  `membrane_snapshot` / `membrane-snapshot`,
+  `spiking_ternary` / `spiking-ternary`). An unrecognised value — or one
+  that is not valid Unicode — fails fast. `run_manifest.json` and
+  `summary.json` stamp `projection_mode` so a run is reproducible from
+  the manifest.
 
 ## GPU smoke test
 
