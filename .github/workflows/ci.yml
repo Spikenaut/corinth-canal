@@ -98,7 +98,7 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Reclaim disk before build
         run: |
-          set -u
+          set +e -u
           # GitHub-hosted runners get a fresh filesystem for every job; this
           # self-hosted one does not, so target/ accumulates across runs until
           # writes start failing. That is what broke this job on 2026-08-24:
@@ -107,10 +107,13 @@ jobs:
           # no diagnostics while building aws-lc-sys. Both are out-of-space
           # signatures, not test failures, so free space before building.
           #
-          # Deliberately not `set -e`: this step must never be the reason the
-          # job fails. If the probe cannot read free space we clean anyway,
-          # which is the safe direction — the cost is a cold rebuild, whereas
-          # guessing "plenty of room" reproduces the original failure.
+          # This step must never be the reason the job fails. Actions runs
+          # Linux `run:` blocks as `bash -e {0}`, so errexit is already on
+          # before the first line — `set +e` here turns it back off, and every
+          # command that can legitimately fail is guarded as well. If the probe
+          # cannot read free space we clean anyway, which is the safe
+          # direction: the cost is a cold rebuild, whereas guessing "plenty of
+          # room" reproduces the out-of-space failure this step prevents.
           df -Ph . || true
           avail_kb=$(df -Pk . 2>/dev/null | awk 'NR==2 {print $4}' || true)
           threshold_kb=$((20 * 1024 * 1024))  # 20 GiB
@@ -120,7 +123,7 @@ jobs:
           fi
           if [ "${avail_kb}" -lt "${threshold_kb}" ]; then
             echo "::warning::$((avail_kb / 1048576)) GiB free (below 20 GiB); clearing target/ before build."
-            cargo clean || rm -rf target
+            { cargo clean || rm -rf target; } || true
             df -Ph . || true
           fi
       - run: |
