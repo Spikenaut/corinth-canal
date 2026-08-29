@@ -411,6 +411,56 @@ mod tests {
         assert_eq!(embedding.len(), EMBEDDING_DIM);
     }
 
+    /// The SAAQ tick loop hands `forward_activity` a single-tick spike train,
+    /// and the histogram bin is `((t * bins) / steps).min(bins - 1)`. With
+    /// `steps == 1` every spike lands in bin 0 and bins 1.. are unreachable,
+    /// so `TemporalHistogram` collapses into a rescaled `RateSum`.
+    /// `saaq_latent_calibration` refuses that combination rather than stamping
+    /// `temporal_histogram` on a run that did not perform it; this test pins
+    /// the behaviour that motivates the refusal, and proves a real multi-tick
+    /// window does populate every bin.
+    #[test]
+    fn temporal_histogram_single_tick_leaves_higher_bins_unreachable() {
+        let bins = TEMPORAL_BINS;
+        let neurons = SNN_NEURONS;
+        let potentials = vec![0.0; neurons];
+        let iz_pots = vec![0.0; IZ_NEURONS];
+        let hist_of = |features: &[f32]| features[neurons..neurons + neurons * bins].to_vec();
+        let bin_total =
+            |hist: &[f32], b: usize| -> f32 { (0..neurons).map(|n| hist[n * bins + b]).sum() };
+
+        let mut proj = Projector::new(ProjectionMode::TemporalHistogram);
+        let single = hist_of(&proj.build_feature_vector(
+            &dummy_spike_train(1, neurons),
+            &potentials,
+            &iz_pots,
+        ));
+        assert!(
+            bin_total(&single, 0) > 0.0,
+            "bin 0 must carry the spikes for a 1-tick train"
+        );
+        for b in 1..bins {
+            assert_eq!(
+                bin_total(&single, b),
+                0.0,
+                "bin {b} is unreachable when the spike train has a single tick"
+            );
+        }
+
+        let mut proj = Projector::new(ProjectionMode::TemporalHistogram);
+        let windowed = hist_of(&proj.build_feature_vector(
+            &dummy_spike_train(8, neurons),
+            &potentials,
+            &iz_pots,
+        ));
+        for b in 0..bins {
+            assert!(
+                bin_total(&windowed, b) > 0.0,
+                "bin {b} must populate for a multi-tick window"
+            );
+        }
+    }
+
     #[test]
     fn test_project_values_bounded() {
         let mut proj = Projector::new(ProjectionMode::TemporalHistogram);

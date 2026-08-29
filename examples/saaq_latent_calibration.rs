@@ -356,6 +356,26 @@ fn run_validation(
         None,
         config.projection_mode,
     );
+    // The tick loop below hands `forward_activity` a single-tick spike train
+    // (`vec![active_neurons]`). `Projector::build_feature_vector` derives the
+    // histogram bin as `((t * bins) / steps).min(bins - 1)`, so with
+    // `steps == 1` every spike lands in bin 0 and bins 1..4 are unreachable —
+    // TemporalHistogram degenerates into a rescaled RateSum carrying no
+    // temporal information. Stamping `temporal_histogram` on that run would
+    // assert something the run did not do, which is the silent-fallback class
+    // GH#162 exists to remove. Refuse the combination until the loop can feed
+    // a real multi-tick window.
+    if config.projection_mode == corinth_canal::projector::ProjectionMode::TemporalHistogram {
+        eprintln!(
+            "PROJECTION_MODE=TemporalHistogram is not supported by saaq_latent_calibration: \
+             the tick loop feeds a single-tick spike train, so histogram bins 1-3 are \
+             structurally zero and the mode collapses to a rescaled RateSum. Refusing to \
+             stamp projection_mode=temporal_histogram on a run that did not perform it. \
+             Use RateSum, MembraneSnapshot or SpikingTernary; TemporalHistogram needs a \
+             multi-tick window (tracked follow-up to GH#162)."
+        );
+        std::process::exit(1);
+    }
     let saaq_rule = ctx.saaq_rule;
 
     let mut accelerator = GpuAccelerator::new();

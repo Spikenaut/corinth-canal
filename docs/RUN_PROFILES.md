@@ -69,6 +69,14 @@ The latent telemetry CSV includes both SAAQ trajectories via
   that is not valid Unicode — fails fast. `run_manifest.json` and
   `summary.json` stamp `projection_mode` so a run is reproducible from
   the manifest.
+- `PROJECTION_MODE=TemporalHistogram` is **rejected** by
+  `saaq_latent_calibration`. That loop feeds the projector a single-tick
+  spike train, so the four histogram bins collapse onto bin 0 and the mode
+  degenerates into a rescaled `RateSum` carrying no temporal information.
+  Rather than stamp `temporal_histogram` on a run that did not perform it,
+  the runner exits 1. Supporting it needs a real multi-tick window in the
+  tick loop, which changes what the calibrator observes per row and is
+  tracked as follow-up to GH#162. `telemetry_bridge` is unaffected.
 
 ## GPU smoke test
 
