@@ -74,6 +74,14 @@
 //! # }
 //! ```
 
+// rustc 1.98 promoted `chunks_exact_to_as_chunks` to warn, and CI runs
+// `-D warnings`, so the GGML / Safetensors block parsers that use
+// `chunks_exact` on fixed wire sizes fail the lint gate. Converting them is a
+// separate refactor. `unknown_lints` keeps this usable on pre-1.98 toolchains,
+// where the lint name does not exist yet and would itself be an error.
+#![allow(unknown_lints)]
+#![allow(clippy::chunks_exact_to_as_chunks)]
+
 pub mod error;
 pub mod experiment;
 pub mod funnel;
