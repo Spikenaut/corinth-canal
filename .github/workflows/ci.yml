@@ -96,6 +96,24 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - name: Reclaim disk before build
+        run: |
+          set -eu
+          # GitHub-hosted runners get a fresh filesystem for every job; this
+          # self-hosted one does not, so target/ accumulates across runs until
+          # writes start failing. That is what broke this job on 2026-08-24:
+          # 58 tests failed with Os { code: 122, kind: QuotaExceeded } in the
+          # tempdir setup, and the re-run then failed with cc(1) exiting 1 and
+          # no diagnostics while building aws-lc-sys. Both are out-of-space
+          # signatures, not test failures, so free space before building.
+          df -Ph .
+          avail_kb=$(df -Pk . | awk 'NR==2 {print $4}')
+          threshold_kb=$((20 * 1024 * 1024))  # 20 GiB
+          if [ "${avail_kb}" -lt "${threshold_kb}" ]; then
+            echo "::warning::$((avail_kb / 1048576)) GiB free (below 20 GiB); clearing target/ before build."
+            cargo clean || rm -rf target
+            df -Ph .
+          fi
       - run: |
           rustup component add rustfmt clippy
           cargo test --all-targets --no-default-features --locked
