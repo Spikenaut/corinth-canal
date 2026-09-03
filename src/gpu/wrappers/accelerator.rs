@@ -260,18 +260,6 @@ impl GpuAccelerator {
         state.membrane.to_vec()
     }
 
-    pub fn temporal_adaptation_to_vec(&self, neuron_count: usize) -> GpuResult<Vec<f32>> {
-        if !self.has_context() {
-            return Err(GpuError::NoGpu);
-        }
-        let state = self
-            .temporal_state
-            .as_ref()
-            .ok_or_else(|| GpuError::MemoryError("temporal state not initialised".into()))?;
-        Self::expect_len("temporal adaptation", state.adaptation.len(), neuron_count)?;
-        state.adaptation.to_vec()
-    }
-
     /// Upload a per-neuron temporal input vector into the resident `input_spikes` buffer.
     pub(crate) fn upload_temporal_input_spikes(&mut self, input_spikes: &[f32]) -> GpuResult<()> {
         if !self.has_context() {
@@ -296,10 +284,6 @@ impl GpuAccelerator {
 
     /// Load synapse weight matrix for GIF weighted kernel. Must match neuron_count * n_inputs.
     /// Call after ensure_temporal_state or it will be overwritten on realloc.
-    pub fn load_synapse_weights(&mut self, weights: &[f32]) -> GpuResult<()> {
-        self.load_synapse_weights_named("host-f32", weights)
-    }
-
     pub fn load_synapse_weights_named(
         &mut self,
         signature: &str,
@@ -540,10 +524,12 @@ impl GpuAccelerator {
             .and_then(|state| state.synapse_signature.as_deref())
     }
 
-    /// Copy the best SAT walker assignment into `output`.
+    /// Read the best solved assignment back out of the SAT solver into `output`.
     ///
     /// This wrapper matches the updated CUDA signature and blocks until the
-    /// extract kernel has completed.
+    /// extract kernel has completed. It completes the pipeline whose reducer
+    /// `satsolver_aux_reduce_best` is already live; it currently has no Rust
+    /// caller.
     #[allow(clippy::too_many_arguments)]
     pub fn satsolver_extract(
         &self,
@@ -612,7 +598,7 @@ impl GpuAccelerator {
     /// On-device SAAQ reduction: pass 1 emits one partial winner per block, then a single
     /// warp-sized pass 2 reduces those partials to one final best walker.
     /// Launches on `stream` after `gif_step_weighted`; synchronizes before the minimal device read.
-    pub fn saaq_find_best_walker(
+    fn saaq_find_best_walker(
         &mut self,
         stream: &Stream,
         neuron_count: usize,
