@@ -122,6 +122,6 @@ Per-run artifacts land under `VALIDATION_OUTPUT_ROOT` (default `./artifacts`): `
 
 ## CI
 
-GitHub Actions is primary: `ci.yml` (CPU — fmt, clippy, `cargo test --lib --no-default-features`, `cargo check --examples`, llvm-cov → Codecov; then a self-hosted Ryzen job with a fork guard), `gpu-tests.yml` (CUDA ≥ 13.2 / sm_120 build validation), `docker-build.yml`, `sentry-release.yml`, `snyk-security.yml`. `azure-pipelines.yml` is optional redundant CPU verification on **main pushes only** (`pr: none`) via a self-hosted Linux agent; if that agent is offline, jobs queue and GHA alone is the signal. `scripts/*` is gitignored by design, so CI checkouts do not contain it.
+GitHub Actions is primary: `ci.yml` (CPU — fmt, clippy, `cargo test --lib --no-default-features`, `cargo check --examples`, llvm-cov → Codecov; then a self-hosted Ryzen job with a fork guard), `gpu-tests.yml` (CUDA ≥ 13.2 / sm_120 build validation), `docker-build.yml`, `sentry-release.yml`, `snyk-security.yml`. `scripts/*` is gitignored by design, so CI checkouts do not contain it.
 
 Note the split in test scope: the hosted job runs only `--lib`, so `tests/` and example-target tests are exercised solely by the Ryzen job (`cargo test --all-targets --no-default-features --locked`), which is skipped for fork PRs. Run `--all-targets` locally before pushing rather than trusting the hosted job.
