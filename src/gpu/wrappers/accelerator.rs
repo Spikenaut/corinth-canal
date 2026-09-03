@@ -296,6 +296,10 @@ impl GpuAccelerator {
 
     /// Load synapse weight matrix for GIF weighted kernel. Must match neuron_count * n_inputs.
     /// Call after ensure_temporal_state or it will be overwritten on realloc.
+    pub fn load_synapse_weights(&mut self, weights: &[f32]) -> GpuResult<()> {
+        self.load_synapse_weights_named("host-f32", weights)
+    }
+
     pub fn load_synapse_weights_named(
         &mut self,
         signature: &str,
