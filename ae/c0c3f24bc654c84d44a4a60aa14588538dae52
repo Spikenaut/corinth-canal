@@ -1,0 +1,27 @@
+src/types.rs
+  s_14f0d59070c44e::t_1c23fbd1240464 157-177
+  s_14f0d59070c44e::t_d7115a7de0729a 350-392
+  s_14f0d59070c44e::t_eb2efca7a0a44d 254
+.codacy/cli.sh
+  ai_agent 1-149
+examples/support/mod.rs
+  s_14f0d59070c44e::t_ec8a19e09b910d 133-137,139
+  s_14f0d59070c44e::t_680e0286fe4e77 651-653,655-657
+  s_14f0d59070c44e::t_30632e15c0a193 654,659
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "aec0c3f24bc654c84d44a4a60aa14588538dae52",
+  "prompts": {},
+  "sessions": {
+    "s_14f0d59070c44e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a4e0841-d54c-471a-af3d-5fa68899cb5e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
