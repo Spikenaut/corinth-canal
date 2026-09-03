@@ -59,6 +59,24 @@ The latent telemetry CSV includes both SAAQ trajectories via
   validation workflow.
 - `run_manifest.json` stamps the actual telemetry source label, including
   `synthetic_fallback` when CSV replay degrades.
+- `PROJECTION_MODE` selects the projector the same way `ROUTING_MODE`
+  selects the router. Unset / blank keeps `SpikingTernary`. Accepted
+  values: `RateSum`, `TemporalHistogram`, `MembraneSnapshot`,
+  `SpikingTernary` (also snake_case and kebab-case forms such as
+  `rate_sum` / `rate-sum`, `temporal_histogram` / `temporal-histogram`,
+  `membrane_snapshot` / `membrane-snapshot`,
+  `spiking_ternary` / `spiking-ternary`). An unrecognised value — or one
+  that is not valid Unicode — fails fast. `run_manifest.json` and
+  `summary.json` stamp `projection_mode` so a run is reproducible from
+  the manifest.
+- `PROJECTION_MODE=TemporalHistogram` is **rejected** by
+  `saaq_latent_calibration`. That loop feeds the projector a single-tick
+  spike train, so the four histogram bins collapse onto bin 0 and the mode
+  degenerates into a rescaled `RateSum` carrying no temporal information.
+  Rather than stamp `temporal_histogram` on a run that did not perform it,
+  the runner exits 1. Supporting it needs a real multi-tick window in the
+  tick loop, which changes what the calibrator observes per row and is
+  tracked as follow-up to GH#162. `telemetry_bridge` is unaffected.
 
 ## GPU smoke test
 
@@ -176,6 +194,9 @@ timestamp_ms,gpu_temp_c,gpu_power_w,cpu_tctl_c,cpu_package_power_w
 | Spiking routing | `just bridge` |
 | Dense routing | `ROUTING_MODE=dense just bridge` |
 | Stub routing | `ROUTING_MODE=stub just bridge` |
+| Rate-sum projection | `PROJECTION_MODE=RateSum just bridge` |
+| Temporal-histogram projection | `PROJECTION_MODE=TemporalHistogram just bridge` |
+| Membrane-snapshot projection | `PROJECTION_MODE=MembraneSnapshot just bridge` |
 
 ## Model discovery
 
@@ -205,6 +226,13 @@ Routing modes:
 - `StubUniform`
 - `DenseSim`
 - `SpikingSim`
+
+Projection modes (selected via `PROJECTION_MODE`, default `SpikingTernary`):
+
+- `RateSum`
+- `TemporalHistogram`
+- `MembraneSnapshot`
+- `SpikingTernary`
 
 Model families supported by the GGUF adapter layer:
 

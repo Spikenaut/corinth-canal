@@ -194,6 +194,10 @@ struct RunContext<'a> {
     /// `ROUTING_MODE` env override from `RunConfig`. When set, wins over
     /// lineup `routing_mode` so archived manifests match the operator intent.
     routing_mode_override: Option<corinth_canal::moe::RoutingMode>,
+    /// `PROJECTION_MODE` env override from `RunConfig`. When set, wins over
+    /// the `SpikingTernary` default so archived manifests match the
+    /// operator intent (GH#162).
+    projection_mode_override: Option<corinth_canal::projector::ProjectionMode>,
     saaq_rule: SaaqUpdateRule,
     /// Already-sanitized run tag (or `None`). Sanitization is performed
     /// once in `main()` so manifest/summary/run_id all see the same value.
@@ -273,6 +277,7 @@ fn run_main(observer: &CommandObserver) -> Result<(), Box<dyn std::error::Error>
                         output_root: cfg.output_root.clone(),
                         model_family_override: cfg.model_family_override,
                         routing_mode_override: cfg.routing_mode_override,
+                        projection_mode_override: cfg.projection_mode_override,
                         saaq_rule: cfg.saaq_rule,
                         run_tag: run_tag_ref,
                     };
@@ -345,6 +350,32 @@ fn run_validation(
         ctx.spec.routing_mode,
         config.routing_mode,
     );
+    // Precedence: PROJECTION_MODE env > ModelConfig default (SpikingTernary).
+    config.projection_mode = corinth_canal::projector::ProjectionMode::resolve(
+        ctx.projection_mode_override,
+        None,
+        config.projection_mode,
+    );
+    // The tick loop below hands `forward_activity` a single-tick spike train
+    // (`vec![active_neurons]`). `Projector::build_feature_vector` derives the
+    // histogram bin as `((t * bins) / steps).min(bins - 1)`, so with
+    // `steps == 1` every spike lands in bin 0 and bins 1..4 are unreachable —
+    // TemporalHistogram degenerates into a rescaled RateSum carrying no
+    // temporal information. Stamping `temporal_histogram` on that run would
+    // assert something the run did not do, which is the silent-fallback class
+    // GH#162 exists to remove. Refuse the combination until the loop can feed
+    // a real multi-tick window.
+    if config.projection_mode == corinth_canal::projector::ProjectionMode::TemporalHistogram {
+        eprintln!(
+            "PROJECTION_MODE=TemporalHistogram is not supported by saaq_latent_calibration: \
+             the tick loop feeds a single-tick spike train, so histogram bins 1-3 are \
+             structurally zero and the mode collapses to a rescaled RateSum. Refusing to \
+             stamp projection_mode=temporal_histogram on a run that did not perform it. \
+             Use RateSum, MembraneSnapshot or SpikingTernary; TemporalHistogram needs a \
+             multi-tick window (tracked follow-up to GH#162)."
+        );
+        std::process::exit(1);
+    }
     let saaq_rule = ctx.saaq_rule;
 
     let mut accelerator = GpuAccelerator::new();
@@ -443,7 +474,7 @@ fn run_validation(
     let mut calibrator = SnnDualLatentCalibrator::new(saaq_rule);
     let drive_gain = input_drive_gain_from_env();
     println!(
-        "validation_start model_slug={} family={:?} architecture={} ticks={} repeat={}/{} routing_tensor={} synapse_source={} telemetry_source={} input_drive_gain={:.1}",
+        "validation_start model_slug={} family={:?} architecture={} ticks={} repeat={}/{} routing_tensor={} synapse_source={} routing_mode={} projection_mode={} telemetry_source={} input_drive_gain={:.1}",
         ctx.spec.slug,
         model.router_family(),
         model.router_architecture(),
@@ -452,6 +483,8 @@ fn run_validation(
         ctx.repeat_count,
         model.routing_tensor_name(),
         model.synapse_source(),
+        routing_mode_label(config.routing_mode),
+        config.projection_mode.as_label(),
         ctx.resolved.source_label,
         drive_gain,
     );
@@ -627,6 +660,7 @@ fn build_manifest(
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
         routing_mode: Some(routing_mode_label(config.routing_mode).to_owned()),
+        projection_mode: Some(config.projection_mode.as_label().to_owned()),
         generated_files,
     }
 }
@@ -695,6 +729,7 @@ fn write_manifest_and_summary(
         &build_summary(
             ctx,
             model.router_family(),
+            config.projection_mode,
             run_dir,
             manifest_path,
             tick_path,
@@ -711,6 +746,7 @@ fn write_manifest_and_summary(
 fn build_summary(
     ctx: &RunContext<'_>,
     model_family: corinth_canal::ModelFamily,
+    projection_mode: corinth_canal::projector::ProjectionMode,
     run_dir: &std::path::Path,
     manifest_path: &std::path::Path,
     tick_path: &std::path::Path,
@@ -728,6 +764,7 @@ fn build_summary(
         repeat_idx: ctx.repeat_idx,
         repeat_count: ctx.repeat_count,
         saaq_rule: saaq_rule_label(saaq_rule).to_owned(),
+        projection_mode: Some(projection_mode.as_label().to_owned()),
         validation_status: validation_status.to_owned(),
         run_dir: run_dir.to_string_lossy().into_owned(),
         manifest_path: manifest_path.to_string_lossy().into_owned(),

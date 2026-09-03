@@ -62,6 +62,12 @@ pub struct ExperimentManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub routing_mode: Option<String>,
 
+    /// Projector strategy used for this run (`rate_sum`,
+    /// `temporal_histogram`, `membrane_snapshot`, `spiking_ternary`).
+    /// Absent on historical manifests written before GH#162.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_mode: Option<String>,
+
     pub generated_files: Vec<String>,
 }
 
@@ -79,6 +85,8 @@ pub struct ExperimentSummary {
     pub repeat_idx: usize,
     pub repeat_count: usize,
     pub saaq_rule: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_mode: Option<String>,
     pub validation_status: String,
     pub run_dir: String,
     pub manifest_path: String,
@@ -292,5 +300,52 @@ impl RunMatrix {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExperimentMetrics, ExperimentSummary};
+
+    fn sample_summary(projection_mode: Option<String>) -> ExperimentSummary {
+        ExperimentSummary {
+            run_id: "t".into(),
+            run_tag: None,
+            model_slug: "olmoe".into(),
+            model_family: "Olmoe".into(),
+            telemetry_source: "synthetic".into(),
+            repeat_idx: 0,
+            repeat_count: 1,
+            saaq_rule: "SaaqV1_5SqrtRate".into(),
+            projection_mode,
+            validation_status: "completed".into(),
+            run_dir: "artifacts/x".into(),
+            manifest_path: "artifacts/x/run_manifest.json".into(),
+            tick_telemetry_path: "artifacts/x/tick_telemetry.txt".into(),
+            latent_telemetry_path: "artifacts/x/latent_telemetry.csv".into(),
+            metrics: ExperimentMetrics::default(),
+            repeat_determinism: None,
+        }
+    }
+
+    #[test]
+    fn experiment_summary_stamps_projection_mode() {
+        let summary = sample_summary(Some("rate_sum".into()));
+        let json = serde_json::to_value(&summary).expect("serialize summary");
+        assert_eq!(json["projection_mode"], "rate_sum");
+    }
+
+    #[test]
+    fn experiment_summary_missing_projection_mode_deserializes() {
+        let summary = sample_summary(Some("spiking_ternary".into()));
+        let json = serde_json::to_value(&summary).expect("serialize summary");
+        let mut obj = json
+            .as_object()
+            .cloned()
+            .expect("summary serializes as object");
+        obj.remove("projection_mode");
+        let parsed: ExperimentSummary = serde_json::from_value(serde_json::Value::Object(obj))
+            .expect("old summary without field");
+        assert_eq!(parsed.projection_mode, None);
     }
 }
