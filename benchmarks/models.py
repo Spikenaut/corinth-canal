@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import warnings
 from typing import Any
 
 
@@ -34,6 +35,34 @@ def _model_path(manifest: Mapping[str, Any] | object) -> str:
     raise ValueError(
         "model manifest must define path, model_path, artifact_path, artifact, or model_id"
     )
+
+
+def _validate_generation(generation: dict[str, Any]) -> tuple[int, float, float]:
+    """Validate and normalize generation options."""
+    max_tokens = generation.get("max_tokens", 32)
+    try:
+        max_tokens = int(max_tokens)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"max_tokens must be an integer, got {max_tokens!r}") from e
+    if max_tokens <= 0:
+        raise ValueError(f"max_tokens must be > 0, got {max_tokens}")
+    if max_tokens > 4096:
+        raise ValueError(f"max_tokens {max_tokens} exceeds limit 4096")
+    temperature = generation.get("temperature", 0.0)
+    try:
+        temperature = float(temperature)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"temperature must be numeric, got {temperature!r}") from e
+    if temperature < 0.0:
+        raise ValueError(f"temperature must be >= 0, got {temperature}")
+    top_p = generation.get("top_p", 1.0)
+    try:
+        top_p = float(top_p)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"top_p must be numeric, got {top_p!r}") from e
+    if not 0 < top_p <= 1.0:
+        raise ValueError(f"top_p must be in (0, 1], got {top_p}")
+    return max_tokens, temperature, top_p
 
 
 class ModelAdapter(ABC):
@@ -82,6 +111,12 @@ class LlamaCppAdapter(ModelAdapter):
 
     backend = "llama.cpp"
 
+    def __init__(self, manifest: Mapping[str, Any] | object, **options: Any) -> None:
+        super().__init__(manifest, **options)
+        self._mode: str | None = None
+        self._executable: str | None = None
+        self._model: Any | None = None
+
     def load(self) -> None:
         if self._loaded:
             return
@@ -101,9 +136,15 @@ class LlamaCppAdapter(ModelAdapter):
             return
 
         executable = self.options.get("executable")
-        executable = shutil.which(executable) if executable else (
-            shutil.which("llama-cli") or shutil.which("main")
-        )
+        if executable:
+            # Explicit path: verify it exists and is executable, do not search PATH
+            if not Path(executable).is_file():
+                raise BackendUnavailableError(
+                    f"llama.cpp executable not found: {executable!r}"
+                )
+        else:
+            # Only search for the known llama.cpp CLI, not generic "main"
+            executable = shutil.which("llama-cli")
         if not executable:
             raise BackendUnavailableError(
                 "llama.cpp backend is unavailable: install llama-cpp-python or put "
@@ -116,9 +157,11 @@ class LlamaCppAdapter(ModelAdapter):
     def generate(self, prompt: str, **generation: Any) -> str:
         if not self._loaded:
             self.load()
-        max_tokens = int(generation.get("max_tokens", 32))
-        temperature = float(generation.get("temperature", 0.0))
+        if self._mode is None:
+            raise RuntimeError("LlamaCppAdapter not loaded correctly")
+        max_tokens, temperature, _ = _validate_generation(generation)
         if self._mode == "python":
+            assert self._model is not None
             result = self._model(
                 prompt,
                 max_tokens=max_tokens,
@@ -126,6 +169,7 @@ class LlamaCppAdapter(ModelAdapter):
                 echo=False,
             )
             return str(result["choices"][0]["text"])
+        assert self._executable is not None
         command = [
             self._executable,
             "-m", self.model_path,
@@ -134,8 +178,23 @@ class LlamaCppAdapter(ModelAdapter):
             "--temp", str(temperature),
             "--no-display-prompt",
         ]
-        completed = subprocess.run(command, check=True, capture_output=True, text=True)
-        return completed.stdout.strip()
+        try:
+            completed = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                input="",
+            )
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"llama-cli timed out after 30s: {e}") from e
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"llama-cli failed: {e.stderr}") from e
+        text = completed.stdout.strip()
+        if not text:
+            raise RuntimeError("llama-cli returned empty output")
+        return text
 
 
 class VllmAdapter(ModelAdapter):
@@ -152,7 +211,11 @@ class VllmAdapter(ModelAdapter):
             raise BackendUnavailableError(
                 "vLLM backend is unavailable: install the optional 'vllm' package"
             ) from error
-        kwargs = dict(self.options)
+        # Filter options to known safe keys; do not blanket-forward trust_remote_code
+        allowed_keys = {"dtype", "tensor_parallel_size", "gpu_memory_utilization", "max_model_len", "enforce_eager"}
+        kwargs = {k: v for k, v in self.options.items() if k in allowed_keys}
+        if "trust_remote_code" in self.options and self.options["trust_remote_code"]:
+            warnings.warn("trust_remote_code=True is not supported for vLLM adapter; ignoring")
         kwargs.pop("executable", None)
         self._sampling_params = module.SamplingParams
         self._model = module.LLM(model=self.model_path, **kwargs)
@@ -161,10 +224,11 @@ class VllmAdapter(ModelAdapter):
     def generate(self, prompt: str, **generation: Any) -> str:
         if not self._loaded:
             self.load()
+        max_tokens, temperature, top_p = _validate_generation(generation)
         params = self._sampling_params(
-            max_tokens=int(generation.get("max_tokens", 32)),
-            temperature=float(generation.get("temperature", 0.0)),
-            top_p=float(generation.get("top_p", 1.0)),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
         )
         result = self._model.generate([prompt], params, use_tqdm=False)
         return str(result[0].outputs[0].text)
@@ -186,6 +250,13 @@ class HuggingFaceAdapter(ModelAdapter):
                 "'transformers' package (and a supported tensor runtime)"
             ) from error
         trust_remote_code = bool(self.options.get("trust_remote_code", False))
+        if trust_remote_code:
+            warnings.warn(
+                "trust_remote_code=True allows arbitrary code execution from model files; "
+                "only enable for trusted models",
+                UserWarning,
+                stacklevel=2,
+            )
         self._tokenizer = transformers.AutoTokenizer.from_pretrained(
             self.model_path, trust_remote_code=trust_remote_code
         )
@@ -193,28 +264,49 @@ class HuggingFaceAdapter(ModelAdapter):
             key: value for key, value in self.options.items()
             if key not in {"trust_remote_code", "executable"}
         }
+        # Only allow known safe HF model kwargs
+        allowed_hf_keys = {"torch_dtype", "device_map", "low_cpu_mem_usage", "attn_implementation"}
+        filtered_options = {k: v for k, v in model_options.items() if k in allowed_hf_keys}
+        if len(filtered_options) != len(model_options):
+            dropped = set(model_options) - set(filtered_options)
+            warnings.warn(f"Ignoring unsupported HF options: {dropped}")
         self._model = transformers.AutoModelForCausalLM.from_pretrained(
-            self.model_path, trust_remote_code=trust_remote_code, **model_options
+            self.model_path, trust_remote_code=trust_remote_code, **filtered_options
         )
+        # Determine device for later tensor placement
+        try:
+            self._device = next(self._model.parameters()).device
+        except StopIteration:
+            self._device = None
         self._loaded = True
 
     def generate(self, prompt: str, **generation: Any) -> str:
         if not self._loaded:
             self.load()
+        max_tokens, temperature, top_p = _validate_generation(generation)
         encoded = self._tokenizer(prompt, return_tensors="pt")
+        # Move tokenizer tensors to model device to avoid GPU crash
+        if getattr(self, "_device", None) is not None:
+            try:
+                import torch
+                encoded = {k: v.to(self._device) if hasattr(v, "to") else v for k, v in encoded.items()}
+            except ImportError:
+                pass
+        # Consistent temperature handling: single default
+        do_sample = temperature > 0
         output = self._model.generate(
             **encoded,
-            max_new_tokens=int(generation.get("max_tokens", 32)),
-            do_sample=float(generation.get("temperature", 0.0)) > 0,
-            temperature=float(generation.get("temperature", 1.0)),
-            top_p=float(generation.get("top_p", 1.0)),
+            max_new_tokens=max_tokens,
+            do_sample=do_sample,
+            temperature=temperature if do_sample else 1.0,
+            top_p=top_p,
         )
         prompt_tokens = encoded["input_ids"].shape[-1]
         return self._tokenizer.decode(output[0][prompt_tokens:], skip_special_tokens=True)
 
 
-_GGUF_FORMATS = {"gguf", "q8_0", "q6_k", "q5_k_m", "iq4_nl", "iq3_m"}
-_HF_FORMATS = {"safetensors", "hf", "huggingface", "bf16", "fp16", "fp8", "int8", "bnb-4bit", "bnb_4bit"}
+_GGUF_FORMATS = {"gguf", "q4_k_m", "q4_0", "q4_k_s", "q5_k_m", "q5_0", "q6_k", "q8_0", "iq4_nl", "iq3_m", "q2_k", "q3_k_m"}
+_HF_FORMATS = {"safetensors", "hf", "huggingface", "bf16", "fp16", "fp8", "int8", "bnb-4bit", "bnb_4bit", "gptq", "awq", "pt", "bin"}
 
 
 def detect_backend(manifest: Mapping[str, Any] | object) -> str:
@@ -231,10 +323,14 @@ def detect_backend(manifest: Mapping[str, Any] | object) -> str:
             raise ValueError(f"unsupported runtime_format {runtime!r}")
         return explicit[runtime]
     source = str(_field(manifest, "source_format", "") or "").lower()
-    path = str(_field(manifest, "path", "") or "").lower()
-    if source in _GGUF_FORMATS or path.endswith(".gguf"):
+    # Use _model_path to handle alias fields (path, model_path, artifact_path, etc.)
+    try:
+        model_path_str = _model_path(manifest).lower()
+    except ValueError:
+        model_path_str = str(_field(manifest, "path", "") or "").lower()
+    if source in _GGUF_FORMATS or model_path_str.endswith(".gguf"):
         return "llama.cpp"
-    if source in _HF_FORMATS or source.startswith("safetensors"):
+    if source in _HF_FORMATS or source.startswith("safetensors") or model_path_str.endswith(".safetensors"):
         return "vllm"
     raise ValueError(
         "cannot detect inference backend; set manifest runtime_format or source_format"

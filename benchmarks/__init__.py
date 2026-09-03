@@ -9,6 +9,7 @@ from .models import (
     VllmAdapter,
     adapter_for_manifest,
     detect_backend,
+    load_manifest,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "VllmAdapter",
     "adapter_for_manifest",
     "detect_backend",
+    "load_manifest",
 ]
