@@ -598,11 +598,7 @@ impl GpuAccelerator {
     /// On-device SAAQ reduction: pass 1 emits one partial winner per block, then a single
     /// warp-sized pass 2 reduces those partials to one final best walker.
     /// Launches on `stream` after `gif_step_weighted`; synchronizes before the minimal device read.
-    fn saaq_find_best_walker(
-        &mut self,
-        stream: &Stream,
-        neuron_count: usize,
-    ) -> GpuResult<u32> {
+    fn saaq_find_best_walker(&mut self, stream: &Stream, neuron_count: usize) -> GpuResult<u32> {
         self.ensure_temporal_state(neuron_count)?;
 
         let state = self
