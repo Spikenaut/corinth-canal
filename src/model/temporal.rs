@@ -11,7 +11,7 @@ use crate::gpu::{GpuAccelerator, GpuError, GpuResult};
 use crate::types::{ModelOutput, TelemetrySnapshot};
 impl Model {
     /// GPU-only temporal simulation with GIF (Generalized Integrate-and-Fire).
-    /// Phase 1: ensure state + load_synapse_weights_named + reset
+    /// Phase 1: ensure state + ensure_temporal_synapse_weights + reset
     /// Phase 2: gif_step_weighted_tick (with adaptation, dynamic threshold, weighted synapses)
     /// Downloads membrane + adaptation; uses existing projector (GIF-compatible via SpikingTernary).
     /// Fails fast with GpuError::NoGpu if GPU unavailable (no CPU fallback).
