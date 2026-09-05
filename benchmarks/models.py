@@ -385,7 +385,9 @@ class VllmAdapter(ModelAdapter):
 
 
 def _hf_trust_remote_code(options: Mapping[str, Any]) -> bool:
-    trust = bool(options.get("trust_remote_code", False))
+    trust = options.get("trust_remote_code", False)
+    if not isinstance(trust, bool):
+        raise ValueError("trust_remote_code must be a boolean")
     if trust:
         warnings.warn(
             "trust_remote_code=True allows arbitrary code execution from model files; "

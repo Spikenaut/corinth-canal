@@ -15,6 +15,7 @@ from benchmarks.models import (
     LlamaCppAdapter,
     MockModelAdapter,
     VllmAdapter,
+    _hf_trust_remote_code,
     _validate_generation,
     adapter_for_manifest,
     detect_backend,
@@ -81,6 +82,19 @@ class GenerationValidationTests(unittest.TestCase):
             _validate_generation({"temperature": math.inf})
         with self.assertRaisesRegex(ValueError, "finite"):
             _validate_generation({"temperature": -math.inf})
+
+
+class TrustRemoteCodeTests(unittest.TestCase):
+    def test_defaults_false_and_accepts_bool(self) -> None:
+        self.assertFalse(_hf_trust_remote_code({}))
+        self.assertFalse(_hf_trust_remote_code({"trust_remote_code": False}))
+        self.assertTrue(_hf_trust_remote_code({"trust_remote_code": True}))
+
+    def test_rejects_non_boolean_values(self) -> None:
+        for value in ("false", "true", 1, 0, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "boolean"):
+                    _hf_trust_remote_code({"trust_remote_code": value})
 
 
 class OptionalBackendTests(unittest.TestCase):
