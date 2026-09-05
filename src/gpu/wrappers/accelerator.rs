@@ -540,12 +540,13 @@ impl GpuAccelerator {
             .and_then(|state| state.synapse_signature.as_deref())
     }
 
-    /// Read the best solved assignment back out of the SAT solver into `output`.
+    /// Copy the best walker assignment into `output`.
     ///
     /// This wrapper matches the updated CUDA signature and blocks until the
     /// extract kernel has completed. It completes the pipeline whose reducer
     /// `satsolver_aux_reduce_best` is already live; it currently has no Rust
-    /// caller.
+    /// caller. The extract copies the selected walker's assignment without
+    /// verifying satisfaction — check the score / solution flag separately.
     #[allow(clippy::too_many_arguments)]
     pub fn satsolver_extract(
         &self,
