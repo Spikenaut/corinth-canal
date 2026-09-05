@@ -75,3 +75,7 @@ codacy-results.sarif
 .codacy/cli.sh
 # Codacy local CLI generated configs
 .codacy/codacy.config*.json
+
+# Python
+__pycache__/
+*.py[cod]

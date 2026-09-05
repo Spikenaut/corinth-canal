@@ -18,6 +18,7 @@ check:
 # Full test suite (CPU-only paths; GPU tests gated on hardware).
 test:
     cargo test
+    python3 -m unittest discover -s benchmarks/tests -v
 
 # GPU smoke test — 10k direct GPU ticks against a real GGUF checkpoint.
 # Requires CHECKPOINT_PATH in .env.local.
