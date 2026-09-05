@@ -167,8 +167,8 @@ class OptionalBackendTests(unittest.TestCase):
                 return "/usr/bin/main"
             return None
 
-        with mock.patch("benchmarks.models.importlib.import_module", side_effect=ImportError):
-            with mock.patch("benchmarks.models.shutil.which", side_effect=fake_which):
+        with mock.patch("benchmarks.models.shutil.which", side_effect=fake_which):
+            with mock.patch("benchmarks.models.importlib.import_module", side_effect=ImportError):
                 with self.assertRaisesRegex(BackendUnavailableError, "llama-cli"):
                     LlamaCppAdapter({"path": "tiny.gguf"}).load()
 
