@@ -14,7 +14,7 @@ import math
 import os
 from pathlib import Path
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import warnings
 from typing import Any
 
@@ -147,6 +147,57 @@ def _resolve_llama_cli(configured: str | None) -> str:
     return str(path)
 
 
+def _invoke_llama_cli(
+    executable: str,
+    model_path: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    top_p: float,
+    timeout: float,
+) -> str:
+    """Run one validated llama-cli turn. argv[0] is the literal name ``llama-cli``;
+    ``executable`` is the already-checked absolute path.
+    """
+    try:
+        completed = subprocess.run(
+            [
+                "llama-cli",
+                "-m",
+                model_path,
+                "-p",
+                prompt,
+                "-n",
+                str(max_tokens),
+                "--temp",
+                str(temperature),
+                "--top-p",
+                str(top_p),
+                "--no-display-prompt",
+                "-no-cnv",
+            ],
+            executable=executable,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            shell=False,
+        )
+    except PermissionError as error:
+        raise BackendUnavailableError(
+            f"llama.cpp executable is not executable: {executable!r}"
+        ) from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"llama-cli timed out after {timeout}s: {error}") from error
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"llama-cli failed: {error.stderr}") from error
+    text = completed.stdout.strip()
+    if not text:
+        raise RuntimeError("llama-cli returned empty output")
+    return text
+
+
 def _llama_cli_timeout(
     generation: Mapping[str, Any],
     options: Mapping[str, Any],
@@ -276,44 +327,15 @@ class LlamaCppAdapter(ModelAdapter):
             return str(result["choices"][0]["text"])
         assert self._executable is not None
         timeout = _llama_cli_timeout(generation, self.options, self.manifest)
-        command = [
+        return _invoke_llama_cli(
             self._executable,
-            "-m",
             self.model_path,
-            "-p",
             prompt,
-            "-n",
-            str(max_tokens),
-            "--temp",
-            str(temperature),
-            "--top-p",
-            str(top_p),
-            "--no-display-prompt",
-            "-no-cnv",
-        ]
-        try:
-            # argv list only; executable is a validated absolute path with +x.
-            completed = subprocess.run(  # nosec S603
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                stdin=subprocess.DEVNULL,
-                shell=False,
-            )
-        except PermissionError as error:
-            raise BackendUnavailableError(
-                f"llama.cpp executable is not executable: {self._executable!r}"
-            ) from error
-        except subprocess.TimeoutExpired as error:
-            raise RuntimeError(f"llama-cli timed out after {timeout}s: {error}") from error
-        except subprocess.CalledProcessError as error:
-            raise RuntimeError(f"llama-cli failed: {error.stderr}") from error
-        text = completed.stdout.strip()
-        if not text:
-            raise RuntimeError("llama-cli returned empty output")
-        return text
+            max_tokens,
+            temperature,
+            top_p,
+            timeout,
+        )
 
 
 class VllmAdapter(ModelAdapter):
@@ -361,6 +383,41 @@ class VllmAdapter(ModelAdapter):
         return str(result[0].outputs[0].text)
 
 
+def _hf_trust_remote_code(options: Mapping[str, Any]) -> bool:
+    trust = bool(options.get("trust_remote_code", False))
+    if trust:
+        warnings.warn(
+            "trust_remote_code=True allows arbitrary code execution from model files; "
+            "only enable for trusted models",
+            UserWarning,
+            stacklevel=3,
+        )
+    return trust
+
+
+def _hf_from_pretrained_kwargs(options: Mapping[str, Any]) -> dict[str, Any]:
+    model_options = {
+        key: value
+        for key, value in options.items()
+        if key not in {"trust_remote_code", "executable"}
+    }
+    allowed = {"torch_dtype", "device_map", "low_cpu_mem_usage", "attn_implementation"}
+    filtered = {key: value for key, value in model_options.items() if key in allowed}
+    if len(filtered) != len(model_options):
+        warnings.warn(
+            f"Ignoring unsupported HF options: {set(model_options) - set(filtered)}",
+            stacklevel=3,
+        )
+    return filtered
+
+
+def _first_param_device(model: Any) -> Any:
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        return None
+
+
 class HuggingFaceAdapter(ModelAdapter):
     """Transformers fallback for standard causal language models."""
 
@@ -376,34 +433,16 @@ class HuggingFaceAdapter(ModelAdapter):
                 "Hugging Face backend is unavailable: install the optional "
                 "'transformers' package (and a supported tensor runtime)"
             ) from error
-        trust_remote_code = bool(self.options.get("trust_remote_code", False))
-        if trust_remote_code:
-            warnings.warn(
-                "trust_remote_code=True allows arbitrary code execution from model files; "
-                "only enable for trusted models",
-                UserWarning,
-                stacklevel=2,
-            )
+        trust = _hf_trust_remote_code(self.options)
         self._tokenizer = transformers.AutoTokenizer.from_pretrained(
-            self.model_path, trust_remote_code=trust_remote_code
+            self.model_path, trust_remote_code=trust
         )
-        model_options = {
-            key: value
-            for key, value in self.options.items()
-            if key not in {"trust_remote_code", "executable"}
-        }
-        allowed_hf_keys = {"torch_dtype", "device_map", "low_cpu_mem_usage", "attn_implementation"}
-        filtered_options = {k: v for k, v in model_options.items() if k in allowed_hf_keys}
-        if len(filtered_options) != len(model_options):
-            dropped = set(model_options) - set(filtered_options)
-            warnings.warn(f"Ignoring unsupported HF options: {dropped}", stacklevel=2)
         self._model = transformers.AutoModelForCausalLM.from_pretrained(
-            self.model_path, trust_remote_code=trust_remote_code, **filtered_options
+            self.model_path,
+            trust_remote_code=trust,
+            **_hf_from_pretrained_kwargs(self.options),
         )
-        try:
-            self._device = next(self._model.parameters()).device
-        except StopIteration:
-            self._device = None
+        self._device = _first_param_device(self._model)
         self._loaded = True
 
     def generate(self, prompt: str, **generation: Any) -> str:

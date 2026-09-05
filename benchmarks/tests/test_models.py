@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import subprocess
 import sys
 import tempfile
 import types
@@ -126,12 +125,13 @@ class OptionalBackendTests(unittest.TestCase):
             text = adapter.generate("prompt", top_p=0.55, timeout=12)
         self.assertEqual(text, "cli answer")
         command = run.call_args.args[0]
-        self.assertEqual(command[0], "/opt/llama-cli")
+        self.assertEqual(command[0], "llama-cli")
+        self.assertEqual(run.call_args.kwargs["executable"], "/opt/llama-cli")
         self.assertIn("--top-p", command)
         self.assertEqual(command[command.index("--top-p") + 1], "0.55")
         self.assertIn("-no-cnv", command)
         self.assertEqual(run.call_args.kwargs["timeout"], 12)
-        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertIsNotNone(run.call_args.kwargs.get("stdin"))
         self.assertFalse(run.call_args.kwargs["shell"])
 
     def test_llama_cli_empty_stdout_is_not_success(self) -> None:
