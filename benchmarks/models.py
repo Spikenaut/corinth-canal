@@ -160,7 +160,8 @@ def _invoke_llama_cli(
     ``executable`` is the already-checked absolute path.
     """
     try:
-        completed = subprocess.run(
+        # executable was validated by _resolve_llama_cli (absolute path + execute bit).
+        completed = subprocess.run(  # nosec S603,B603
             [
                 "llama-cli",
                 "-m",
@@ -182,7 +183,7 @@ def _invoke_llama_cli(
             text=True,
             timeout=timeout,
             stdin=subprocess.DEVNULL,
-            shell=False,
+            shell=False,  # nosec S603,B603
         )
     except PermissionError as error:
         raise BackendUnavailableError(
