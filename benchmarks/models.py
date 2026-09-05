@@ -311,10 +311,19 @@ class LlamaCppAdapter(ModelAdapter):
         self._loaded = True
 
     def generate(self, prompt: str, **generation: Any) -> str:
-        if not self._loaded:
-            self.load()
-        if self._mode is None:
-            raise RuntimeError("LlamaCppAdapter not loaded correctly")
+        if not getattr(self, "_loaded", False):
+            try:
+                self.load()
+            except BackendUnavailableError:
+                raise
+            except Exception as error:
+                raise BackendUnavailableError(
+                    f"llama.cpp backend is unavailable: {error}"
+                ) from error
+        if not getattr(self, "_loaded", False) or getattr(self, "_mode", None) is None:
+            raise BackendUnavailableError(
+                "llama.cpp backend is unavailable: adapter did not finish loading"
+            )
         max_tokens, temperature, top_p = _validate_generation(generation)
         if self._mode == "python":
             assert self._model is not None

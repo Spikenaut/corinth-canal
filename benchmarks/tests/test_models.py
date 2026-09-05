@@ -175,6 +175,20 @@ class OptionalBackendTests(unittest.TestCase):
                 with self.assertRaisesRegex(BackendUnavailableError, "not executable"):
                     LlamaCppAdapter({"path": "tiny.gguf"}, executable=str(exe)).load()
 
+    def test_generate_after_failed_load_is_unavailable(self) -> None:
+        adapter = LlamaCppAdapter({"path": "tiny.gguf"})
+        del adapter._mode
+        with mock.patch.object(adapter, "load", side_effect=BackendUnavailableError("missing runtime")):
+            with self.assertRaises(BackendUnavailableError):
+                adapter.generate("prompt")
+
+    def test_generate_without_mode_is_unavailable(self) -> None:
+        adapter = LlamaCppAdapter({"path": "tiny.gguf"})
+        adapter._loaded = True
+        adapter._mode = None
+        with self.assertRaisesRegex(BackendUnavailableError, "did not finish loading"):
+            adapter.generate("prompt")
+
     def test_does_not_treat_main_on_path_as_llama_cli(self) -> None:
         def fake_which(name: str) -> str | None:
             if name == "main":

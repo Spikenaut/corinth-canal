@@ -42,7 +42,10 @@ jobs:
           cache-on-failure: true
 
       - name: Format check
-        run: cargo fmt --all -- --check    
+        run: cargo fmt --all -- --check
+
+      - name: Benchmark adapter unit tests
+        run: python3 -m unittest discover -s benchmarks/tests -v
 
       - name: Lint 
         run: cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code
