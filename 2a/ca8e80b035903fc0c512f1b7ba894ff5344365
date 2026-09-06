@@ -1,0 +1,27 @@
+src/moe/mod.rs
+  s_6512c408e2ebcf::t_3dcb75c8480869 12,77
+src/model/temporal.rs
+  s_6512c408e2ebcf::t_d6d68b860229ed 176-195
+  s_6512c408e2ebcf::t_3dcb75c8480869 11
+src/moe/tests.rs
+  s_6512c408e2ebcf::t_6468dc46fd2153 2384-2389,2393
+  s_6512c408e2ebcf::t_d3c16cc68fd9b4 2390-2392
+src/moe/adapter.rs
+  s_6512c408e2ebcf::t_b0610e9ecbf6c4 47-52,63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2aca8e80b035903fc0c512f1b7ba894ff5344365",
+  "prompts": {},
+  "sessions": {
+    "s_6512c408e2ebcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3fa19524-1458-473a-8358-545d96ad900a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
