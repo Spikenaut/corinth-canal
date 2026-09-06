@@ -1,0 +1,25 @@
+examples/support/observability.rs
+  s_6512c408e2ebcf::t_b7cc99a6604d42 557-563
+.github/workflows/gpu-tests.yml
+  s_6512c408e2ebcf::t_7ad8d3aa144a89 64,66,86-93
+examples/csv_replay.rs
+  s_6512c408e2ebcf::t_8944be4e8d9518 138
+examples/gpu_smoke_test.rs
+  s_6512c408e2ebcf::t_b7cc99a6604d42 119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d074afab2b0a125001cf53ca022968cedeee331b",
+  "prompts": {},
+  "sessions": {
+    "s_6512c408e2ebcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3fa19524-1458-473a-8358-545d96ad900a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
