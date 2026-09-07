@@ -1,0 +1,17 @@
+src/lib.rs
+  s_e914f161b87c02::t_f473cb62cc5be9 115
+src/experiment/schema.rs
+  s_09958359e33d8c::t_27269a9d104685 385-400,406-408,421-452
+  s_e914f161b87c02::t_efd74d8fd28d5d 409-414
+  s_09958359e33d8c::t_b0df7fb4922a09 9
+  s_09958359e33d8c::t_003ca73f4dc206 166,168-170,190-218
+  s_e914f161b87c02::t_f473cb62cc5be9 401-405,415-420
+src/experiment/mod.rs
+  s_e914f161b87c02::t_f473cb62cc5be9 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6f4491058b6786a165733503cc29cfbd7f7cdddf",
+  "prompts": {}
+}
