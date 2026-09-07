@@ -89,7 +89,11 @@ jobs:
           # device, so it can only compile. The self-hosted runner has the real
           # driver, so run the suite here. Device-dependent tests self-skip via
           # GpuContext::is_available() when no GPU is present.
-          nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+          # Informational only. A missing or failing nvidia-smi must not fail
+          # the step: the point of the runtime guards is that the suite
+          # degrades to skipping device tests rather than erroring.
+          nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || \
+            echo "nvidia-smi unavailable; device-dependent tests will self-skip"
           cargo test --all-targets --features cuda --locked
 
       - name: PR Comment on Success/Failure

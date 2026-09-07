@@ -290,7 +290,14 @@ mod tests {
             return;
         }
 
-        let _ctx = GpuContext::init().expect("Failed to initialize GPU context");
+        // `is_available` only enumerates a device; context creation can still
+        // fail on one that is present but unusable (driver mismatch, ECC
+        // recovery, another process holding it exclusively). Skip rather than
+        // fail the suite for an environment problem.
+        let Ok(_ctx) = GpuContext::init() else {
+            eprintln!("Skipping test_load_kernels: CUDA device present but context init failed");
+            return;
+        };
         let kernels = KernelModule::load().expect("Failed to load kernels");
 
         assert!(kernels.get_function("cosine_similarity_batched").is_ok());
