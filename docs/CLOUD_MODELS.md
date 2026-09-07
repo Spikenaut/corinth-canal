@@ -16,7 +16,13 @@ Cloud model metadata lives in `configs/saaq_cloud_lineup.toml`. Helper
 parsing/validation lives in `examples/support/mod.rs` and can be referenced via:
 
 ```bash
-CLOUD_LINEUP_CONFIG=configs/saaq_cloud_lineup.toml
+export CLOUD_LINEUP_CONFIG=configs/saaq_cloud_lineup.toml
+```
+
+Or as a per-command prefix, which is what the runners expect:
+
+```bash
+CLOUD_LINEUP_CONFIG=configs/saaq_cloud_lineup.toml cargo test --no-default-features cloud_lineup
 ```
 
 ## Cloud model entries
