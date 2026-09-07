@@ -584,6 +584,12 @@ def _normalized_field(manifest: Mapping[str, Any] | object, name: str) -> str:
     return str(value).strip().lower().replace("-", "_")
 
 
+# Runtimes named in the `loader_hint` domain of configs/model_adapter_configs.toml
+# that this module has no adapter for. Named explicitly so they produce an
+# actionable error instead of falling through to "cannot detect backend".
+_KNOWN_UNSUPPORTED_RUNTIMES = {"sglang"}
+
+
 def detect_backend(manifest: Mapping[str, Any] | object) -> str:
     """Choose a backend from explicit runtime and artifact format metadata.
 
@@ -601,27 +607,55 @@ def detect_backend(manifest: Mapping[str, Any] | object) -> str:
             )
         return backend
 
+    # Collect rather than raise mid-scan: a later field or the path suffix may
+    # still resolve a backend, and failing early would reject manifests that
+    # previously worked.
+    seen: list[tuple[str, str]] = []
+    deferred_error: str | None = None
+
     for field in _BACKEND_HINT_FIELDS:
         value = _normalized_field(manifest, field)
         if not value:
             continue
+        seen.append((field, value))
+
         if value == "custom_artifact":
-            raise ValueError(
+            deferred_error = deferred_error or (
                 f"{field} 'custom_artifact' names no inference runtime; set "
                 f"{_RUNTIME_OVERRIDE_FIELD} explicitly for this model"
             )
+            continue
+        if value in _KNOWN_UNSUPPORTED_RUNTIMES:
+            deferred_error = deferred_error or (
+                f"{field} {value!r} has no adapter in this package; set "
+                f"{_RUNTIME_OVERRIDE_FIELD} to one of "
+                f"{sorted(set(_EXPLICIT_RUNTIMES))}"
+            )
+            continue
+
         backend = _backend_from_runtime(value) or _backend_from_artifact(value, "")
         if backend is not None:
             return backend
 
     backend = _backend_from_artifact("", _resolved_model_path_lower(manifest))
-    if backend is None:
+    if backend is not None:
+        return backend
+
+    if deferred_error is not None:
+        raise ValueError(deferred_error)
+
+    if seen:
+        pairs = ", ".join(f"{field}={value!r}" for field, value in seen)
         raise ValueError(
-            "cannot detect inference backend; set "
-            f"{_RUNTIME_OVERRIDE_FIELD} or one of {list(_BACKEND_HINT_FIELDS)} "
-            "(saw none, and the model path has no recognised suffix)"
+            f"cannot detect inference backend; no value matched a known runtime "
+            f"or artifact format ({pairs}), and the model path has no recognised "
+            f"suffix"
         )
-    return backend
+    raise ValueError(
+        "cannot detect inference backend; set "
+        f"{_RUNTIME_OVERRIDE_FIELD} or one of {list(_BACKEND_HINT_FIELDS)} "
+        "(none were present, and the model path has no recognised suffix)"
+    )
 
 
 def adapter_for_manifest(

@@ -7,6 +7,12 @@
 # The Rust crate is the primary artifact; this is deliberately a thin,
 # dependency-light description of the Python side only.
 
+[build-system]
+# Declared explicitly so pip does not fall back to the legacy setuptools
+# backend, whose behaviour depends on the ambient setuptools version.
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "corinth-canal-benchmarks"
 version = "0.2.0"

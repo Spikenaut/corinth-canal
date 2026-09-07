@@ -237,8 +237,6 @@ class PackageExportTests(unittest.TestCase):
             self.assertEqual(load_manifest(path)["runtime_format"], "mock")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class DetectBackendProducerShapesTest(unittest.TestCase):
@@ -282,6 +280,27 @@ class DetectBackendProducerShapesTest(unittest.TestCase):
             "path": "/models/m.gguf",
         }
         self.assertEqual(detect_backend(manifest), "vllm")
+
+    def test_custom_artifact_still_resolves_from_a_path_suffix(self):
+        # Raising as soon as custom_artifact is seen would reject manifests
+        # that previously resolved via the path.
+        manifest = {"source_format": "custom_artifact", "path": "/models/m.gguf"}
+        self.assertEqual(detect_backend(manifest), "llama.cpp")
+
+    def test_sglang_is_named_as_unsupported(self):
+        # Documented in the loader_hint domain of model_adapter_configs.toml
+        # but has no adapter here.
+        with self.assertRaises(ValueError) as ctx:
+            detect_backend({"loader_hint": "sglang", "path": "/models/x"})
+        self.assertIn("sglang", str(ctx.exception))
+        self.assertIn("no adapter", str(ctx.exception))
+
+    def test_unrecognised_values_are_echoed_in_the_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            detect_backend({"source_format": "mystery", "path": "model.bin"})
+        message = str(ctx.exception)
+        self.assertIn("mystery", message)
+        self.assertIn("source_format", message)
 
     def test_custom_artifact_gets_an_explanatory_error(self):
         with self.assertRaises(ValueError) as ctx:
@@ -344,3 +363,5 @@ class HuggingFaceAdapterBehaviourTest(unittest.TestCase):
         self.assertTrue(calls["model"].get("trust_remote_code"))
 
 
+if __name__ == "__main__":
+    unittest.main()
