@@ -441,16 +441,41 @@ mod tests {
 
         let row = |index: usize| &projector.weights[index * feature_dim..(index + 1) * feature_dim];
 
-        // Under the old formula every row past ~422 was byte-identical.
-        let last = row(EMBEDDING_DIM - 1);
-        let penultimate = row(EMBEDDING_DIM - 2);
-        assert_ne!(last, penultimate, "final two output rows are identical");
-        assert!(
-            last.iter().any(|w| *w != last[0]),
-            "final output row is constant"
-        );
+        // Probe across the whole matrix, not only the tail. Restricting this
+        // to the last two rows would let a hash regression at low or mid
+        // indices pass silently, which the old formula's tail-first failure
+        // mode makes easy to overlook. Five rows of `feature_dim` floats is
+        // negligible next to the matrix itself.
+        let probes = [
+            0,
+            EMBEDDING_DIM / 4,
+            EMBEDDING_DIM / 2,
+            EMBEDDING_DIM - 2,
+            EMBEDDING_DIM - 1,
+        ];
 
-        // Distinctness over the final row only: ~12k values, negligible memory.
+        for &index in &probes {
+            let probed = row(index);
+            assert!(
+                probed.iter().any(|w| *w != probed[0]),
+                "output row {index} is constant"
+            );
+        }
+
+        // Under the old formula every row past ~422 was byte-identical, so
+        // pairwise inequality is the sharp regression signal.
+        for (position, &left) in probes.iter().enumerate() {
+            for &right in &probes[position + 1..] {
+                assert_ne!(
+                    row(left),
+                    row(right),
+                    "output rows {left} and {right} are identical"
+                );
+            }
+        }
+
+        // Distinctness within one row: ~12k values, negligible memory.
+        let last = row(EMBEDDING_DIM - 1);
         let distinct_in_last_row: std::collections::HashSet<u32> =
             last.iter().map(|w| w.to_bits()).collect();
         assert!(
