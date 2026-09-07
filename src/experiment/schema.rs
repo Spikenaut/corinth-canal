@@ -6,6 +6,7 @@
 //! `Surrogate_Viz.jl`.
 
 use crate::error::{HybridError, Result};
+use crate::types::ModelFamily;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -223,9 +224,21 @@ impl RunMatrix {
     /// - Every enabled run has explicit router and norm policy.
     /// - Grok-1 cannot be selected unless `GROK1_ARTIFACT_READY=1`.
     /// - Unknown model families are rejected.
+    /// Validate the matrix, reading the Grok-1 readiness flag from the
+    /// environment.
+    ///
+    /// This is the only environment read in this module and it is a readiness
+    /// flag, not a path — see the invariant in CLAUDE.md.
     pub fn validate(&self) -> Result<()> {
         let grok_ready = std::env::var("GROK1_ARTIFACT_READY").is_ok_and(|v| v == "1");
+        self.validate_with(grok_ready)
+    }
 
+    /// Validation proper, with the Grok-1 gate passed in.
+    ///
+    /// Split out so every rejection branch is testable without mutating
+    /// process-global environment state from a test.
+    pub fn validate_with(&self, grok_ready: bool) -> Result<()> {
         for run in &self.runs {
             // Skip validation for explicitly skipped runs.
             if run.skip_reason.is_some() {
@@ -269,29 +282,17 @@ impl RunMatrix {
                 )));
             }
 
-            const KNOWN_FAMILIES: &[&str] = &[
-                "olmoe",
-                "qwen3_moe",
-                "gemma4",
-                "deepseek2",
-                "llama_moe",
-                "moonlight_16b_a3b",
-                "granite_3_1_a800m",
-                "nemotron",
-                "lfm2_moe",
-                "slim_moe",
-                "zaya",
-                "glm4",
-                "gpt_oss",
-                "step",
-                "minimax",
-                "cohere",
-                "grin",
-                "skyworks",
-                "trinity",
-                "grok",
-            ];
-            if !KNOWN_FAMILIES.contains(&run.model_family.as_str()) {
+            // Validate through the enum rather than a hand-maintained list.
+            // This was a third copy of the family names — after
+            // `ModelFamily::slug` and `configs/model_adapter_configs.toml` —
+            // and a new variant silently failed to reach it.
+            //
+            // Requiring `slug() == model_family` keeps the accepted set exactly
+            // the canonical slugs: `from_alias` also accepts shorthands such as
+            // "qwen", which must not be valid in a matrix file.
+            let known_family = ModelFamily::from_alias(&run.model_family)
+                .is_some_and(|family| family.slug() == run.model_family);
+            if !known_family {
                 return Err(HybridError::InvalidConfig(format!(
                     "run '{}' uses unknown model_family '{}'",
                     run.run_id, run.model_family
@@ -347,5 +348,50 @@ mod tests {
         let parsed: ExperimentSummary = serde_json::from_value(serde_json::Value::Object(obj))
             .expect("old summary without field");
         assert_eq!(parsed.projection_mode, None);
+    }
+}
+
+#[cfg(test)]
+mod validate_tests {
+    use super::*;
+
+    /// Every string `KNOWN_FAMILIES` accepts must round-trip through the enum.
+    /// If this holds, the hand-maintained list is redundant with `ModelFamily`.
+    #[test]
+    fn known_families_round_trip_through_the_enum() {
+        const KNOWN: &[&str] = &[
+            "olmoe",
+            "qwen3_moe",
+            "gemma4",
+            "deepseek2",
+            "llama_moe",
+            "moonlight_16b_a3b",
+            "granite_3_1_a800m",
+            "nemotron",
+            "lfm2_moe",
+            "slim_moe",
+            "zaya",
+            "glm4",
+            "gpt_oss",
+            "step",
+            "minimax",
+            "cohere",
+            "grin",
+            "skyworks",
+            "trinity",
+            "grok",
+        ];
+        let mut unmatched = Vec::new();
+        for slug in KNOWN {
+            match ModelFamily::from_alias(slug) {
+                Some(family) if family.slug() == *slug => {}
+                Some(family) => unmatched.push(format!("{slug} -> {:?} (slug {})", family, family.slug())),
+                None => unmatched.push(format!("{slug} -> None")),
+            }
+        }
+        assert!(
+            unmatched.is_empty(),
+            "these do not round-trip: {unmatched:?}"
+        );
     }
 }
