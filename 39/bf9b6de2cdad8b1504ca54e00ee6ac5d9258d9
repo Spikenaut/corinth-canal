@@ -1,0 +1,19 @@
+configs/local_gguf_lineup.template.toml
+  s_7842f0ddb6086b::t_b3155f3b332c63 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "39bf9b6de2cdad8b1504ca54e00ee6ac5d9258d9",
+  "prompts": {},
+  "sessions": {
+    "s_7842f0ddb6086b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e76f216-ff17-4011-9e78-70e5f752bc4c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
