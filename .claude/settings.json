@@ -21,8 +21,32 @@
       "Bash(gh pr diff:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
+      "Bash(bd prime)",
+      "Bash(bd ready)",
+      "Bash(bd show:*)",
+      "Bash(bd list:*)",
       "mcp__github__pull_request_read"
     ],
-    "ask": []
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue close:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo llvm-cov:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo publish:*)",
+      "Bash(just setup)",
+      "Bash(bd create:*)",
+      "Bash(bd close:*)",
+      "Bash(bd update:*)",
+      "Bash(bd remember:*)"
+    ]
   }
 }
