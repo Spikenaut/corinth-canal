@@ -1,0 +1,20 @@
+src/moe/tests.rs
+  s_e914f161b87c02::t_847398727c23ea 6
+  s_e914f161b87c02::t_cc63a4b3ebb5e2 8-37,39-40,48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d89e9c869681586941b300b7ce66709b55a268cb",
+  "prompts": {},
+  "sessions": {
+    "s_e914f161b87c02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c993de1-00c0-43ff-99d9-0bf807166a54",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
