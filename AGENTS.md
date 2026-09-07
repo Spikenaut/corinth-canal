@@ -143,7 +143,10 @@ Run `cargo check --no-default-features && cargo test --no-default-features` loca
 
 - All `corinth-canal` work stays in the repository root.
 - Do not create or use additional `corinth-canal` worktrees outside the main repo.
-- External edits are limited to approved research tools and dependencies unless explicitly requested.
+- Do not edit files outside this repository, and do not add dependencies, unless
+  the task explicitly asks for it. This previously read "limited to approved
+  research tools", which depended on an inventory this document no longer keeps;
+  the constraint was always about scope, not about which tool you drive.
 
 ## Git Workflow
 
