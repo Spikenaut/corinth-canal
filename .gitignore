@@ -67,7 +67,8 @@ configs/safetensors_lineup.toml
 # Claude Code settings are per-machine, not shared state. Tracking
 # settings.json (GH#139) made a permission list that only suits one
 # workstation into repo-wide state, and every pull reverted local edits
-# to it. CLAUDE.md stays tracked -- that is the part cloud agents need.
+# to it. Copy .claude/settings.example.json to settings.local.json instead.
+# CLAUDE.md stays tracked -- that is the part cloud agents need.
 .claude/settings.json
 .claude/settings.local.json
 
