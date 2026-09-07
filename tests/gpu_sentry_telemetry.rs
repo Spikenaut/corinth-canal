@@ -9,7 +9,7 @@
 mod gpu_telemetry_tests {
     use corinth_canal::gpu::wrappers::error::GpuError;
     use corinth_canal::gpu::wrappers::sentry_capture::{
-        LaunchContext, LaunchType, capture_launch_failure,
+        LaunchContext, LaunchType, capture_launch_failure, error_category, launch_event_message,
     };
 
     #[test]
@@ -43,7 +43,8 @@ mod gpu_telemetry_tests {
         };
         let error = GpuError::LaunchFailed("CUDA error: invalid configuration".to_string());
 
-        // Should be a no-op when Sentry is not configured
+        assert_eq!(error_category(&error), "launch_failed");
+        // Should be a no-op when Sentry is not configured.
         capture_launch_failure(context, &error, None);
     }
 
@@ -65,7 +66,11 @@ mod gpu_telemetry_tests {
             "info: 0 bytes gmem".to_string(),
         );
 
-        // Should handle JIT logs without panicking
+        assert_eq!(error_category(&error), "module_load_failed");
+        assert_eq!(
+            launch_event_message(&error, &context.kernel_name),
+            "CUDA fatbin module load failed: spiking_network"
+        );
         capture_launch_failure(context, &error, Some(jit_logs));
     }
 
@@ -81,6 +86,11 @@ mod gpu_telemetry_tests {
         };
         let error = GpuError::LaunchFailed("CUDA runtime error code 1".to_string());
 
+        assert_eq!(error_category(&error), "launch_failed");
+        assert_eq!(
+            launch_event_message(&error, &context.kernel_name),
+            "CUDA kernel launch failed: gif_step_weighted_f16"
+        );
         capture_launch_failure(context, &error, None);
     }
 
@@ -107,8 +117,9 @@ mod gpu_telemetry_tests {
         ];
 
         for (expected_category, error) in test_cases {
+            let kernel_name = format!("test_{expected_category}");
             let context = LaunchContext {
-                kernel_name: format!("test_{}", expected_category),
+                kernel_name: kernel_name.clone(),
                 launch_type: LaunchType::PtxFatbin,
                 grid: (1, 1, 1),
                 block: (256, 1, 1),
@@ -116,7 +127,15 @@ mod gpu_telemetry_tests {
                 neuron_count: None,
             };
 
-            // Should handle all error types without panicking
+            // The category is the Sentry grouping key, so assert it rather than
+            // only checking that capture does not panic.
+            assert_eq!(error_category(&error), expected_category);
+
+            // The event title must carry the kernel name and never the error
+            // payload, which can embed a fatbin or .ptx path.
+            let message = launch_event_message(&error, &kernel_name);
+            assert!(message.contains(&kernel_name), "message: {message}");
+
             capture_launch_failure(context, &error, None);
         }
     }
@@ -134,6 +153,16 @@ mod gpu_telemetry_tests {
         };
         let error = GpuError::LaunchFailed("too many resources requested".to_string());
 
+        assert_eq!(error_category(&error), "launch_failed");
+        assert_eq!(
+            launch_event_message(&error, &context.kernel_name),
+            "CUDA kernel launch failed: satsolver_aux_update"
+        );
+        assert!(
+            !launch_event_message(&error, &context.kernel_name)
+                .contains("too many resources requested"),
+            "event title must not carry the error payload"
+        );
         capture_launch_failure(context, &error, None);
     }
 
@@ -150,6 +179,12 @@ mod gpu_telemetry_tests {
         };
         let error = GpuError::ModuleLoadFailed("empty fatbin".to_string());
 
+        assert_eq!(error_category(&error), "module_load_failed");
+        assert_eq!(
+            launch_event_message(&error, &context.kernel_name),
+            "CUDA fatbin module load failed: module_load"
+        );
+        // Zero dimensions are the module-load shape; capture must still accept them.
         capture_launch_failure(context, &error, None);
     }
 
@@ -165,6 +200,7 @@ mod gpu_telemetry_tests {
             neuron_count: Some(2048),
         };
         let error = GpuError::LaunchFailed("test".to_string());
+        assert_eq!(context_with_neurons.neuron_count, Some(2048));
         capture_launch_failure(context_with_neurons, &error, None);
 
         // Test without neuron count
@@ -176,6 +212,7 @@ mod gpu_telemetry_tests {
             shared_mem: 0,
             neuron_count: None,
         };
+        assert_eq!(context_without_neurons.neuron_count, None);
         capture_launch_failure(context_without_neurons, &error, None);
     }
 }

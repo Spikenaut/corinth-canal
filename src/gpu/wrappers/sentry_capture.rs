@@ -71,6 +71,40 @@ pub struct LaunchContext {
     /// Neuron count (when applicable for temporal kernels)
     pub neuron_count: Option<usize>,
 }
+/// Stable Sentry tag value for a GPU error kind.
+///
+/// Pure, and public so tests can assert on it. Previously this lived inline in
+/// `capture_launch_failure`, which returns early without a Sentry client, so
+/// the only way to exercise it was to call a function that did nothing and
+/// assert nothing about it.
+///
+/// These strings are grouping keys in Sentry: changing one splits an existing
+/// issue's history, so treat them as a contract rather than as labels.
+pub fn error_category(error: &GpuError) -> &'static str {
+    match error {
+        GpuError::LaunchFailed(_) => "launch_failed",
+        GpuError::ModuleLoadFailed(_) => "module_load_failed",
+        GpuError::MemoryError(_) => "memory_error",
+        GpuError::InitFailed(_) => "init_failed",
+        GpuError::KernelNotFound(_) => "kernel_not_found",
+        GpuError::CudaError(_) => "cuda_error",
+        GpuError::NoGpu => "no_gpu",
+    }
+}
+
+/// Sentry event title for a launch failure.
+///
+/// Carries the kernel name but never the error payload, which can embed a
+/// fatbin or .ptx path.
+pub fn launch_event_message(error: &GpuError, kernel_name: &str) -> String {
+    match error {
+        GpuError::ModuleLoadFailed(_) => {
+            format!("CUDA fatbin module load failed: {kernel_name}")
+        }
+        GpuError::LaunchFailed(_) => format!("CUDA kernel launch failed: {kernel_name}"),
+        other => format!("CUDA GPU error [{}]: {kernel_name}", error_category(other)),
+    }
+}
 
 /// Capture a CUDA kernel launch failure and send it to Sentry.
 ///
@@ -93,26 +127,8 @@ pub fn capture_launch_failure(
         return;
     }
 
-    let error_category = match error {
-        GpuError::LaunchFailed(_) => "launch_failed",
-        GpuError::ModuleLoadFailed(_) => "module_load_failed",
-        GpuError::MemoryError(_) => "memory_error",
-        GpuError::InitFailed(_) => "init_failed",
-        GpuError::KernelNotFound(_) => "kernel_not_found",
-        GpuError::CudaError(_) => "cuda_error",
-        GpuError::NoGpu => "no_gpu",
-    };
-
-    let event_message = match error {
-        GpuError::ModuleLoadFailed(_) => {
-            format!("CUDA fatbin module load failed: {}", context.kernel_name)
-        }
-        GpuError::LaunchFailed(_) => format!("CUDA kernel launch failed: {}", context.kernel_name),
-        _ => format!(
-            "CUDA GPU error [{}]: {}",
-            error_category, context.kernel_name
-        ),
-    };
+    let error_category = error_category(error);
+    let event_message = launch_event_message(error, &context.kernel_name);
 
     let gpu_arch = runtime_gpu_arch_tag();
 
