@@ -1,0 +1,19 @@
+.claude/settings.example.json
+  s_7842f0ddb6086b::t_0c1e38be592789 10-17,23-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bc9b7a772afcb30c9d2c8d0a94b7c53180a4b9d8",
+  "prompts": {},
+  "sessions": {
+    "s_7842f0ddb6086b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e76f216-ff17-4011-9e78-70e5f752bc4c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
