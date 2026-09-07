@@ -337,7 +337,9 @@ impl<'a> GgufCursor<'a> {
     }
 
     fn skip_value_depth(&mut self, value_type: u32, path: &str, depth: usize) -> Result<()> {
-        if depth > MAX_VALUE_NESTING {
+        // `depth` is 0-based for the outermost value, so `>=` admits exactly
+        // MAX_VALUE_NESTING levels. `>` admitted one more than documented.
+        if depth >= MAX_VALUE_NESTING {
             return Err(HybridError::UnsupportedFormat(format!(
                 "GGUF metadata array nesting exceeds {MAX_VALUE_NESTING} levels"
             )));
@@ -414,6 +416,58 @@ mod hardening_tests {
             Ok(_) => panic!("deeply nested array must be rejected"),
             Err(err) => assert!(
                 err.to_string().contains("nesting exceeds"),
+                "unexpected error: {err}"
+            ),
+        }
+    }
+
+    #[test]
+    fn nesting_bound_admits_exactly_max_value_nesting_levels() {
+        // `depth` is 0-based, so the guard must reject at MAX_VALUE_NESTING,
+        // not MAX_VALUE_NESTING + 1. Previously nine levels were accepted.
+        // `gguf_with_nested_array(n)` yields n + 1 recursion levels: the KV
+        // value itself is the outermost ARRAY, then n nested ones.
+        let deepest_ok = MAX_VALUE_NESTING - 2;
+        let accepted = gguf_with_nested_array(deepest_ok);
+        assert!(
+            parse_checkpoint_layout(&accepted, "ok.gguf").is_ok(),
+            "{} nested levels must be accepted",
+            deepest_ok
+        );
+
+        let rejected = gguf_with_nested_array(deepest_ok + 1);
+        match parse_checkpoint_layout(&rejected, "too-deep.gguf") {
+            Ok(_) => panic!("{} nested levels must be rejected", deepest_ok + 1),
+            Err(err) => assert!(
+                err.to_string().contains("nesting exceeds"),
+                "unexpected error: {err}"
+            ),
+        }
+    }
+
+    #[test]
+    fn tensor_offset_overflow_is_rejected() {
+        // `relative_offset` is read from the file, so `data_start + relative`
+        // is attacker-influenced. Unchecked it panics in debug and wraps into a
+        // plausible in-bounds offset in release.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"GGUF");
+        buf.extend_from_slice(&3u32.to_le_bytes()); // version
+        buf.extend_from_slice(&1u64.to_le_bytes()); // tensor_count
+        buf.extend_from_slice(&0u64.to_le_bytes()); // kv_count
+
+        let name = b"blk.0.attn_q.weight";
+        buf.extend_from_slice(&(name.len() as u64).to_le_bytes());
+        buf.extend_from_slice(name);
+        buf.extend_from_slice(&1u32.to_le_bytes()); // n_dims
+        buf.extend_from_slice(&4u64.to_le_bytes()); // dim[0]
+        buf.extend_from_slice(&0u32.to_le_bytes()); // ggml_type F32
+        buf.extend_from_slice(&u64::MAX.to_le_bytes()); // relative_offset
+
+        match parse_checkpoint_layout(&buf, "overflow.gguf") {
+            Ok(_) => panic!("overflowing tensor offset must be rejected"),
+            Err(err) => assert!(
+                err.to_string().contains("overflow"),
                 "unexpected error: {err}"
             ),
         }
