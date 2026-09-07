@@ -1,0 +1,21 @@
+src/moe/gguf/dequant.rs
+  s_6512c408e2ebcf::t_c705154a7124ab 274-276
+.claude/settings.json
+  ai_agent 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "779dcedc8ac0fd04c171896b6f8a74a39bf3a542",
+  "prompts": {},
+  "sessions": {
+    "s_6512c408e2ebcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3fa19524-1458-473a-8358-545d96ad900a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
