@@ -7,16 +7,21 @@
     "",
     "    cp .claude/settings.example.json .claude/settings.local.json",
     "",
-    "Only read-only, non-mutating commands are pre-approved here, so a cloud",
-    "or web agent can investigate the repository without prompting while any",
-    "action that writes, pushes, or publishes still asks."
+    "Only non-mutating commands are pre-approved, so a cloud or web agent can",
+    "investigate the repository without prompting while anything that writes,",
+    "pushes or publishes still asks.",
+    "",
+    "Note the fmt and clippy entries are pinned to their exact check-only",
+    "forms. A bare `cargo fmt` rewrites sources and `cargo clippy --fix`",
+    "applies suggestions, so a `cargo fmt:*` style prefix would have granted",
+    "write access to the tree -- the opposite of what this template promises."
   ],
   "permissions": {
     "allow": [
       "Bash(cargo check:*)",
       "Bash(cargo test:*)",
-      "Bash(cargo clippy:*)",
-      "Bash(cargo fmt:*)",
+      "Bash(cargo fmt --all -- --check)",
+      "Bash(cargo clippy --all-targets --no-default-features -- -D warnings -A dead_code)",
       "Bash(cargo tree:*)",
       "Bash(cargo metadata:*)",
       "Bash(just --list)",
