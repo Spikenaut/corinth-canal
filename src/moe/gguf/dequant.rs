@@ -271,7 +271,9 @@ pub(in crate::moe) fn f16_to_f32(bits: u16) -> f32 {
         // Reusing the shifted mantissa directly as an f32 bit pattern — the
         // previous behaviour — reinterpreted it as an f32 subnormal instead,
         // yielding ~1.1e-41..1.2e-38 where the true range is 6.0e-8..6.1e-5.
-        // Every value came out too small by a factor of 2^111 (~5.19e33).
+        // Every value came out too small by a factor of 2^112 (~5.19e33):
+        // the old path yielded mantissa * 2^13 * 2^-149 = mantissa * 2^-136,
+        // against a true mantissa * 2^-24.
         const SUBNORMAL_SCALE: f32 = 1.0 / 16_777_216.0; // 2^-24
         let magnitude = ((bits & 0x03FF) as f32) * SUBNORMAL_SCALE;
         return f32::from_bits(sign | magnitude.to_bits());
