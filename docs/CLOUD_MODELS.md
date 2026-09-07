@@ -22,7 +22,15 @@ export CLOUD_LINEUP_CONFIG=configs/saaq_cloud_lineup.toml
 Or as a per-command prefix, which is what the runners expect:
 
 ```bash
-CLOUD_LINEUP_CONFIG=configs/saaq_cloud_lineup.toml cargo test --no-default-features cloud_lineup
+CLOUD_LINEUP_CONFIG=configs/saaq_cloud_lineup.toml cargo run --release --example saaq_latent_calibration
+```
+
+Note that the lineup parsing tests do **not** read this variable —
+`cloud_lineup_parses_valid_toml` writes its own temporary TOML — so prefixing
+`cargo test` with it proves nothing about the shipped file:
+
+```bash
+cargo test --no-default-features cloud_lineup
 ```
 
 ## Cloud model entries

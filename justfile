@@ -53,9 +53,11 @@ saaq-campaign:
         cargo run --release --example saaq_latent_calibration
     @echo "ok: campaign finished; see artifacts/index.csv"
 
-# Force CSV-replay mode for the SAAQ sweep. TELEMETRY_CSV_PATH must be set
-# in .env.local or exported in the environment -- this recipe takes no
-# parameters, so it must be passed as a variable assignment:
+# Force CSV-replay mode for the SAAQ sweep. TELEMETRY_CSV_PATH overrides the
+# CSV to replay; when it is unset, telemetry_csv_path_from_env falls back to
+# `telemetry.csv` relative to the working directory, so the sweep runs against
+# whatever that resolves to rather than failing. This recipe takes no
+# parameters, so set it in .env.local or pass it as a variable assignment:
 #   TELEMETRY_CSV_PATH=/path/to/telemetry.csv just saaq-csv
 saaq-csv:
     TELEMETRY_SOURCE=csv cargo run --release --example saaq_latent_calibration
