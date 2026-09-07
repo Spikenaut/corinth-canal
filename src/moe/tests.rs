@@ -3,11 +3,41 @@ use super::checkpoint::{dequantize_row_iq3_m, tensor_row_size};
 use super::safetensors::dtype_size_bytes;
 use super::*;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-fn write_temp_file(bytes: &[u8], label: &str) -> PathBuf {
+/// A GGUF fixture on disk that deletes itself when it goes out of scope.
+///
+/// Cleanup used to be 30 hand-placed `remove_file` calls sitting *after* the
+/// assertions, so any failing test leaked its fixture — 4.5-8.4 MB each. The
+/// sibling `safetensors` test module already had this pattern; this mirrors it.
+struct TempGgufFile(PathBuf);
+
+impl std::ops::Deref for TempGgufFile {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempGgufFile {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempGgufFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn write_temp_file(bytes: &[u8], label: &str) -> TempGgufFile {
+    // Process id as well as nanos: two test binaries running concurrently can
+    // otherwise collide on the same nanosecond.
     let path = std::env::temp_dir().join(format!(
-        "corinth_canal_{label}_{}.gguf",
+        "corinth_canal_{label}_{}_{}.gguf",
+        std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -15,7 +45,7 @@ fn write_temp_file(bytes: &[u8], label: &str) -> PathBuf {
     ));
     let mut file = std::fs::File::create(&path).unwrap();
     file.write_all(bytes).unwrap();
-    path
+    TempGgufFile(path)
 }
 
 fn push_u32(out: &mut Vec<u8>, value: u32) {
@@ -375,8 +405,6 @@ fn test_dense_sim_uses_real_gate_weights() {
     assert_eq!(out.selected_experts[0], 0);
     assert_eq!(model.family(), ModelFamily::Olmoe);
     assert_eq!(model.routing_tensor_name(), "blk.0.ffn_gate_inp.weight");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -394,8 +422,6 @@ fn test_quantized_synapse_probe_uses_routing_f32_fallback() {
     );
     assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
     assert_eq!(metadata.synapse_source, "routing-f32");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -436,8 +462,6 @@ fn test_quantized_attn_q_does_not_advertise_real_gpu_synapse_tensor() {
     );
     assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
     assert_eq!(metadata.synapse_source, "routing-f32");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -461,8 +485,6 @@ fn test_preferred_synapse_descriptor_iq3s_uses_routing_f32_fallback() {
     assert!(!descriptor.has_dequant_path);
     assert_eq!(model.real_gpu_synapse_tensor_name(), None);
     assert_eq!(model.synapse_source(), "routing-f32");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -486,8 +508,6 @@ fn test_preferred_synapse_descriptor_f16_has_dequant_path() {
         Some("blk.0.attn_q.weight")
     );
     assert_eq!(model.synapse_source(), "real");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -515,8 +535,6 @@ fn test_preferred_synapse_descriptor_q8_0_has_dequant_path() {
         Some("blk.0.attn_q.weight")
     );
     assert_eq!(model.synapse_source(), "dequantized-q8_0");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -531,8 +549,6 @@ fn test_q8_0_synapse_probe_uses_dequantized_source() {
     );
     assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
     assert_eq!(metadata.synapse_source, "dequantized-q8_0");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -547,8 +563,6 @@ fn test_synapse_tensor_row_major_shape_reports_q8_0_dims() {
         .synapse_tensor_row_major_shape("blk.0.attn_q.weight")
         .expect("Q8_0 synapse tensor shape must be readable");
     assert_eq!(shape, (EMBEDDING_DIM, EMBEDDING_DIM));
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -587,8 +601,6 @@ fn test_synapse_tensor_row_major_shape_uses_one_row_for_rank_one_tensor() {
         .synapse_tensor_row_major_shape("rank1.tensor")
         .expect("rank-1 tensor shape must be readable");
     assert_eq!(shape, (1, 7));
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -627,8 +639,6 @@ fn test_synapse_tensor_row_major_shape_rejects_zero_dim_tensor() {
         .synapse_tensor_row_major_shape("zero-dim.tensor")
         .expect_err("zero-dim tensor must be rejected");
     assert!(matches!(err, HybridError::UnsupportedFormat(_)));
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -656,8 +666,6 @@ fn test_preferred_synapse_descriptor_q5_k_has_dequant_path() {
         Some("blk.0.attn_q.weight")
     );
     assert_eq!(model.synapse_source(), "dequantized-q5_k");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -672,8 +680,6 @@ fn test_q5_k_synapse_probe_uses_dequantized_source() {
     );
     assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
     assert_eq!(metadata.synapse_source, "dequantized-q5_k");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -688,8 +694,6 @@ fn test_q6_k_synapse_probe_uses_dequantized_source() {
     );
     assert_eq!(metadata.real_gpu_synapse_tensor_name, None);
     assert_eq!(metadata.synapse_source, "dequantized-q6_k");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -740,8 +744,6 @@ fn test_q5_k_dequantize_full_tensor_succeeds() {
     assert_eq!(weights[127], 1.0_f32, "element 127 should be 1.0");
     assert_eq!(weights[128], 1.0_f32, "element 128 should be 1.0");
     assert_eq!(weights[255], 1.0_f32, "element 255 should be 1.0");
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -778,8 +780,6 @@ fn test_q6_k_dequantize_full_tensor_succeeds() {
         "element 255 should be -32.0, got {}",
         weights[255]
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -1528,7 +1528,6 @@ fn test_router_crate_private_dequant_helpers_reachable() {
     assert!(model.routing_f32_synapse_tensor_name().is_none());
     assert!(model.routing_f32_synapse_weights("nope").is_err());
     let _ = model.dequantized_q8_0_synapse_weights("blk.0.attn_q.weight");
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1628,7 +1627,6 @@ fn test_adapter_resolve_tok_embeddings_fallback() {
         super::adapter::SynapseSource::RoutingF32
     );
     assert!(adapter.dequant_iq3_m_synapse_tensor.is_none());
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1671,7 +1669,6 @@ fn test_adapter_resolve_tok_embeddings_unsupported_type() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("tok_embeddings.weight")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1712,7 +1709,6 @@ fn test_adapter_resolve_token_embedding_invalid_rank() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1753,7 +1749,6 @@ fn test_adapter_resolve_token_embedding_mismatched_width() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1794,7 +1789,6 @@ fn test_adapter_resolve_token_embedding_zero_vocab() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1840,7 +1834,6 @@ fn test_adapter_resolve_token_embedding_q8_0_misaligned_width() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("token_embd.weight")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1884,7 +1877,6 @@ fn test_adapter_does_not_treat_wire_type_31_as_iq3_m() {
         adapter.synapse_source,
         super::adapter::SynapseSource::RoutingF32
     );
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1919,7 +1911,6 @@ fn test_adapter_resolve_token_embedding_missing() {
         result,
         Err(HybridError::MissingTensor { name, .. }) if name == "token_embd.weight"
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1953,7 +1944,6 @@ fn test_adapter_resolve_routing_missing() {
         result,
         Err(HybridError::MissingTensor { name, .. }) if name == "ffn_gate_inp.weight"
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -1994,7 +1984,6 @@ fn test_adapter_resolve_routing_wrong_type() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("must be rank-2 F32")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -2035,7 +2024,6 @@ fn test_adapter_resolve_routing_insufficient_experts() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("only exposes 1 experts")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -2077,7 +2065,6 @@ fn test_adapter_resolve_routing_invalid_orientation() {
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains("unsupported orientation")
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -2124,7 +2111,6 @@ fn test_adapter_resolve_quantized_synapse_rank_not_two() {
         adapter.routing_f32_synapse_tensor.as_deref(),
         Some("blk.0.ffn_gate_inp.weight")
     );
-    let _ = std::fs::remove_file(&path);
 }
 
 fn build_standard_adapter_gguf() -> Vec<u8> {
@@ -2166,7 +2152,6 @@ fn assert_topology_key_required(key: &str, fixture_name: &str, expected_fragment
         result,
         Err(HybridError::UnsupportedFormat(msg)) if msg.contains(expected_fragment)
     ));
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
