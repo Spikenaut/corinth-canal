@@ -314,8 +314,9 @@ pub fn redact_absolute_paths(text: &str) -> String {
     // a trailing colon was swallowed into the stem (`<path:model.gguf:>`) and
     // comma-adjacent paths merged into one candidate, losing the first
     // checkpoint's identity.
-    const DELIMITERS: [char; 16] = [
-        ' ', '\t', '\n', '\r', '"', '\'', '(', ')', '[', ']', ':', ',', '=', ';', '<', '>',
+    const DELIMITERS: [char; 18] = [
+        ' ', '\t', '\n', '\r', '"', '\'', '(', ')', '[', ']', ':', ',', '=', ';', '<', '>', '{',
+        '}',
     ];
 
     fn stem_of(candidate: &str) -> String {
@@ -356,12 +357,15 @@ pub fn redact_absolute_paths(text: &str) -> String {
                 .chars()
                 .next_back()
                 .is_some_and(|prev| DELIMITERS.contains(&prev));
+        // UNC shares (\\\\server\\share\\a.gguf) start with a backslash, so they
+        // match neither the drive-letter test below nor the POSIX one.
+        let unc_path = prev_is_boundary && rest.starts_with("\\\\") && rest.len() > 2;
         let windows_path = prev_is_boundary
             && ch.is_ascii_alphabetic()
             && rest.len() > 3
             && bytes.get(idx + 1) == Some(&b':')
             && bytes.get(idx + 2) == Some(&b'\\');
-        if windows_path {
+        if windows_path || unc_path {
             let end = rest
                 .find(|c| DELIMITERS.contains(&c) && c != ':')
                 .map(|offset| idx + offset)
@@ -374,11 +378,14 @@ pub fn redact_absolute_paths(text: &str) -> String {
         // POSIX absolute paths. A '/' only starts a candidate at a token
         // boundary, and never directly after ':' — that is a URL scheme
         // ("https://host/path"), not a filesystem path.
+        // A ':' is a token boundary like any other, except immediately before
+        // "//" — that is a URL scheme ("https://host/p"), not a path. Excluding
+        // every post-colon '/' also skipped real paths written tight against a
+        // colon, e.g. "error:/var/lib/x/model.gguf".
+        let previous = text[..idx].chars().next_back();
+        let scheme_separator = previous == Some(':') && rest.starts_with("//");
         let at_token_start = idx == 0
-            || text[..idx]
-                .chars()
-                .next_back()
-                .is_some_and(|prev| DELIMITERS.contains(&prev) && prev != ':');
+            || (previous.is_some_and(|prev| DELIMITERS.contains(&prev)) && !scheme_separator);
         if ch == '/' && at_token_start {
             let end = rest
                 .find(|c| DELIMITERS.contains(&c))
@@ -410,11 +417,40 @@ fn redact_value(value: &mut serde_json::Value) {
     }
 }
 
+/// Strip absolute build-machine paths from stack frames.
+///
+/// The panic integration attaches a stacktrace whose frames carry `abs_path`
+/// — the absolute source path of the machine that built the binary. That is
+/// not covered by redacting the exception value, and it is the single richest
+/// source of absolute paths in a panic event. `filename` is kept: it is the
+/// module-relative path and is what makes a frame readable.
+fn redact_stacktrace(stacktrace: &mut sentry::protocol::Stacktrace) {
+    for frame in &mut stacktrace.frames {
+        if let Some(abs_path) = frame.abs_path.as_mut() {
+            *abs_path = redact_absolute_paths(abs_path);
+        }
+        if let Some(filename) = frame.filename.as_mut() {
+            *filename = redact_absolute_paths(filename);
+        }
+    }
+}
+
 /// `before_send` hook: strip absolute paths from everything leaving the process.
 fn redact_event(mut event: sentry::protocol::Event<'static>) -> sentry::protocol::Event<'static> {
     for exception in &mut event.exception.values {
         if let Some(value) = exception.value.as_mut() {
             *value = redact_absolute_paths(value);
+        }
+        if let Some(stacktrace) = exception.stacktrace.as_mut() {
+            redact_stacktrace(stacktrace);
+        }
+    }
+    if let Some(stacktrace) = event.stacktrace.as_mut() {
+        redact_stacktrace(stacktrace);
+    }
+    for thread in &mut event.threads.values {
+        if let Some(stacktrace) = thread.stacktrace.as_mut() {
+            redact_stacktrace(stacktrace);
         }
     }
     if let Some(message) = event.message.as_mut() {
@@ -1073,6 +1109,32 @@ mod redaction_tests {
         let redacted = redact_absolute_paths(r"load failed for C:\models\gguf\Foo-Q8.gguf");
         assert!(!redacted.contains("models"), "leaked: {redacted}");
         assert!(redacted.contains("<path:Foo-Q8>"), "{redacted}");
+    }
+
+    #[test]
+    fn redacts_paths_wrapped_in_braces() {
+        // `{` and `}` were documented as delimiters but missing from the array,
+        // so a brace-wrapped path was never scanned at all.
+        let redacted = redact_absolute_paths("ctx={/home/a/model.gguf}");
+        assert!(!redacted.contains("/home/a"), "leaked: {redacted}");
+        assert!(redacted.contains("<path:model>"), "{redacted}");
+        assert!(redacted.ends_with('}'), "closing brace dropped: {redacted}");
+    }
+
+    #[test]
+    fn redacts_a_path_written_tight_against_a_colon() {
+        // Excluding every post-colon '/' to protect URL schemes also skipped
+        // real paths written with no space after the colon.
+        let redacted = redact_absolute_paths("error:/var/lib/out/model.gguf");
+        assert!(!redacted.contains("/var/lib"), "leaked: {redacted}");
+        assert!(redacted.contains("<path:model>"), "{redacted}");
+    }
+
+    #[test]
+    fn redacts_unc_paths() {
+        let redacted = redact_absolute_paths(r"load failed for \\server\share\m\a.gguf");
+        assert!(!redacted.contains("server"), "leaked: {redacted}");
+        assert!(redacted.contains("<path:a>"), "{redacted}");
     }
 
     #[test]
