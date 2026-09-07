@@ -224,11 +224,11 @@ impl RunMatrix {
     /// - Every enabled run has explicit router and norm policy.
     /// - Grok-1 cannot be selected unless `GROK1_ARTIFACT_READY=1`.
     /// - Unknown model families are rejected.
-    /// Validate the matrix, reading the Grok-1 readiness flag from the
-    /// environment.
     ///
-    /// This is the only environment read in this module and it is a readiness
-    /// flag, not a path — see the invariant in CLAUDE.md.
+    /// Reads the Grok-1 readiness flag from the environment. That is the only
+    /// environment read in this module, and it is a readiness flag rather than
+    /// a filesystem path, per the invariant in CLAUDE.md. Use
+    /// [`validate_with`](Self::validate_with) to supply the flag directly.
     pub fn validate(&self) -> Result<()> {
         let grok_ready = std::env::var("GROK1_ARTIFACT_READY").is_ok_and(|v| v == "1");
         self.validate_with(grok_ready)
@@ -385,13 +385,162 @@ mod validate_tests {
         for slug in KNOWN {
             match ModelFamily::from_alias(slug) {
                 Some(family) if family.slug() == *slug => {}
-                Some(family) => unmatched.push(format!("{slug} -> {:?} (slug {})", family, family.slug())),
+                Some(family) => {
+                    unmatched.push(format!("{slug} -> {:?} (slug {})", family, family.slug()))
+                }
                 None => unmatched.push(format!("{slug} -> None")),
             }
         }
         assert!(
             unmatched.is_empty(),
             "these do not round-trip: {unmatched:?}"
+        );
+    }
+
+    fn valid_run() -> RunEntry {
+        RunEntry {
+            run_id: "r1".into(),
+            model_family: "olmoe".into(),
+            model_id_or_path: "/models/olmoe".into(),
+            source_format: "gguf".into(),
+            quant_mode: "q8_0".into(),
+            saaq_formula_version: "v1_5".into(),
+            router_policy: "top_k".into(),
+            norm_policy: "rms".into(),
+            telemetry_source: "synthetic".into(),
+            output_root: "artifacts".into(),
+            max_runtime_minutes: 30,
+            max_disk_gib: 8,
+            expected_artifacts: Vec::new(),
+            success_metrics: Vec::new(),
+            skip_reason: None,
+        }
+    }
+
+    fn matrix(run: RunEntry) -> RunMatrix {
+        RunMatrix { runs: vec![run] }
+    }
+
+    fn rejection(run: RunEntry, grok_ready: bool) -> String {
+        matrix(run)
+            .validate_with(grok_ready)
+            .expect_err("expected this run to be rejected")
+            .to_string()
+    }
+
+    #[test]
+    fn a_fully_specified_run_validates() {
+        assert!(matrix(valid_run()).validate_with(false).is_ok());
+    }
+
+    #[test]
+    fn missing_runtime_cap_is_rejected() {
+        let mut run = valid_run();
+        run.max_runtime_minutes = 0;
+        assert!(rejection(run, false).contains("missing max_runtime_minutes"));
+    }
+
+    #[test]
+    fn missing_disk_cap_is_rejected() {
+        let mut run = valid_run();
+        run.max_disk_gib = 0;
+        assert!(rejection(run, false).contains("missing max_disk_gib"));
+    }
+
+    #[test]
+    fn blank_router_policy_is_rejected() {
+        let mut run = valid_run();
+        run.router_policy = "   ".into();
+        assert!(rejection(run, false).contains("missing router_policy"));
+    }
+
+    #[test]
+    fn blank_norm_policy_is_rejected() {
+        let mut run = valid_run();
+        run.norm_policy = "\t".into();
+        assert!(rejection(run, false).contains("missing norm_policy"));
+    }
+
+    #[test]
+    fn unknown_model_family_is_rejected() {
+        let mut run = valid_run();
+        run.model_family = "not_a_family".into();
+        assert!(rejection(run, false).contains("unknown model_family"));
+    }
+
+    #[test]
+    fn a_non_canonical_alias_is_not_a_valid_matrix_family() {
+        // `from_alias` accepts "qwen", but a matrix file must use the
+        // canonical slug, so validation requires slug() == model_family.
+        let mut run = valid_run();
+        run.model_family = "qwen".into();
+        assert!(rejection(run, false).contains("unknown model_family"));
+
+        let mut canonical = valid_run();
+        canonical.model_family = "qwen3_moe".into();
+        assert!(matrix(canonical).validate_with(false).is_ok());
+    }
+
+    #[test]
+    fn grok1_is_gated_on_readiness_but_other_grok_paths_are_not() {
+        let mut grok1 = valid_run();
+        grok1.model_family = "grok".into();
+        grok1.model_id_or_path = "/models/grok-1".into();
+        assert!(
+            rejection(grok1.clone(), false).contains("GROK1_ARTIFACT_READY"),
+            "grok-1 must be gated when not ready"
+        );
+        assert!(
+            matrix(grok1).validate_with(true).is_ok(),
+            "grok-1 must pass once ready"
+        );
+
+        // The gate keys on the grok-1 path specifically, not the family.
+        let mut other_grok = valid_run();
+        other_grok.model_family = "grok".into();
+        other_grok.model_id_or_path = "/models/grok-2".into();
+        assert!(matrix(other_grok).validate_with(false).is_ok());
+    }
+
+    /// Parse and validate the matrix actually shipped in the repository.
+    ///
+    /// `experiments/*/matrix.toml` was previously unchecked against this
+    /// schema — nothing parsed it, so a field rename here or a typo there
+    /// would only surface when someone ran the sweep. `CARGO_MANIFEST_DIR` is
+    /// resolved at compile time, so this introduces no runtime path discovery.
+    #[test]
+    fn the_shipped_experiment_matrix_parses_and_validates() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("experiments/vultr-2026-05-28/matrix.toml");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            // The matrix is a research artifact, not a build input; skip
+            // rather than fail if a checkout does not carry it.
+            eprintln!("skipping: {} not present", path.display());
+            return;
+        };
+
+        let parsed: RunMatrix =
+            toml::from_str(&text).expect("shipped matrix must parse as RunMatrix");
+        assert!(!parsed.runs.is_empty(), "shipped matrix has no runs");
+
+        // grok_ready = true so the Grok-1 gate does not mask other problems.
+        parsed
+            .validate_with(true)
+            .expect("shipped matrix must satisfy its own schema");
+    }
+
+    #[test]
+    fn a_skipped_run_bypasses_every_check() {
+        let mut run = valid_run();
+        run.skip_reason = Some("checkpoint unavailable".into());
+        run.max_runtime_minutes = 0;
+        run.max_disk_gib = 0;
+        run.router_policy = String::new();
+        run.norm_policy = String::new();
+        run.model_family = "not_a_family".into();
+        assert!(
+            matrix(run).validate_with(false).is_ok(),
+            "skip_reason must short-circuit validation"
         );
     }
 }
