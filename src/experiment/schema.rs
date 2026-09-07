@@ -6,6 +6,7 @@
 //! `Surrogate_Viz.jl`.
 
 use crate::error::{HybridError, Result};
+use crate::types::ModelFamily;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -162,10 +163,11 @@ pub struct ExperimentBundle {
 
 // ── Model adapter configuration ───────────────────────────────────────────
 
-/// Static per-model-family configuration used by the run matrix.
+/// Static per-model-family configuration.
 ///
-/// Emitted as `model_adapter_configs.toml` and consumed by the run matrix
-/// validator and `Surrogate_Viz.jl`.
+/// One `[[adapter]]` entry in `configs/model_adapter_configs.toml`. Parse the
+/// file as [`ModelAdapterConfigs`], not as a bare sequence of these — the file
+/// wraps them in a table array.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelAdapterConfig {
     pub model_family: String,
@@ -183,6 +185,37 @@ pub struct ModelAdapterConfig {
     pub minimum_expected_artifacts: Vec<String>,
     #[serde(default)]
     pub known_risks: Vec<String>,
+}
+
+/// The whole of `configs/model_adapter_configs.toml`.
+///
+/// The file is a table array, so [`ModelAdapterConfig`] alone cannot represent
+/// it — without this wrapper the type existed but could not parse the only
+/// file it describes, and the 300-odd lines of that file went unchecked.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelAdapterConfigs {
+    #[serde(rename = "adapter")]
+    pub adapters: Vec<ModelAdapterConfig>,
+}
+
+impl ModelAdapterConfigs {
+    /// Check every entry names a canonical [`ModelFamily`] slug.
+    ///
+    /// Same rule as [`RunMatrix::validate`]: `from_alias` also accepts
+    /// shorthands such as "qwen", so the slug must round-trip exactly.
+    pub fn validate(&self) -> Result<()> {
+        for adapter in &self.adapters {
+            let known = ModelFamily::from_alias(&adapter.model_family)
+                .is_some_and(|family| family.slug() == adapter.model_family);
+            if !known {
+                return Err(HybridError::InvalidConfig(format!(
+                    "adapter entry '{}' uses unknown model_family '{}'",
+                    adapter.model_id_or_local_path, adapter.model_family
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Dynamic per-run entry in the SAAQ run matrix.
@@ -347,5 +380,73 @@ mod tests {
         let parsed: ExperimentSummary = serde_json::from_value(serde_json::Value::Object(obj))
             .expect("old summary without field");
         assert_eq!(parsed.projection_mode, None);
+    }
+}
+
+#[cfg(test)]
+mod adapter_config_tests {
+    use super::*;
+
+    /// Parse and validate the adapter config actually shipped in the repo.
+    ///
+    /// Before `ModelAdapterConfigs` existed, `ModelAdapterConfig` described a
+    /// file it could not parse — the entries are a `[[adapter]]` table array —
+    /// so none of that file was ever checked against the type meant to model
+    /// it. `CARGO_MANIFEST_DIR` is resolved at compile time, so this adds no
+    /// runtime path discovery.
+    #[test]
+    fn the_shipped_adapter_config_parses_and_validates() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("configs/model_adapter_configs.toml");
+        // No skip branch: the file is tracked, so absence is a real failure.
+        // A test that returns green when its fixture is missing reports
+        // "passed" for something it never checked.
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+
+        let parsed: ModelAdapterConfigs =
+            toml::from_str(&text).expect("shipped adapter config must parse");
+        // Count table headers only: the file's header comment also mentions
+        // "[[adapter]]" in prose, so a substring count over-reports by one.
+        let declared = text
+            .lines()
+            .filter(|line| line.trim() == "[[adapter]]")
+            .count();
+        assert_eq!(
+            parsed.adapters.len(),
+            declared,
+            "parsed {} of {declared} [[adapter]] entries",
+            parsed.adapters.len()
+        );
+        assert!(!parsed.adapters.is_empty(), "no adapter entries parsed");
+
+        parsed
+            .validate()
+            .expect("every shipped adapter entry must name a canonical family slug");
+    }
+
+    #[test]
+    fn an_unknown_family_is_rejected() {
+        let configs = ModelAdapterConfigs {
+            adapters: vec![ModelAdapterConfig {
+                model_family: "not_a_family".into(),
+                model_id_or_local_path: "/models/x".into(),
+                format: "gguf".into(),
+                loader_hint: "gguf".into(),
+                router_policy: "top_k".into(),
+                norm_policy: "rms".into(),
+                expert_policy: "dense".into(),
+                supports_route_metrics: true,
+                supports_block_metrics: true,
+                preferred_quant_modes: Vec::new(),
+                minimum_expected_artifacts: Vec::new(),
+                known_risks: Vec::new(),
+            }],
+        };
+        let err = configs.validate().expect_err("unknown family must reject");
+        assert!(
+            err.to_string().contains("unknown model_family"),
+            "unexpected error: {err}"
+        );
     }
 }

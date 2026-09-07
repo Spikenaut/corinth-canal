@@ -112,7 +112,7 @@ pub use types::{
 
 pub use experiment::schema::{
     ExperimentBundle, ExperimentManifest, ExperimentMetrics, ExperimentSummary, ExperimentWarning,
-    ModelAdapterConfig, RunEntry, RunMatrix,
+    ModelAdapterConfig, ModelAdapterConfigs, RunEntry, RunMatrix,
 };
 
 pub mod tensor;
