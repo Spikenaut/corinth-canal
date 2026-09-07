@@ -29,12 +29,8 @@ updates:
         patterns:
           - "opentelemetry*"
 
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: "chore(benchmarks)"
-    labels:
-      - "dependencies"
+
+  # NOTE: no pip entry yet. `benchmarks/` has no dependency manifest on main —
+  # pyproject.toml arrives with GH#182 / #183. Dependabot errors on an
+  # ecosystem with no manifest to read, so the pip block is deliberately
+  # omitted until that lands, then added in a follow-up.
