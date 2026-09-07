@@ -586,12 +586,30 @@ pub(super) fn resolve_safetensors_adapter(
     })
 }
 
+/// Whether a configured `model_family` override is compatible with the family
+/// inferred from the checkpoint's architecture string.
+///
+/// Exact equality, plus the pairs that name the same family under two enum
+/// variants:
+///
+/// - `Moonlight16BA3B` / `DeepSeek2` — Moonlight ships a DeepSeek-2
+///   architecture string.
+/// - `Nemotron` / `NemotronLegacy` — `NemotronLegacy` exists only to
+///   deserialize historical checkpoint metadata via its `Nemotron3Nano4B`
+///   serde alias. `from_alias` never produces it, both report slug
+///   `"nemotron"`, and the architecture tables only ever infer `Nemotron`.
+///   Without this pair a lineup written with the historical alias
+///   deserializes to `NemotronLegacy`, fails this check against the inferred
+///   `Nemotron`, and aborts the run — the one variant that cannot be
+///   satisfied by any checkpoint.
 fn check_family_compatibility(expected: ModelFamily, inferred: ModelFamily) -> bool {
     expected == inferred
         || matches!(
             (expected, inferred),
             (ModelFamily::Moonlight16BA3B, ModelFamily::DeepSeek2)
                 | (ModelFamily::DeepSeek2, ModelFamily::Moonlight16BA3B)
+                | (ModelFamily::Nemotron, ModelFamily::NemotronLegacy)
+                | (ModelFamily::NemotronLegacy, ModelFamily::Nemotron)
         )
 }
 
@@ -869,6 +887,42 @@ mod tests {
         assert_eq!(
             infer_family("nemotronh", None, "test.gguf").unwrap(),
             ModelFamily::Nemotron
+        );
+    }
+
+    #[test]
+    fn nemotron_legacy_override_is_accepted_for_a_nemotron_checkpoint() {
+        // `NemotronLegacy` is reachable only by deserializing historical
+        // checkpoint metadata through its `Nemotron3Nano4B` serde alias.
+        // `from_alias` never yields it and no architecture string infers it, so
+        // before this pair existed it was the one ModelFamily variant no
+        // checkpoint could satisfy: the override always lost to the inferred
+        // `Nemotron` and aborted the run.
+        assert_eq!(
+            infer_family("nemotronh", Some(ModelFamily::NemotronLegacy), "test.gguf").unwrap(),
+            ModelFamily::NemotronLegacy,
+            "a NemotronLegacy override must be honoured, not rejected"
+        );
+
+        // The reverse direction, and the slug both variants share.
+        assert!(super::check_family_compatibility(
+            ModelFamily::Nemotron,
+            ModelFamily::NemotronLegacy
+        ));
+        assert_eq!(
+            ModelFamily::NemotronLegacy.slug(),
+            ModelFamily::Nemotron.slug()
+        );
+    }
+
+    #[test]
+    fn genuinely_mismatched_family_overrides_are_still_rejected() {
+        // The pair above must not weaken the check generally.
+        let err = infer_family("nemotronh", Some(ModelFamily::Olmoe), "test.gguf")
+            .expect_err("an unrelated override must still be rejected");
+        assert!(
+            err.to_string().contains("does not match"),
+            "unexpected error: {err}"
         );
     }
 
