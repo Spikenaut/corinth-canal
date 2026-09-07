@@ -74,7 +74,7 @@ The `ModelFamily` enum in `src/types.rs` is the list — 21 variants at the time
 of writing, including `Olmoe`, `Qwen3Moe`, `Gemma4`, `DeepSeek2`, `LlamaMoe`,
 `Zaya`, `Glm4`, `Moonlight16BA3B`, `Granite31A800M`, `Nemotron`, `Lfm2Moe`,
 `SlimMoe`, `GptOss`, `Step`, `MiniMax`, `Cohere`, `Grin`, `Skyworks`,
-`Trinity` and `Grok`. Consult the enum rather than this paragraph: prose lists
+`Trinity`, `Grok` and `NemotronLegacy` — the last being a serde-only back-compat alias (`nemotron3nano4b`) with no human-facing name of its own. Consult the enum rather than this paragraph: prose lists
 here have drifted before, and `ModelFamily::from_alias` is the authority.
 
 ### Model onboarding and cloud lineup
