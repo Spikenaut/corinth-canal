@@ -1,0 +1,23 @@
+src/moe/gguf/metadata.rs
+  s_6512c408e2ebcf::t_5ab6751dccad78 425-427,432-433,436-437,439,441-475
+  s_6512c408e2ebcf::t_096f486d9e2a74 340-342
+  s_6512c408e2ebcf::t_c9dff03055848f 428-431,434-435,438,440
+src/moe/gguf/map.rs
+  s_6512c408e2ebcf::t_096f486d9e2a74 23-27,35-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5b98adcff5f8b7f97992ae049ce4b24eda70f3aa",
+  "prompts": {},
+  "sessions": {
+    "s_6512c408e2ebcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3fa19524-1458-473a-8358-545d96ad900a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
