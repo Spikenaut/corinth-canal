@@ -427,24 +427,36 @@ mod tests {
         // `(i as f32 * PHI) % 1.0` formula lost all fractional precision once
         // `i * PHI` passed 2^23, so 21,719,774 of 25,176,064 weights equalled
         // `-limit`, the matrix held only 3,731 distinct values, and just 423
-        // of 2048 output rows were distinct. This asserts none of that holds.
+        // of 2048 output rows were distinct.
+        //
+        // The assertions deliberately target the *tail* of the matrix rather
+        // than counting distinct values across all 25M weights: a full
+        // `HashSet<u32>` costs a few hundred MB on top of the ~100 MB weight
+        // vector, which is hostile to memory-constrained CI runners. The tail
+        // is where the old formula degenerated first and hardest, so it is
+        // both the cheaper and the sharper probe.
         let projector = Projector::new(ProjectionMode::RateSum);
         let feature_dim = projector.feature_dim;
         assert_eq!(projector.weights.len(), EMBEDDING_DIM * feature_dim);
 
-        let distinct: std::collections::HashSet<u32> =
-            projector.weights.iter().map(|w| w.to_bits()).collect();
+        let row = |index: usize| &projector.weights[index * feature_dim..(index + 1) * feature_dim];
+
+        // Under the old formula every row past ~422 was byte-identical.
+        let last = row(EMBEDDING_DIM - 1);
+        let penultimate = row(EMBEDDING_DIM - 2);
+        assert_ne!(last, penultimate, "final two output rows are identical");
         assert!(
-            distinct.len() > 1_000_000,
-            "weight matrix collapsed to {} distinct values",
-            distinct.len()
+            last.iter().any(|w| *w != last[0]),
+            "final output row is constant"
         );
 
-        // The tail of the matrix is where the old formula degenerated first.
-        let last_row = &projector.weights[projector.weights.len() - feature_dim..];
+        // Distinctness over the final row only: ~12k values, negligible memory.
+        let distinct_in_last_row: std::collections::HashSet<u32> =
+            last.iter().map(|w| w.to_bits()).collect();
         assert!(
-            last_row.iter().any(|w| *w != last_row[0]),
-            "final output row is constant"
+            distinct_in_last_row.len() > feature_dim / 2,
+            "final row collapsed to {} distinct values of {feature_dim}",
+            distinct_in_last_row.len()
         );
     }
 
