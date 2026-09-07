@@ -15,7 +15,7 @@ path = "/absolute/path/to/ZAYA1-8B-Q8_0.gguf"
 
 # GLM-4.6V-Flash is NOT MoE (dense model, no expert_count) — excluded from SAAQ campaign.
 # [[model]]
-# slug = "glm_4_6v_flash_q8_0"
+# slug = "glm46v_flash_q8_0"
 # family = "glm4"
 # path = "/absolute/path/to/GLM-4.6V-Flash-Q8_0.gguf"
 
