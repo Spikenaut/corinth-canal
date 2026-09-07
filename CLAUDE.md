@@ -43,7 +43,7 @@ Coverage mirrors CI with `cargo llvm-cov --lib --no-default-features --locked --
 
 ```bash
 just saaq                          # primary SAAQ latent calibration loop
-just saaq-csv                      # forces TELEMETRY_SOURCE=csv (needs TELEMETRY_CSV_PATH)
+just saaq-csv                      # forces TELEMETRY_SOURCE=csv (TELEMETRY_CSV_PATH overrides; defaults to ./telemetry.csv)
 just saaq-campaign                 # 2-phase synthetic + csv baseline campaign
 CHECKPOINT_PATH=/path/model.gguf just smoke   # direct GPU temporal smoke path
 just synapse-diag                  # print preferred GPU synapse tensor + ggml_type per model
