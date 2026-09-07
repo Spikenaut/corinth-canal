@@ -1,0 +1,21 @@
+src/experiment/schema.rs
+  s_09958359e33d8c::t_3f3d7d4308bbce 505-531
+  s_09958359e33d8c::t_03e31b95684ff1 388-390
+  s_09958359e33d8c::t_e4b8577351dd2c 228-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b43152d3f447ed07f57d47c2237f6d48005c4846",
+  "prompts": {},
+  "sessions": {
+    "s_09958359e33d8c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ada3bd03-976f-4018-a4f7-11239bd1da21",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
